@@ -22,12 +22,18 @@ import type {
 } from "./types.js";
 
 
+// All logging gated behind DEBUG_SDK env var
+function sessionLog(tag: string, ...args: unknown[]) {
+  if (process.env.DEBUG_SDK) console.error(`[SDK-Session] [${tag}]`, ...args);
+}
+
 export class Session implements AsyncDisposable {
   private transport: SubprocessTransport;
   private _agentId: string | null = null;
   private _sessionId: string | null = null;
   private _conversationId: string | null = null;
   private initialized = false;
+
 
   constructor(
     private options: InternalSessionOptions = {}
@@ -44,7 +50,9 @@ export class Session implements AsyncDisposable {
       throw new Error("Session already initialized");
     }
 
+    sessionLog("init", "connecting transport...");
     await this.transport.connect();
+    sessionLog("init", "transport connected, sending initialize request");
 
     // Send initialize control request
     await this.transport.write({
@@ -54,7 +62,9 @@ export class Session implements AsyncDisposable {
     });
 
     // Wait for init message
+    sessionLog("init", "waiting for init message from CLI...");
     for await (const msg of this.transport.messages()) {
+      sessionLog("init", `received wire message: type=${msg.type}`);
       if (msg.type === "system" && "subtype" in msg && msg.subtype === "init") {
         const initMsg = msg as WireMessage & {
           agent_id: string;
@@ -68,6 +78,8 @@ export class Session implements AsyncDisposable {
         this._conversationId = initMsg.conversation_id;
         this.initialized = true;
 
+        sessionLog("init", `initialized: agent=${initMsg.agent_id} conversation=${initMsg.conversation_id} model=${initMsg.model} tools=${initMsg.tools?.length || 0}`);
+
         return {
           type: "init",
           agentId: initMsg.agent_id,
@@ -79,6 +91,7 @@ export class Session implements AsyncDisposable {
       }
     }
 
+    sessionLog("init", "ERROR: transport closed before init message received");
     throw new Error("Failed to initialize session - no init message received");
   }
 
@@ -100,23 +113,37 @@ export class Session implements AsyncDisposable {
    */
   async send(message: SendMessage): Promise<void> {
     if (!this.initialized) {
+      sessionLog("send", "auto-initializing (not yet initialized)");
       await this.initialize();
     }
+
+    const preview = typeof message === "string"
+      ? message.slice(0, 100)
+      : Array.isArray(message) ? `[multimodal: ${message.length} parts]` : String(message).slice(0, 100);
+    sessionLog("send", `sending message: ${preview}${typeof message === "string" && message.length > 100 ? "..." : ""}`);
 
     await this.transport.write({
       type: "user",
       message: { role: "user", content: message },
     });
+    sessionLog("send", "message written to transport");
   }
 
   /**
    * Stream messages from the agent
    */
   async *stream(): AsyncGenerator<SDKMessage> {
+    const streamStart = Date.now();
+    let yieldCount = 0;
+    let dropCount = 0;
+    let gotResult = false;
+    sessionLog("stream", `starting stream (agent=${this._agentId}, conversation=${this._conversationId})`);
+
     for await (const wireMsg of this.transport.messages()) {
       // Handle CLI → SDK control requests (e.g., can_use_tool)
       if (wireMsg.type === "control_request") {
         const controlReq = wireMsg as ControlRequest;
+        sessionLog("stream", `control_request: subtype=${controlReq.request.subtype} tool=${(controlReq.request as CanUseToolControlRequest).tool_name || "N/A"}`);
         if (controlReq.request.subtype === "can_use_tool") {
           await this.handleCanUseTool(
             controlReq.request_id,
@@ -128,13 +155,26 @@ export class Session implements AsyncDisposable {
 
       const sdkMsg = this.transformMessage(wireMsg);
       if (sdkMsg) {
+        yieldCount++;
+        sessionLog("stream", `yield #${yieldCount}: type=${sdkMsg.type}${sdkMsg.type === "result" ? ` success=${(sdkMsg as SDKResultMessage).success} error=${(sdkMsg as SDKResultMessage).error || "none"}` : ""}`);
         yield sdkMsg;
 
         // Stop on result message
         if (sdkMsg.type === "result") {
+          gotResult = true;
           break;
         }
+      } else {
+        dropCount++;
+        const wireMsgAny = wireMsg as unknown as Record<string, unknown>;
+        sessionLog("stream", `DROPPED wire message #${dropCount}: type=${wireMsg.type} message_type=${wireMsgAny.message_type || "N/A"} subtype=${wireMsgAny.subtype || "N/A"}`);
       }
+    }
+
+    const elapsed = Date.now() - streamStart;
+    sessionLog("stream", `stream ended: duration=${elapsed}ms yielded=${yieldCount} dropped=${dropCount} gotResult=${gotResult}`);
+    if (!gotResult) {
+      sessionLog("stream", `WARNING: stream ended WITHOUT a result message -- transport may have closed unexpectedly`);
     }
   }
 
@@ -147,8 +187,11 @@ export class Session implements AsyncDisposable {
   ): Promise<void> {
     let response: CanUseToolResponse;
 
+    sessionLog("canUseTool", `tool=${req.tool_name} mode=${this.options.permissionMode || "default"} requestId=${requestId}`);
+
     // If bypassPermissions mode, auto-allow all tools
     if (this.options.permissionMode === "bypassPermissions") {
+      sessionLog("canUseTool", `AUTO-ALLOW ${req.tool_name} (bypassPermissions)`);
       response = {
         behavior: "allow",
         updatedInput: null,
@@ -187,6 +230,8 @@ export class Session implements AsyncDisposable {
     }
 
     // Send control_response (Claude SDK compatible format)
+    const responseBehavior = "behavior" in response ? response.behavior : "unknown";
+    sessionLog("canUseTool", `responding: requestId=${requestId} behavior=${responseBehavior}`);
     await this.transport.write({
       type: "control_response",
       response: {
@@ -195,12 +240,14 @@ export class Session implements AsyncDisposable {
         response,
       },
     });
+    sessionLog("canUseTool", `response sent for ${req.tool_name}`);
   }
 
   /**
    * Abort the current operation (interrupt without closing the session)
    */
   async abort(): Promise<void> {
+    sessionLog("abort", `aborting session (agent=${this._agentId})`);
     await this.transport.write({
       type: "control_request",
       request_id: `interrupt-${Date.now()}`,
@@ -212,6 +259,7 @@ export class Session implements AsyncDisposable {
    * Close the session
    */
   close(): void {
+    sessionLog("close", `closing session (agent=${this._agentId}, conversation=${this._conversationId})`);
     this.transport.close();
   }
 

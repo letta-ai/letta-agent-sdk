@@ -8,6 +8,11 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
 import type { InternalSessionOptions, WireMessage } from "./types.js";
 
+// All logging gated behind DEBUG_SDK env var
+function sdkLog(tag: string, ...args: unknown[]) {
+  if (process.env.DEBUG_SDK) console.error(`[SDK-Transport] [${tag}]`, ...args);
+}
+
 export class SubprocessTransport {
   private process: ChildProcess | null = null;
   private stdout: Interface | null = null;
@@ -15,6 +20,8 @@ export class SubprocessTransport {
   private messageResolvers: Array<(msg: WireMessage) => void> = [];
   private closed = false;
   private agentId?: string;
+  private wireMessageCount = 0;
+  private lastMessageAt = 0;
 
   constructor(
     private options: InternalSessionOptions = {}
@@ -28,16 +35,19 @@ export class SubprocessTransport {
 
     // Find the CLI - use the installed letta-code package
     const cliPath = await this.findCli();
-    if (process.env.DEBUG) {
-      console.log("[letta-code-sdk] Using CLI:", cliPath);
-      console.log("[letta-code-sdk] Args:", args.join(" "));
-    }
+    sdkLog("connect", `CLI: ${cliPath}`);
+    sdkLog("connect", `args: ${args.join(" ")}`);
+    sdkLog("connect", `cwd: ${this.options.cwd || process.cwd()}`);
+    sdkLog("connect", `permissionMode: ${this.options.permissionMode || "default"}`);
 
     this.process = spawn("node", [cliPath, ...args], {
       cwd: this.options.cwd || process.cwd(),
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env },
     });
+
+    const pid = this.process.pid;
+    sdkLog("connect", `CLI process spawned, pid=${pid}`);
 
     if (!this.process.stdout || !this.process.stdin) {
       throw new Error("Failed to create subprocess pipes");
@@ -55,7 +65,8 @@ export class SubprocessTransport {
         const msg = JSON.parse(line) as WireMessage;
         this.handleMessage(msg);
       } catch {
-        // Ignore non-JSON lines (stderr leakage, etc.)
+        // Non-JSON line from CLI stdout - could be important debug info
+        sdkLog("stdout", `[non-JSON] ${line.slice(0, 500)}`);
       }
     });
 
@@ -70,11 +81,24 @@ export class SubprocessTransport {
     }
 
     // Handle process exit
-    this.process.on("close", (code) => {
-      this.closed = true;
+    //
+    // BUG FIX: When the CLI subprocess exits while read() has a pending
+    // resolver waiting for the next message, that resolver would never fire.
+    // The messages() async generator would be stuck in `await this.read()`
+    // forever, causing session.stream() to hang, which deadlocks the
+    // caller's processing mutex. Resolving pending readers with null on
+    // process exit lets messages() break out of its loop cleanly.
+    this.process.on("close", (code, signal) => {
       if (code !== 0 && code !== null) {
         console.error(`[letta-code-sdk] CLI process exited with code ${code}`);
       }
+      sdkLog("close", `CLI process exited: pid=${pid} code=${code} signal=${signal} wireMessages=${this.wireMessageCount} msSinceLastMsg=${this.lastMessageAt ? Date.now() - this.lastMessageAt : 0} pendingResolvers=${this.messageResolvers.length} queueLen=${this.messageQueue.length}`);
+      this.closed = true;
+      // Flush pending readers so they don't hang forever (see comment above)
+      for (const resolve of this.messageResolvers) {
+        resolve(null as unknown as WireMessage);
+      }
+      this.messageResolvers = [];
     });
 
     this.process.on("error", (err) => {
@@ -88,8 +112,12 @@ export class SubprocessTransport {
    */
   async write(data: object): Promise<void> {
     if (!this.process?.stdin || this.closed) {
-      throw new Error("Transport not connected");
+      const err = new Error(`Transport not connected (closed=${this.closed}, pid=${this.process?.pid}, stdin=${!!this.process?.stdin})`);
+      sdkLog("write", err.message);
+      throw err;
     }
+    const payload = data as Record<string, unknown>;
+    sdkLog("write", `type=${payload.type} subtype=${(payload.request as Record<string, unknown>)?.subtype || (payload.response as Record<string, unknown>)?.subtype || "N/A"}`);
     this.process.stdin.write(JSON.stringify(data) + "\n");
   }
 
@@ -104,10 +132,12 @@ export class SubprocessTransport {
 
     // If closed, no more messages
     if (this.closed) {
+      sdkLog("read", `returning null (closed), total wireMessages=${this.wireMessageCount}`);
       return null;
     }
 
     // Wait for next message
+    sdkLog("read", `waiting for next message (resolvers=${this.messageResolvers.length + 1}, queue=${this.messageQueue.length})`);
     return new Promise((resolve) => {
       this.messageResolvers.push(resolve);
     });
@@ -119,7 +149,10 @@ export class SubprocessTransport {
   async *messages(): AsyncGenerator<WireMessage> {
     while (true) {
       const msg = await this.read();
-      if (msg === null) break;
+      if (msg === null) {
+        sdkLog("messages", `iterator ending (closed=${this.closed}, wireMessages=${this.wireMessageCount})`);
+        break;
+      }
       yield msg;
     }
   }
@@ -128,6 +161,7 @@ export class SubprocessTransport {
    * Close the transport
    */
   close(): void {
+    sdkLog("close", `explicit close called (wireMessages=${this.wireMessageCount}, pendingResolvers=${this.messageResolvers.length}, pid=${this.process?.pid})`);
     if (this.process) {
       this.process.stdin?.end();
       this.process.kill();
@@ -147,9 +181,30 @@ export class SubprocessTransport {
   }
 
   private handleMessage(msg: WireMessage): void {
+    this.wireMessageCount++;
+    this.lastMessageAt = Date.now();
+
+    // Compact log of every wire message for traceability
+    const wirePayload = msg as unknown as Record<string, unknown>;
+    const msgType = wirePayload.message_type || wirePayload.subtype || "";
+    sdkLog("wire", `#${this.wireMessageCount} type=${msg.type} ${msgType ? `msg_type=${msgType}` : ""} resolvers=${this.messageResolvers.length} queue=${this.messageQueue.length}`);
+
+    // Always log critical message types (result, errors, approval)
+    if (msg.type === "result") {
+      const result = wirePayload as unknown as { subtype?: string; result?: string; duration_ms?: number; stop_reason?: string };
+      sdkLog("wire", `RESULT: subtype=${result.subtype} stop_reason=${result.stop_reason || "N/A"} duration=${result.duration_ms}ms resultLen=${result.result?.length || 0}`);
+    }
+
     // Track agent_id from init message
     if (msg.type === "system" && "subtype" in msg && msg.subtype === "init") {
       this.agentId = (msg as unknown as { agent_id: string }).agent_id;
+      sdkLog("wire", `INIT: agent_id=${this.agentId}`);
+    }
+
+    // Log control requests (approval flow)
+    if (msg.type === "control_request") {
+      const req = wirePayload as unknown as { request_id?: string; request?: { subtype?: string; tool_name?: string } };
+      sdkLog("wire", `CONTROL_REQUEST: id=${req.request_id} subtype=${req.request?.subtype} tool=${req.request?.tool_name || "N/A"}`);
     }
 
     // If someone is waiting for a message, give it to them
