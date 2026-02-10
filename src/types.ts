@@ -116,64 +116,6 @@ export type MemoryItem =
 export type MemoryPreset = "persona" | "human" | "skills" | "loaded_skills";
 
 // ═══════════════════════════════════════════════════════════════
-// TOOL TYPES (matches pi-agent-core)
-// ═══════════════════════════════════════════════════════════════
-
-/**
- * Tool result content block
- */
-export interface AgentToolResultContent {
-  type: "text" | "image";
-  text?: string;
-  data?: string;      // base64 for images
-  mimeType?: string;
-}
-
-/**
- * Tool result (matches pi-agent-core)
- */
-export interface AgentToolResult<T> {
-  content: AgentToolResultContent[];
-  details?: T;
-}
-
-/**
- * Tool update callback (for streaming tool progress)
- */
-export type AgentToolUpdateCallback<T> = (update: Partial<AgentToolResult<T>>) => void;
-
-/**
- * Agent tool definition (matches pi-agent-core)
- */
-export interface AgentTool<TParams, TResult> {
-  /** Display label */
-  label: string;
-  
-  /** Tool name (used in API calls) */
-  name: string;
-  
-  /** Description shown to the model */
-  description: string;
-  
-  /** JSON Schema for parameters (TypeBox or plain object) */
-  parameters: TParams;
-  
-  /** Execution function */
-  execute: (
-    toolCallId: string,
-    args: unknown,
-    signal?: AbortSignal,
-    onUpdate?: AgentToolUpdateCallback<TResult>,
-  ) => Promise<AgentToolResult<TResult>>;
-}
-
-/**
- * Convenience type for tools with any params
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type AnyAgentTool = AgentTool<any, unknown>;
-
-// ═══════════════════════════════════════════════════════════════
 // SESSION OPTIONS
 // ═══════════════════════════════════════════════════════════════
 
@@ -213,9 +155,6 @@ export interface InternalSessionOptions {
   permissionMode?: PermissionMode;
   canUseTool?: CanUseToolCallback;
 
-  // Custom tools
-  tools?: AnyAgentTool[];
-
   // Process settings
   cwd?: string;
 }
@@ -244,12 +183,6 @@ export interface CreateSessionOptions {
 
   /** Custom permission callback - called when tool needs approval */
   canUseTool?: CanUseToolCallback;
-
-  /**
-   * Custom tools that execute locally in the SDK process.
-   * These tools are registered with the CLI and executed when the LLM calls them.
-   */
-  tools?: AnyAgentTool[];
 }
 
 /**
@@ -295,12 +228,6 @@ export interface CreateAgentOptions {
 
   /** Custom permission callback - called when tool needs approval */
   canUseTool?: CanUseToolCallback;
-
-  /**
-   * Custom tools that execute locally in the SDK process.
-   * These tools are registered with the CLI and executed when the LLM calls them.
-   */
-  tools?: AnyAgentTool[];
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -378,17 +305,3 @@ export type SDKMessage =
   | SDKReasoningMessage
   | SDKResultMessage
   | SDKStreamEventMessage;
-
-// ═══════════════════════════════════════════════════════════════
-// EXTERNAL TOOL PROTOCOL TYPES
-// ═══════════════════════════════════════════════════════════════
-
-/**
- * Request to execute an external tool (CLI → SDK)
- */
-export interface ExecuteExternalToolRequest {
-  subtype: "execute_external_tool";
-  tool_call_id: string;
-  tool_name: string;
-  input: Record<string, unknown>;
-}
