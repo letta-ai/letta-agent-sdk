@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
+import { SubprocessTransport } from "./transport.js";
 
 describe("CLI resolution", () => {
   test("resolves @letta-ai/letta-code via package main export", () => {
@@ -21,5 +22,37 @@ describe("CLI resolution", () => {
     expect(() => {
       require.resolve("@letta-ai/letta-code/letta.js");
     }).toThrow();
+  });
+});
+
+describe("transport args", () => {
+  function buildArgsFor(
+    permissionMode?: "default" | "acceptEdits" | "plan" | "bypassPermissions",
+  ): string[] {
+    const transport = new SubprocessTransport(
+      permissionMode ? { permissionMode } : {},
+    );
+    // Access private helper for deterministic argument testing.
+    // biome-ignore lint/suspicious/noExplicitAny: test access to private method
+    return (transport as any).buildArgs();
+  }
+
+  test("acceptEdits uses --permission-mode acceptEdits", () => {
+    const args = buildArgsFor("acceptEdits");
+    expect(args).toContain("--permission-mode");
+    expect(args).toContain("acceptEdits");
+    expect(args).not.toContain("--accept-edits");
+  });
+
+  test("plan mode uses --permission-mode plan", () => {
+    const args = buildArgsFor("plan");
+    expect(args).toContain("--permission-mode");
+    expect(args).toContain("plan");
+  });
+
+  test("bypassPermissions still uses --yolo alias", () => {
+    const args = buildArgsFor("bypassPermissions");
+    expect(args).toContain("--yolo");
+    expect(args).not.toContain("--permission-mode");
   });
 });

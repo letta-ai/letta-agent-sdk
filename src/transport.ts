@@ -345,9 +345,13 @@ export class SubprocessTransport {
 
     // Permission mode
     if (this.options.permissionMode === "bypassPermissions") {
+      // Keep using alias for backwards compatibility
       args.push("--yolo");
-    } else if (this.options.permissionMode === "acceptEdits") {
-      args.push("--accept-edits");
+    } else if (
+      this.options.permissionMode &&
+      this.options.permissionMode !== "default"
+    ) {
+      args.push("--permission-mode", this.options.permissionMode);
     }
 
     // Allowed tools

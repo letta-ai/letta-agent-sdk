@@ -220,7 +220,11 @@ export interface InternalSessionOptions {
   cwd?: string;
 }
 
-export type PermissionMode = "default" | "acceptEdits" | "bypassPermissions";
+export type PermissionMode =
+  | "default"
+  | "acceptEdits"
+  | "plan"
+  | "bypassPermissions";
 
 /**
  * Options for createSession() and resumeSession() - restricted to options that can be applied to existing agents (LRU/Memo).
