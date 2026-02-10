@@ -210,6 +210,7 @@ export interface InternalSessionOptions {
 
   // Permissions
   allowedTools?: string[];
+  disallowedTools?: string[];
   permissionMode?: PermissionMode;
   canUseTool?: CanUseToolCallback;
 
@@ -239,6 +240,9 @@ export interface CreateSessionOptions {
 
   /** List of allowed tool names */
   allowedTools?: string[];
+
+  /** List of disallowed tool names */
+  disallowedTools?: string[];
 
   /** Permission mode */
   permissionMode?: PermissionMode;
@@ -290,6 +294,9 @@ export interface CreateAgentOptions {
 
   /** List of allowed tool names */
   allowedTools?: string[];
+
+  /** List of disallowed tool names */
+  disallowedTools?: string[];
 
   /** Permission mode */
   permissionMode?: PermissionMode;

@@ -26,33 +26,44 @@ describe("CLI resolution", () => {
 });
 
 describe("transport args", () => {
-  function buildArgsFor(
-    permissionMode?: "default" | "acceptEdits" | "plan" | "bypassPermissions",
-  ): string[] {
-    const transport = new SubprocessTransport(
-      permissionMode ? { permissionMode } : {},
-    );
+  function buildArgsFor(options: {
+    permissionMode?: "default" | "acceptEdits" | "plan" | "bypassPermissions";
+    allowedTools?: string[];
+    disallowedTools?: string[];
+  } = {}): string[] {
+    const transport = new SubprocessTransport(options);
     // Access private helper for deterministic argument testing.
     // biome-ignore lint/suspicious/noExplicitAny: test access to private method
     return (transport as any).buildArgs();
   }
 
   test("acceptEdits uses --permission-mode acceptEdits", () => {
-    const args = buildArgsFor("acceptEdits");
+    const args = buildArgsFor({ permissionMode: "acceptEdits" });
     expect(args).toContain("--permission-mode");
     expect(args).toContain("acceptEdits");
     expect(args).not.toContain("--accept-edits");
   });
 
   test("plan mode uses --permission-mode plan", () => {
-    const args = buildArgsFor("plan");
+    const args = buildArgsFor({ permissionMode: "plan" });
     expect(args).toContain("--permission-mode");
     expect(args).toContain("plan");
   });
 
   test("bypassPermissions still uses --yolo alias", () => {
-    const args = buildArgsFor("bypassPermissions");
+    const args = buildArgsFor({ permissionMode: "bypassPermissions" });
     expect(args).toContain("--yolo");
     expect(args).not.toContain("--permission-mode");
+  });
+
+  test("allowedTools and disallowedTools are forwarded to CLI flags", () => {
+    const args = buildArgsFor({
+      allowedTools: ["Read", "Bash"],
+      disallowedTools: ["EnterPlanMode", "ExitPlanMode"],
+    });
+    expect(args).toContain("--allowedTools");
+    expect(args).toContain("Read,Bash");
+    expect(args).toContain("--disallowedTools");
+    expect(args).toContain("EnterPlanMode,ExitPlanMode");
   });
 });

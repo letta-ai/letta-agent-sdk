@@ -22,6 +22,10 @@ import type {
   AnyAgentTool,
   ExecuteExternalToolRequest,
 } from "./types.js";
+import {
+  isHeadlessAutoAllowTool,
+  requiresRuntimeUserInput,
+} from "./interactiveToolPolicy.js";
 
 
 // All logging gated behind DEBUG_SDK env var
@@ -327,20 +331,35 @@ export class Session implements AsyncDisposable {
     req: CanUseToolControlRequest
   ): Promise<void> {
     let response: CanUseToolResponse;
+    const toolName = req.tool_name;
+    const hasCallback = typeof this.options.canUseTool === "function";
+    const toolNeedsRuntimeUserInput = requiresRuntimeUserInput(toolName);
+    const autoAllowWithoutCallback =
+      isHeadlessAutoAllowTool(toolName);
 
-    sessionLog("canUseTool", `tool=${req.tool_name} mode=${this.options.permissionMode || "default"} requestId=${requestId}`);
+    sessionLog("canUseTool", `tool=${toolName} mode=${this.options.permissionMode || "default"} requestId=${requestId}`);
 
-    // If bypassPermissions mode, auto-allow all tools
-    if (this.options.permissionMode === "bypassPermissions") {
-      sessionLog("canUseTool", `AUTO-ALLOW ${req.tool_name} (bypassPermissions)`);
+    // Tools that require runtime user input cannot be auto-allowed without a callback.
+    if (toolNeedsRuntimeUserInput && !hasCallback) {
+      response = {
+        behavior: "deny",
+        message: "No canUseTool callback registered",
+        interrupt: false,
+      };
+    } else if (
+      this.options.permissionMode === "bypassPermissions" &&
+      !toolNeedsRuntimeUserInput
+    ) {
+      // bypassPermissions auto-allows non-interactive tools.
+      sessionLog("canUseTool", `AUTO-ALLOW ${toolName} (bypassPermissions)`);
       response = {
         behavior: "allow",
         updatedInput: null,
         updatedPermissions: [],
       } satisfies CanUseToolResponseAllow;
-    } else if (this.options.canUseTool) {
+    } else if (hasCallback) {
       try {
-        const result = await this.options.canUseTool(req.tool_name, req.input);
+        const result = await this.options.canUseTool!(toolName, req.input);
         if (result.behavior === "allow") {
           response = {
             behavior: "allow",
@@ -361,6 +380,15 @@ export class Session implements AsyncDisposable {
           interrupt: false,
         };
       }
+    } else if (autoAllowWithoutCallback) {
+      // Default headless behavior matches Claude: EnterPlanMode can proceed
+      // without requiring a callback in bidirectional mode.
+      sessionLog("canUseTool", `AUTO-ALLOW ${toolName} (default behavior)`);
+      response = {
+        behavior: "allow",
+        updatedInput: null,
+        updatedPermissions: [],
+      } satisfies CanUseToolResponseAllow;
     } else {
       // No callback registered - deny by default
       response = {
@@ -381,7 +409,7 @@ export class Session implements AsyncDisposable {
         response,
       },
     });
-    sessionLog("canUseTool", `response sent for ${req.tool_name}`);
+    sessionLog("canUseTool", `response sent for ${toolName}`);
   }
 
   /**

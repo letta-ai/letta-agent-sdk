@@ -1,33 +1,42 @@
-import { describe, expect, test, mock } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { Session } from "./session.js";
 
 describe("Session", () => {
   describe("handleCanUseTool with bypassPermissions", () => {
-    test("auto-approves tools when permissionMode is bypassPermissions", async () => {
-      // Create a session with bypassPermissions
-      const session = new Session({
-        permissionMode: "bypassPermissions",
-      });
-
-      // Access the private method for testing
+    async function invokeCanUseTool(
+      session: Session,
+      tool_name: string,
+      input: Record<string, unknown>,
+    ): Promise<unknown> {
       // @ts-expect-error - accessing private method for testing
       const handleCanUseTool = session.handleCanUseTool.bind(session);
 
-      // Mock the transport.write to capture the response
       let capturedResponse: unknown;
       // @ts-expect-error - accessing private property for testing
       session.transport.write = async (msg: unknown) => {
         capturedResponse = msg;
       };
 
-      // Simulate a control_request for tool approval
       await handleCanUseTool("test-request-id", {
         subtype: "can_use_tool",
-        tool_name: "Bash",
+        tool_name,
         tool_call_id: "test-tool-call-id",
-        input: { command: "ls" },
+        input,
         permission_suggestions: [],
         blocked_path: null,
+      });
+
+      return capturedResponse;
+    }
+
+    test("auto-approves tools when permissionMode is bypassPermissions", async () => {
+      // Create a session with bypassPermissions
+      const session = new Session({
+        permissionMode: "bypassPermissions",
+      });
+
+      const capturedResponse = await invokeCanUseTool(session, "Bash", {
+        command: "ls",
       });
 
       // Verify the response auto-approves
@@ -51,25 +60,63 @@ describe("Session", () => {
         permissionMode: "default",
       });
 
-      // @ts-expect-error - accessing private method for testing
-      const handleCanUseTool = session.handleCanUseTool.bind(session);
-
-      let capturedResponse: unknown;
-      // @ts-expect-error - accessing private property for testing
-      session.transport.write = async (msg: unknown) => {
-        capturedResponse = msg;
-      };
-
-      await handleCanUseTool("test-request-id", {
-        subtype: "can_use_tool",
-        tool_name: "Bash",
-        tool_call_id: "test-tool-call-id",
-        input: { command: "ls" },
-        permission_suggestions: [],
-        blocked_path: null,
+      const capturedResponse = await invokeCanUseTool(session, "Bash", {
+        command: "ls",
       });
 
       // Verify the response denies (no callback registered)
+      expect(capturedResponse).toEqual({
+        type: "control_response",
+        response: {
+          subtype: "success",
+          request_id: "test-request-id",
+          response: {
+            behavior: "deny",
+            message: "No canUseTool callback registered",
+            interrupt: false,
+          },
+        },
+      });
+    });
+
+    test("auto-allows EnterPlanMode without callback", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+
+      const capturedResponse = await invokeCanUseTool(
+        session,
+        "EnterPlanMode",
+        {},
+      );
+
+      expect(capturedResponse).toEqual({
+        type: "control_response",
+        response: {
+          subtype: "success",
+          request_id: "test-request-id",
+          response: {
+            behavior: "allow",
+            updatedInput: null,
+            updatedPermissions: [],
+          },
+        },
+      });
+    });
+
+    test("denies AskUserQuestion without callback even in bypassPermissions", async () => {
+      const session = new Session({
+        permissionMode: "bypassPermissions",
+      });
+
+      const capturedResponse = await invokeCanUseTool(
+        session,
+        "AskUserQuestion",
+        {
+          questions: [],
+        },
+      );
+
       expect(capturedResponse).toEqual({
         type: "control_response",
         response: {
@@ -95,22 +142,8 @@ describe("Session", () => {
         },
       });
 
-      // @ts-expect-error - accessing private method for testing
-      const handleCanUseTool = session.handleCanUseTool.bind(session);
-
-      let capturedResponse: unknown;
-      // @ts-expect-error - accessing private property for testing
-      session.transport.write = async (msg: unknown) => {
-        capturedResponse = msg;
-      };
-
-      await handleCanUseTool("test-request-id", {
-        subtype: "can_use_tool",
-        tool_name: "Bash",
-        tool_call_id: "test-tool-call-id",
-        input: { command: "ls" },
-        permission_suggestions: [],
-        blocked_path: null,
+      const capturedResponse = await invokeCanUseTool(session, "Bash", {
+        command: "ls",
       });
 
       // Verify callback was used and allowed
