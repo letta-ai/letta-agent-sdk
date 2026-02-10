@@ -408,12 +408,14 @@ export class Session implements AsyncDisposable {
         duration_ms: number;
         total_cost_usd?: number;
         conversation_id: string;
+        stop_reason?: string;
       };
       return {
         type: "result",
         success: msg.subtype === "success",
         result: msg.result,
         error: msg.subtype !== "success" ? msg.subtype : undefined,
+        stopReason: msg.stop_reason,
         durationMs: msg.duration_ms,
         totalCostUsd: msg.total_cost_usd,
         conversationId: msg.conversation_id,

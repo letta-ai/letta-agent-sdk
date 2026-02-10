@@ -279,6 +279,7 @@ export interface SDKResultMessage {
   success: boolean;
   result?: string;
   error?: string;
+  stopReason?: string;
   durationMs: number;
   totalCostUsd?: number;
   conversationId: string | null;
