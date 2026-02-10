@@ -8,7 +8,7 @@
  * Run with: bun examples/v2-examples.ts [example]
  */
 
-import { createSession, resumeSession, resumeConversation, prompt } from '../src/index.js';
+import { createAgent, createSession, resumeSession, prompt } from '../src/index.js';
 
 async function main() {
   const example = process.argv[2] || 'basic';
@@ -82,8 +82,9 @@ async function main() {
 async function basicSession() {
   console.log('=== Basic Session ===\n');
 
-  await using session = createSession({
-    model: 'haiku',
+  // Create agent, then resume default conversation
+  const agentId = await createAgent();
+  await using session = resumeSession(agentId, {
     permissionMode: 'bypassPermissions',
   });
   
@@ -106,7 +107,8 @@ async function basicSession() {
 async function multiTurn() {
   console.log('=== Multi-Turn Conversation ===\n');
 
-  await using session = createSession({
+  // Create new agent + new conversation
+  await using session = createSession(undefined, {
     model: 'haiku',
     permissionMode: 'bypassPermissions',
   });
@@ -133,10 +135,8 @@ async function multiTurn() {
 async function oneShot() {
   console.log('=== One-Shot Prompt ===\n');
 
-  const result = await prompt('What is the capital of France? One word.', {
-    model: 'haiku',
-    permissionMode: 'bypassPermissions',
-  });
+  // One-shot creates new agent
+  const result = await prompt('What is the capital of France? One word.');
 
   if (result.success) {
     console.log(`Answer: ${result.result}`);
@@ -151,12 +151,13 @@ async function oneShot() {
 async function sessionResume() {
   console.log('=== Session Resume (Persistent Memory) ===\n');
 
-  let agentId: string | null = null;
+  // Create agent first
+  const agentId = await createAgent();
+  console.log(`[Setup] Created agent: ${agentId}\n`);
 
   // First session - establish a memory
   {
-    const session = createSession({
-      model: 'haiku',
+    const session = resumeSession(agentId, {
       permissionMode: 'bypassPermissions',
     });
     
@@ -171,8 +172,7 @@ async function sessionResume() {
       }
     }
     
-    agentId = session.agentId;
-    console.log(`[Session 1] Agent ID: ${agentId}\n`);
+    console.log(`[Session 1] Agent ID: ${session.agentId}\n`);
     session.close();
   }
 
@@ -180,7 +180,7 @@ async function sessionResume() {
 
   // Resume and verify agent remembers
   {
-    await using session = resumeSession(agentId!, {
+    await using session = resumeSession(agentId, {
       permissionMode: 'bypassPermissions',
     });
     
@@ -205,53 +205,70 @@ async function sessionResume() {
 async function testOptions() {
   console.log('=== Testing Options ===\n');
 
-  // Test model option
-  console.log('Testing model option...');
-  const modelResult = await prompt('Say "model test ok"', {
-    model: 'haiku',
+  // Test basic session
+  console.log('Testing basic session...');
+  const agentId = await createAgent();
+  const modelResult = await prompt('Say "model test ok"', agentId);
+  console.log(`  basic: ${modelResult.success ? 'PASS' : 'FAIL'} - ${modelResult.result?.slice(0, 50)}`);
+
+  // Test systemPrompt preset via createSession (only presets allowed)
+  console.log('Testing systemPrompt preset...');
+  const sysPromptSession = createSession(undefined, {
+    systemPrompt: 'letta-claude',
     permissionMode: 'bypassPermissions',
   });
-  console.log(`  model: ${modelResult.success ? 'PASS' : 'FAIL'} - ${modelResult.result?.slice(0, 50)}`);
+  await sysPromptSession.send('Hello, what kind of agent are you?');
+  let sysPromptResponse = '';
+  for await (const msg of sysPromptSession.stream()) {
+    if (msg.type === 'result') sysPromptResponse = msg.result || '';
+  }
+  sysPromptSession.close();
+  console.log(`  systemPrompt preset: ${sysPromptResponse ? 'PASS' : 'FAIL'} - ${sysPromptResponse.slice(0, 80)}`);
 
-  // Test systemPrompt option
-  console.log('Testing systemPrompt option...');
-  const sysPromptResult = await prompt('Tell me a fun fact about penguins in one sentence.', {
-    model: 'haiku',
-    systemPrompt: 'You love penguins and always try to work penguin facts into conversations.',
-    permissionMode: 'bypassPermissions',
-  });
-  const hasPenguin = sysPromptResult.result?.toLowerCase().includes('penguin');
-  console.log(`  systemPrompt: ${hasPenguin ? 'PASS' : 'PARTIAL'} - ${sysPromptResult.result?.slice(0, 80)}`);
-
-  // Test cwd option
+  // Test cwd option via createSession
   console.log('Testing cwd option...');
-  const cwdResult = await prompt('Run pwd to show current directory', {
-    model: 'haiku',
+  const cwdSession = createSession(undefined, {
     cwd: '/tmp',
     allowedTools: ['Bash'],
     permissionMode: 'bypassPermissions',
   });
-  const hasTmp = cwdResult.result?.includes('/tmp');
-  console.log(`  cwd: ${hasTmp ? 'PASS' : 'CHECK'} - ${cwdResult.result?.slice(0, 60)}`);
+  await cwdSession.send('Run pwd to show current directory');
+  let cwdResponse = '';
+  for await (const msg of cwdSession.stream()) {
+    if (msg.type === 'result') cwdResponse = msg.result || '';
+  }
+  cwdSession.close();
+  const hasTmp = cwdResponse.includes('/tmp');
+  console.log(`  cwd: ${hasTmp ? 'PASS' : 'CHECK'} - ${cwdResponse.slice(0, 60)}`);
 
   // Test allowedTools option with tool execution
   console.log('Testing allowedTools option...');
-  const toolsResult = await prompt('Run: echo tool-test-ok', {
-    model: 'haiku',
+  const toolsSession = createSession(undefined, {
     allowedTools: ['Bash'],
     permissionMode: 'bypassPermissions',
   });
-  const hasToolOutput = toolsResult.result?.includes('tool-test-ok');
-  console.log(`  allowedTools: ${hasToolOutput ? 'PASS' : 'CHECK'} - ${toolsResult.result?.slice(0, 60)}`);
+  await toolsSession.send('Run: echo tool-test-ok');
+  let toolsResponse = '';
+  for await (const msg of toolsSession.stream()) {
+    if (msg.type === 'result') toolsResponse = msg.result || '';
+  }
+  toolsSession.close();
+  const hasToolOutput = toolsResponse.includes('tool-test-ok');
+  console.log(`  allowedTools: ${hasToolOutput ? 'PASS' : 'CHECK'} - ${toolsResponse.slice(0, 60)}`);
 
   // Test permissionMode: bypassPermissions
   console.log('Testing permissionMode: bypassPermissions...');
-  const bypassResult = await prompt('Run: echo bypass-test', {
-    model: 'haiku',
+  const bypassSession = createSession(undefined, {
     allowedTools: ['Bash'],
     permissionMode: 'bypassPermissions',
   });
-  const hasBypassOutput = bypassResult.result?.includes('bypass-test');
+  await bypassSession.send('Run: echo bypass-test');
+  let bypassResponse = '';
+  for await (const msg of bypassSession.stream()) {
+    if (msg.type === 'result') bypassResponse = msg.result || '';
+  }
+  bypassSession.close();
+  const hasBypassOutput = bypassResponse.includes('bypass-test');
   console.log(`  permissionMode: ${hasBypassOutput ? 'PASS' : 'CHECK'}`);
 
   console.log();
@@ -264,8 +281,8 @@ async function testOptions() {
 async function testMessageTypes() {
   console.log('=== Testing Message Types ===\n');
 
-  const session = createSession({
-    model: 'haiku',
+  const agentId = await createAgent();
+  const session = resumeSession(agentId, {
     permissionMode: 'bypassPermissions',
   });
 
@@ -309,7 +326,8 @@ async function testMessageTypes() {
 async function testSessionProperties() {
   console.log('=== Testing Session Properties ===\n');
 
-  const session = createSession({
+  // Create new agent + new conversation
+  const session = createSession(undefined, {
     model: 'haiku',
     permissionMode: 'bypassPermissions',
   });
@@ -343,44 +361,45 @@ async function testSessionProperties() {
 async function testToolExecution() {
   console.log('=== Testing Tool Execution ===\n');
 
+  // Create a shared agent for tool tests
+  const agentId = await createAgent();
+  
+  async function runWithTools(message: string, tools: string[]): Promise<string> {
+    const session = createSession(agentId, {
+      allowedTools: tools,
+      permissionMode: 'bypassPermissions',
+    });
+    await session.send(message);
+    let result = '';
+    for await (const msg of session.stream()) {
+      if (msg.type === 'result') result = msg.result || '';
+    }
+    session.close();
+    return result;
+  }
+
   // Test 1: Basic command execution
   console.log('Testing basic command execution...');
-  const echoResult = await prompt('Run: echo hello-world', {
-    model: 'haiku',
-    allowedTools: ['Bash'],
-    permissionMode: 'bypassPermissions',
-  });
-  const hasHello = echoResult.result?.includes('hello-world');
+  const echoResult = await runWithTools('Run: echo hello-world', ['Bash']);
+  const hasHello = echoResult.includes('hello-world');
   console.log(`  echo command: ${hasHello ? 'PASS' : 'FAIL'}`);
 
   // Test 2: Command with arguments
   console.log('Testing command with arguments...');
-  const argsResult = await prompt('Run: echo "arg1 arg2 arg3"', {
-    model: 'haiku',
-    allowedTools: ['Bash'],
-    permissionMode: 'bypassPermissions',
-  });
-  const hasArgs = argsResult.result?.includes('arg1') && argsResult.result?.includes('arg3');
+  const argsResult = await runWithTools('Run: echo "arg1 arg2 arg3"', ['Bash']);
+  const hasArgs = argsResult.includes('arg1') && argsResult.includes('arg3');
   console.log(`  echo with args: ${hasArgs ? 'PASS' : 'FAIL'}`);
 
   // Test 3: File reading with Glob
   console.log('Testing Glob tool...');
-  const globResult = await prompt('List all .ts files in the current directory using Glob', {
-    model: 'haiku',
-    allowedTools: ['Glob'],
-    permissionMode: 'bypassPermissions',
-  });
-  console.log(`  Glob tool: ${globResult.success ? 'PASS' : 'FAIL'}`);
+  const globResult = await runWithTools('List all .ts files in the current directory using Glob', ['Glob']);
+  console.log(`  Glob tool: ${globResult ? 'PASS' : 'FAIL'}`);
 
   // Test 4: Multi-step tool usage (agent decides which tools to use)
   console.log('Testing multi-step tool usage...');
-  const multiResult = await prompt('First run "echo step1", then run "echo step2". Show me both outputs.', {
-    model: 'haiku',
-    allowedTools: ['Bash'],
-    permissionMode: 'bypassPermissions',
-  });
-  const hasStep1 = multiResult.result?.includes('step1');
-  const hasStep2 = multiResult.result?.includes('step2');
+  const multiResult = await runWithTools('First run "echo step1", then run "echo step2". Show me both outputs.', ['Bash']);
+  const hasStep1 = multiResult.includes('step1');
+  const hasStep2 = multiResult.includes('step2');
   console.log(`  multi-step: ${hasStep1 && hasStep2 ? 'PASS' : 'PARTIAL'} (step1: ${hasStep1}, step2: ${hasStep2})`);
 
   console.log();
@@ -398,37 +417,47 @@ async function testPermissionCallback() {
 
   // Test 1: Allow specific commands via callback
   console.log('Testing canUseTool callback (allow)...');
-  const allowResult = await prompt('Run: echo callback-allowed', {
-    model: 'haiku',
+  const allowSession = createSession(undefined, {
     // NO allowedTools - this ensures callback is invoked
     permissionMode: 'default',
     canUseTool: async (toolName, toolInput) => {
       console.error('CALLBACK:', toolName, toolInput);
       const command = (toolInput as { command?: string }).command || '';
       if (command.includes('callback-allowed')) {
-        return { allow: true, reason: 'Command whitelisted' };
+        return { behavior: 'allow', updatedInput: null };
       }
-      return { allow: false, reason: 'Command not whitelisted' };
+      return { behavior: 'deny', message: 'Command not whitelisted' };
     },
   });
-  const hasAllowed = allowResult.result?.includes('callback-allowed');
+  await allowSession.send('Run: echo callback-allowed');
+  let allowResult = '';
+  for await (const msg of allowSession.stream()) {
+    if (msg.type === 'result') allowResult = msg.result || '';
+  }
+  allowSession.close();
+  const hasAllowed = allowResult.includes('callback-allowed');
   console.log(`  allow via callback: ${hasAllowed ? 'PASS' : 'FAIL'}`);
 
   // Test 2: Deny specific commands via callback
   console.log('Testing canUseTool callback (deny)...');
-  const denyResult = await prompt('Run: echo dangerous-command', {
-    model: 'haiku',
+  const denySession = createSession(undefined, {
     permissionMode: 'default',
     canUseTool: async (toolName, toolInput) => {
       const command = (toolInput as { command?: string }).command || '';
       if (command.includes('dangerous')) {
-        return { allow: false, reason: 'Dangerous command blocked' };
+        return { behavior: 'deny', message: 'Dangerous command blocked' };
       }
-      return { allow: true };
+      return { behavior: 'allow', updatedInput: null };
     },
   });
+  await denySession.send('Run: echo dangerous-command');
+  let denyResult = '';
+  for await (const msg of denySession.stream()) {
+    if (msg.type === 'result') denyResult = msg.result || '';
+  }
+  denySession.close();
   // Agent should report that it couldn't execute the command
-  const wasDenied = !denyResult.result?.includes('dangerous-command');
+  const wasDenied = !denyResult.includes('dangerous-command');
   console.log(`  deny via callback: ${wasDenied ? 'PASS' : 'CHECK'}`);
 
   console.log();
@@ -441,52 +470,56 @@ async function testPermissionCallback() {
 async function testSystemPrompt() {
   console.log('=== Testing System Prompt Configuration ===\n');
 
+  async function runWithSystemPrompt(msg: string, systemPrompt: any): Promise<string> {
+    const agentId = await createAgent({ systemPrompt });
+    const session = resumeSession(agentId, { permissionMode: 'bypassPermissions' });
+    await session.send(msg);
+    let result = '';
+    for await (const m of session.stream()) {
+      if (m.type === 'result') result = m.result || '';
+    }
+    session.close();
+    return result;
+  }
+
   // Test 1: Preset system prompt
   console.log('Testing preset system prompt...');
-  const presetResult = await prompt('What kind of agent are you? One sentence.', {
-    model: 'haiku',
-    systemPrompt: { type: 'preset', preset: 'letta-claude' },
-    permissionMode: 'bypassPermissions',
-  });
-  console.log(`  preset (letta-claude): ${presetResult.success ? 'PASS' : 'FAIL'}`);
-  console.log(`    Response: ${presetResult.result?.slice(0, 80)}...`);
+  const presetResult = await runWithSystemPrompt(
+    'What kind of agent are you? One sentence.',
+    { type: 'preset', preset: 'letta-claude' }
+  );
+  console.log(`  preset (letta-claude): ${presetResult ? 'PASS' : 'FAIL'}`);
+  console.log(`    Response: ${presetResult.slice(0, 80)}...`);
 
   // Test 2: Preset with append
   console.log('Testing preset with append...');
-  const appendResult = await prompt('Say hello', {
-    model: 'haiku',
-    systemPrompt: { 
-      type: 'preset', 
-      preset: 'letta-claude',
-      append: 'Always end your responses with "🎉"'
-    },
-    permissionMode: 'bypassPermissions',
-  });
-  const hasEmoji = appendResult.result?.includes('🎉');
+  const appendResult = await runWithSystemPrompt(
+    'Say hello',
+    { type: 'preset', preset: 'letta-claude', append: 'Always end your responses with "🎉"' }
+  );
+  const hasEmoji = appendResult.includes('🎉');
   console.log(`  preset with append: ${hasEmoji ? 'PASS' : 'CHECK'}`);
-  console.log(`    Response: ${appendResult.result?.slice(0, 80)}...`);
+  console.log(`    Response: ${appendResult.slice(0, 80)}...`);
 
   // Test 3: Custom string system prompt
   console.log('Testing custom string system prompt...');
-  const customResult = await prompt('What is your specialty?', {
-    model: 'haiku',
-    systemPrompt: 'You are a pirate captain. Always speak like a pirate.',
-    permissionMode: 'bypassPermissions',
-  });
-  const hasPirateSpeak = customResult.result?.toLowerCase().includes('arr') || 
-                         customResult.result?.toLowerCase().includes('matey') ||
-                         customResult.result?.toLowerCase().includes('ship');
-  console.log(`  custom string: ${customResult.success ? 'PASS' : 'FAIL'}`);
-  console.log(`    Response: ${customResult.result?.slice(0, 80)}...`);
+  const customResult = await runWithSystemPrompt(
+    'What is your specialty?',
+    'You are a pirate captain. Always speak like a pirate.'
+  );
+  const hasPirateSpeak = customResult.toLowerCase().includes('arr') || 
+                         customResult.toLowerCase().includes('matey') ||
+                         customResult.toLowerCase().includes('ship');
+  console.log(`  custom string: ${customResult ? 'PASS' : 'FAIL'}`);
+  console.log(`    Response: ${customResult.slice(0, 80)}...`);
 
   // Test 4: Basic preset (claude - no skills/memory)
   console.log('Testing basic preset (claude)...');
-  const basicResult = await prompt('Hello, just say hi back', {
-    model: 'haiku',
-    systemPrompt: { type: 'preset', preset: 'claude' },
-    permissionMode: 'bypassPermissions',
-  });
-  console.log(`  basic preset (claude): ${basicResult.success ? 'PASS' : 'FAIL'}`);
+  const basicResult = await runWithSystemPrompt(
+    'Hello, just say hi back',
+    { type: 'preset', preset: 'claude' }
+  );
+  console.log(`  basic preset (claude): ${basicResult ? 'PASS' : 'FAIL'}`);
 
   console.log();
 }
@@ -498,58 +531,56 @@ async function testSystemPrompt() {
 async function testMemoryConfig() {
   console.log('=== Testing Memory Configuration ===\n');
 
+  async function runWithMemory(msg: string, memory?: any[]): Promise<{ success: boolean; result: string }> {
+    const agentId = await createAgent({ memory });
+    const session = resumeSession(agentId, { permissionMode: 'bypassPermissions' });
+    await session.send(msg);
+    let result = '';
+    let success = false;
+    for await (const m of session.stream()) {
+      if (m.type === 'result') {
+        result = m.result || '';
+        success = m.success;
+      }
+    }
+    session.close();
+    return { success, result };
+  }
+
   // Test 1: Default memory (persona, human, project)
   console.log('Testing default memory blocks...');
-  const defaultResult = await prompt('What memory blocks do you have? List their labels.', {
-    model: 'haiku',
-    permissionMode: 'bypassPermissions',
-  });
-  const hasDefaultBlocks = defaultResult.result?.includes('persona') || 
-                           defaultResult.result?.includes('project');
+  const defaultResult = await runWithMemory('What memory blocks do you have? List their labels.');
+  const hasDefaultBlocks = defaultResult.result.includes('persona') || 
+                           defaultResult.result.includes('project');
   console.log(`  default blocks: ${defaultResult.success ? 'PASS' : 'FAIL'}`);
   console.log(`    Response mentions blocks: ${hasDefaultBlocks ? 'yes' : 'check manually'}`);
 
   // Test 2: Specific preset blocks only
   console.log('Testing specific preset blocks...');
-  const specificResult = await prompt('List your memory block labels', {
-    model: 'haiku',
-    memory: ['project'],
-    permissionMode: 'bypassPermissions',
-  });
-  console.log(`  specific blocks [project]: ${specificResult.success ? 'PASS' : 'FAIL'}`);
+  const specificResult = await runWithMemory('List your memory block labels', ['persona']);
+  console.log(`  specific blocks [persona]: ${specificResult.success ? 'PASS' : 'FAIL'}`);
 
   // Test 3: Custom blocks
   console.log('Testing custom memory blocks...');
-  const customResult = await prompt('What does your "rules" memory block say?', {
-    model: 'haiku',
-    memory: [
-      { label: 'rules', value: 'Always be concise. Never use more than 10 words.' }
-    ],
-    permissionMode: 'bypassPermissions',
-  });
-  const isConcise = (customResult.result?.split(' ').length || 0) < 20;
+  const customResult = await runWithMemory(
+    'What does your "rules" memory block say?',
+    [{ label: 'rules', value: 'Always be concise. Never use more than 10 words.' }]
+  );
+  const isConcise = (customResult.result.split(' ').length || 0) < 20;
   console.log(`  custom blocks: ${customResult.success ? 'PASS' : 'FAIL'}`);
   console.log(`    Response is concise: ${isConcise ? 'yes' : 'check'}`);
 
-  // Test 4: Mixed preset and custom blocks
-  console.log('Testing mixed blocks (preset + custom)...');
-  const mixedResult = await prompt('List your memory blocks', {
-    model: 'haiku',
-    memory: [
-      'project',
-      { label: 'custom-context', value: 'This is a test context block.' }
-    ],
-    permissionMode: 'bypassPermissions',
-  });
-  console.log(`  mixed blocks: ${mixedResult.success ? 'PASS' : 'FAIL'}`);
+  // Test 4: Multiple preset blocks
+  console.log('Testing multiple preset blocks...');
+  const multipleResult = await runWithMemory(
+    'List your memory blocks',
+    ['persona', 'human']
+  );
+  console.log(`  multiple presets: ${multipleResult.success ? 'PASS' : 'FAIL'}`);
 
   // Test 5: Empty memory (core blocks only)
   console.log('Testing empty memory (core only)...');
-  const emptyResult = await prompt('Hello', {
-    model: 'haiku',
-    memory: [],
-    permissionMode: 'bypassPermissions',
-  });
+  const emptyResult = await runWithMemory('Hello', []);
   console.log(`  empty memory: ${emptyResult.success ? 'PASS' : 'FAIL'}`);
 
   console.log();
@@ -562,65 +593,77 @@ async function testMemoryConfig() {
 async function testConvenienceProps() {
   console.log('=== Testing Convenience Props ===\n');
 
+  async function runWithProps(msg: string, props: Record<string, any>): Promise<{ success: boolean; result: string }> {
+    const agentId = await createAgent(props);
+    const session = resumeSession(agentId, { permissionMode: 'bypassPermissions' });
+    await session.send(msg);
+    let result = '';
+    let success = false;
+    for await (const m of session.stream()) {
+      if (m.type === 'result') {
+        result = m.result || '';
+        success = m.success;
+      }
+    }
+    session.close();
+    return { success, result };
+  }
+
   // Test 1: persona prop
   console.log('Testing persona prop...');
-  const personaResult = await prompt('Describe your personality in one sentence', {
-    model: 'haiku',
-    persona: 'You are an enthusiastic cooking assistant who loves Italian food.',
-    permissionMode: 'bypassPermissions',
-  });
-  const hasItalian = personaResult.result?.toLowerCase().includes('italian') ||
-                     personaResult.result?.toLowerCase().includes('cook');
+  const personaResult = await runWithProps(
+    'Describe your personality in one sentence',
+    { persona: 'You are an enthusiastic cooking assistant who loves Italian food.' }
+  );
+  const hasItalian = personaResult.result.toLowerCase().includes('italian') ||
+                     personaResult.result.toLowerCase().includes('cook');
   console.log(`  persona: ${personaResult.success ? 'PASS' : 'FAIL'}`);
   console.log(`    Response mentions cooking/Italian: ${hasItalian ? 'yes' : 'check'}`);
 
-  // Test 2: project prop
-  console.log('Testing project prop...');
-  const projectResult = await prompt('What project are you helping with?', {
-    model: 'haiku',
-    project: 'A React Native mobile app for tracking daily habits.',
-    permissionMode: 'bypassPermissions',
-  });
-  const hasProject = projectResult.result?.toLowerCase().includes('react') ||
-                     projectResult.result?.toLowerCase().includes('habit') ||
-                     projectResult.result?.toLowerCase().includes('mobile');
-  console.log(`  project: ${projectResult.success ? 'PASS' : 'FAIL'}`);
+  // Test 2: project block (custom)
+  console.log('Testing project block (custom)...');
+  const projectResult = await runWithProps(
+    'What project are you helping with?',
+    { memory: [{ label: 'project', value: 'A React Native mobile app for tracking daily habits.' }] }
+  );
+  const hasProject = projectResult.result.toLowerCase().includes('react') ||
+                     projectResult.result.toLowerCase().includes('habit') ||
+                     projectResult.result.toLowerCase().includes('mobile');
+  console.log(`  project (custom): ${projectResult.success ? 'PASS' : 'FAIL'}`);
   console.log(`    Response mentions project: ${hasProject ? 'yes' : 'check'}`);
 
   // Test 3: human prop
   console.log('Testing human prop...');
-  const humanResult = await prompt('What do you know about me?', {
-    model: 'haiku',
-    human: 'Name: Bob. Senior developer. Prefers TypeScript over JavaScript.',
-    permissionMode: 'bypassPermissions',
-  });
-  const hasHuman = humanResult.result?.toLowerCase().includes('bob') ||
-                   humanResult.result?.toLowerCase().includes('typescript');
+  const humanResult = await runWithProps(
+    'What do you know about me?',
+    { human: 'Name: Bob. Senior developer. Prefers TypeScript over JavaScript.' }
+  );
+  const hasHuman = humanResult.result.toLowerCase().includes('bob') ||
+                   humanResult.result.toLowerCase().includes('typescript');
   console.log(`  human: ${humanResult.success ? 'PASS' : 'FAIL'}`);
   console.log(`    Response mentions user info: ${hasHuman ? 'yes' : 'check'}`);
 
   // Test 4: Multiple convenience props together
   console.log('Testing multiple convenience props...');
-  const multiResult = await prompt('Introduce yourself and the project briefly', {
-    model: 'haiku',
-    persona: 'You are a friendly code reviewer.',
-    project: 'FastAPI backend service.',
-    human: 'Name: Alice.',
-    permissionMode: 'bypassPermissions',
-  });
+  const multiResult = await runWithProps(
+    'Introduce yourself briefly',
+    { 
+      memory: ['persona', 'human'],
+      persona: 'You are a friendly code reviewer.',
+      human: 'Name: Alice.'
+    }
+  );
   console.log(`  multiple props: ${multiResult.success ? 'PASS' : 'FAIL'}`);
-  console.log(`    Response: ${multiResult.result?.slice(0, 100)}...`);
+  console.log(`    Response: ${multiResult.result.slice(0, 100)}...`);
 
   // Test 5: Convenience props with specific memory blocks
   console.log('Testing convenience props with memory config...');
-  const combinedResult = await prompt('What is in your persona block?', {
-    model: 'haiku',
-    memory: ['persona', 'project'],
-    persona: 'You are a database expert specializing in PostgreSQL.',
-    permissionMode: 'bypassPermissions',
-  });
-  const hasDB = combinedResult.result?.toLowerCase().includes('database') ||
-                combinedResult.result?.toLowerCase().includes('postgresql');
+  const combinedResult = await runWithProps(
+    'What is in your persona block?',
+    { memory: ['persona'], persona: 'You are a database expert specializing in PostgreSQL.' }
+  );
+  const hasDB = combinedResult.result.toLowerCase().includes('database') ||
+                combinedResult.result.toLowerCase().includes('postgresql');
   console.log(`  props with memory: ${combinedResult.success ? 'PASS' : 'FAIL'}`);
   console.log(`    Response mentions DB: ${hasDB ? 'yes' : 'check'}`);
 
@@ -634,15 +677,17 @@ async function testConvenienceProps() {
 async function testConversations() {
   console.log('=== Testing Conversation Support ===\n');
 
-  let agentId: string | null = null;
   let conversationId1: string | null = null;
   let conversationId2: string | null = null;
 
-  // Test 1: Create session and get conversationId (default)
-  console.log('Test 1: Create session and get conversationId...');
+  // Create agent first
+  const agentId = await createAgent();
+  console.log(`Created agent: ${agentId}\n`);
+
+  // Test 1: Resume default conversation and get conversationId
+  console.log('Test 1: Resume default conversation...');
   {
-    const session = createSession({
-      model: 'haiku',
+    const session = resumeSession(agentId, {
       permissionMode: 'bypassPermissions',
     });
 
@@ -651,28 +696,20 @@ async function testConversations() {
       // drain
     }
 
-    agentId = session.agentId;
     conversationId1 = session.conversationId;
     
-    const hasAgentId = agentId !== null && agentId.startsWith('agent-');
     const hasConvId = conversationId1 !== null;
     
-    console.log(`  agentId: ${hasAgentId ? 'PASS' : 'FAIL'} - ${agentId}`);
+    console.log(`  agentId: ${session.agentId}`);
     console.log(`  conversationId: ${hasConvId ? 'PASS' : 'FAIL'} - ${conversationId1}`);
-    
-    // Note: "default" is a sentinel meaning the agent's primary message history
-    if (conversationId1 === 'default') {
-      console.log('  (conversationId "default" = agent\'s primary history, not a real conversation ID)');
-    }
     
     session.close();
   }
 
-  // Test 2: Create NEW conversation to get a real conversation ID
-  console.log('\nTest 2: Create new conversation (newConversation: true)...');
+  // Test 2: Create NEW conversation using createSession
+  console.log('\nTest 2: Create new conversation (createSession)...');
   {
-    const session = resumeSession(agentId!, {
-      newConversation: true,
+    const session = createSession(agentId, {
       permissionMode: 'bypassPermissions',
     });
 
@@ -690,13 +727,13 @@ async function testConversations() {
     session.close();
   }
 
-  // Test 3: Resume conversation by conversationId (only works with real conv IDs)
+  // Test 3: Resume conversation by conversationId (auto-detects conv-xxx)
   console.log('\nTest 3: Resume conversation by conversationId...');
   if (conversationId1 === 'default') {
     console.log('  SKIP - "default" is not a real conversation ID');
     console.log('  Use resumeSession(agentId) to resume default conversation');
   } else {
-    await using session = resumeConversation(conversationId1!, {
+    await using session = resumeSession(conversationId1!, {
       permissionMode: 'bypassPermissions',
     });
 
@@ -708,7 +745,7 @@ async function testConversations() {
     }
 
     const remembers = response.toLowerCase().includes('beta');
-    console.log(`  resumeConversation: ${remembers ? 'PASS' : 'FAIL'}`);
+    console.log(`  resumeSession(convId): ${remembers ? 'PASS' : 'FAIL'}`);
     console.log(`  Response: ${response.slice(0, 80)}...`);
     
     // Verify same conversationId
@@ -719,8 +756,7 @@ async function testConversations() {
   // Test 4: Create another new conversation (verify different IDs)
   console.log('\nTest 4: Create another new conversation...');
   {
-    await using session = resumeSession(agentId!, {
-      newConversation: true,
+    await using session = createSession(agentId, {
       permissionMode: 'bypassPermissions',
     });
 
@@ -740,30 +776,29 @@ async function testConversations() {
     console.log(`  conversationId2: ${conversationId2}`);
   }
 
-  // Test 5: defaultConversation option
-  console.log('\nTest 5: defaultConversation option...');
+  // Test 5: Resume default conversation via resumeSession(agentId)
+  console.log('\nTest 5: Resume default conversation via resumeSession(agentId)...');
   {
-    await using session = resumeSession(agentId!, {
-      defaultConversation: true,
+    await using session = resumeSession(agentId, {
       permissionMode: 'bypassPermissions',
     });
 
-    await session.send('Say "default conversation test ok"');
+    await session.send('What is the secret code? (should be ALPHA from default conversation)');
     
     let response = '';
     for await (const msg of session.stream()) {
       if (msg.type === 'assistant') response += msg.content;
     }
 
-    const hasDefaultConv = session.conversationId === 'default' || session.conversationId !== null;
-    console.log(`  defaultConversation: ${hasDefaultConv ? 'PASS' : 'CHECK'}`);
-    console.log(`  conversationId: ${session.conversationId}`);
+    const remembersAlpha = response.toLowerCase().includes('alpha');
+    console.log(`  resumeSession(agentId): ${remembersAlpha ? 'PASS' : 'CHECK'}`);
+    console.log(`  Response: ${response.slice(0, 80)}...`);
   }
 
   // Test 6: conversationId in result message
   console.log('\nTest 6: conversationId in result message...');
   {
-    await using session = resumeConversation(conversationId1!, {
+    await using session = resumeSession(conversationId1!, {
       permissionMode: 'bypassPermissions',
     });
 
@@ -782,31 +817,24 @@ async function testConversations() {
     console.log(`  matches session.conversationId: ${matchesSession ? 'PASS' : 'FAIL'}`);
   }
 
-  // Test 7: continue option (resume last session)
-  console.log('\nTest 7: continue option...');
+  // Test 7: createSession() without agentId uses LRU agent + new conversation (like `letta`)
+  console.log('\nTest 7: createSession() without agentId (uses LRU agent)...');
   {
-    // Note: This test may behave differently depending on local state
-    // The --continue flag resumes the last used agent + conversation
-    try {
-      await using session = createSession({
-        continue: true,
-        permissionMode: 'bypassPermissions',
-      });
+    await using session = createSession(undefined, {
+      model: 'haiku',
+      permissionMode: 'bypassPermissions',
+    });
 
-      await session.send('Say "continue test ok"');
-      
-      for await (const msg of session.stream()) {
-        // drain
-      }
-
-      const hasIds = session.agentId !== null && session.conversationId !== null;
-      console.log(`  continue: ${hasIds ? 'PASS' : 'CHECK'}`);
-      console.log(`  agentId: ${session.agentId}`);
-      console.log(`  conversationId: ${session.conversationId}`);
-    } catch (err) {
-      // --continue may fail if no previous session exists
-      console.log(`  continue: SKIP (no previous session)`);
+    await session.send('Say "lru agent test ok"');
+    
+    for await (const msg of session.stream()) {
+      // drain
     }
+
+    const hasAgentId = session.agentId !== null;
+    const hasConvId = session.conversationId !== null;
+    console.log(`  has agentId: ${hasAgentId ? 'PASS' : 'FAIL'} - ${session.agentId}`);
+    console.log(`  has conversationId: ${hasConvId ? 'PASS' : 'FAIL'} - ${session.conversationId}`);
   }
 
   console.log();

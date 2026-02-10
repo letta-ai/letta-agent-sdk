@@ -28,6 +28,40 @@ export type {
 import type { CreateBlock, CanUseToolResponse } from "@letta-ai/letta-code/protocol";
 
 // ═══════════════════════════════════════════════════════════════
+// MESSAGE CONTENT TYPES (for multimodal support)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Text content in a message
+ */
+export interface TextContent {
+  type: "text";
+  text: string;
+}
+
+/**
+ * Image content in a message (base64 encoded)
+ */
+export interface ImageContent {
+  type: "image";
+  source: {
+    type: "base64";
+    media_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+    data: string;
+  };
+}
+
+/**
+ * A single content item (text or image)
+ */
+export type MessageContentItem = TextContent | ImageContent;
+
+/**
+ * What send() accepts - either a simple string or multimodal content array
+ */
+export type SendMessage = string | MessageContentItem[];
+
+// ═══════════════════════════════════════════════════════════════
 // SYSTEM PROMPT TYPES
 // ═══════════════════════════════════════════════════════════════
 
@@ -79,7 +113,7 @@ export type MemoryItem =
 /**
  * Default memory block preset names.
  */
-export type MemoryPreset = "persona" | "human" | "project";
+export type MemoryPreset = "persona" | "human" | "skills" | "loaded_skills";
 
 // ═══════════════════════════════════════════════════════════════
 // TOOL TYPES (matches pi-agent-core)
@@ -152,61 +186,52 @@ export type CanUseToolCallback = (
 ) => Promise<CanUseToolResponse> | CanUseToolResponse;
 
 /**
- * Options for creating a session
+ * Internal session options used by Session/Transport classes.
+ * Not user-facing - use CreateSessionOptions or CreateAgentOptions instead.
+ * @internal
  */
-export interface SessionOptions {
-  /** Model to use (e.g., "claude-sonnet-4-20250514") */
+export interface InternalSessionOptions {
+  // Agent/conversation routing
+  agentId?: string;
+  conversationId?: string;
+  newConversation?: boolean;
+  defaultConversation?: boolean;
+  createOnly?: boolean;
+
+  // Agent configuration
+  model?: string;
+  embedding?: string;
+  systemPrompt?: SystemPromptConfig;
+  
+  // Memory blocks (only for new agents)
+  memory?: MemoryItem[];
+  persona?: string;  // Convenience for persona block
+  human?: string;    // Convenience for human block
+
+  // Permissions
+  allowedTools?: string[];
+  permissionMode?: PermissionMode;
+  canUseTool?: CanUseToolCallback;
+
+  // Custom tools
+  tools?: AnyAgentTool[];
+
+  // Process settings
+  cwd?: string;
+}
+
+export type PermissionMode = "default" | "acceptEdits" | "bypassPermissions";
+
+/**
+ * Options for createSession() and resumeSession() - restricted to options that can be applied to existing agents (LRU/Memo).
+ * For creating new agents with custom memory/persona, use createAgent().
+ */
+export interface CreateSessionOptions {
+  /** Model to use (e.g., "claude-sonnet-4-20250514") - updates the agent's LLM config */
   model?: string;
 
-  /** Resume a specific conversation by ID (derives agent automatically) */
-  conversationId?: string;
-
-  /** Create a new conversation for concurrent sessions (requires agentId) */
-  newConversation?: boolean;
-
-  /** Resume the last session (agent + conversation from previous run) */
-  continue?: boolean;
-
-  /** Use agent's default conversation (requires agentId) */
-  defaultConversation?: boolean;
-
-  /**
-   * System prompt configuration.
-   * - string: Use as the complete system prompt
-   * - { type: 'preset', preset, append? }: Use a preset with optional appended text
-   *
-   * Available presets: 'default', 'letta-claude', 'letta-codex', 'letta-gemini',
-   *                    'claude', 'codex', 'gemini'
-   */
-  systemPrompt?: SystemPromptConfig;
-
-  /**
-   * Memory block configuration. Each item can be:
-   * - string: Preset block name ("project", "persona", "human")
-   * - CreateBlock: Custom block definition
-   * - { blockId: string }: Reference to existing shared block
-   *
-   * If not specified, defaults to ["persona", "human", "project"].
-   * Core blocks (skills, loaded_skills) are always included automatically.
-   */
-  memory?: MemoryItem[];
-
-  /**
-   * Convenience: Set persona block value directly.
-   * Uses default block description/limit, just overrides the value.
-   * Error if persona not included in memory config.
-   */
-  persona?: string;
-
-  /**
-   * Convenience: Set human block value directly.
-   */
-  human?: string;
-
-  /**
-   * Convenience: Set project block value directly.
-   */
-  project?: string;
+  /** System prompt preset (only presets, no custom strings or append) - updates the agent */
+  systemPrompt?: SystemPromptPreset;
 
   /** List of allowed tool names */
   allowedTools?: string[];
@@ -214,11 +239,8 @@ export interface SessionOptions {
   /** Permission mode */
   permissionMode?: PermissionMode;
 
-  /** Working directory */
+  /** Working directory for the CLI process */
   cwd?: string;
-
-  /** Maximum conversation turns */
-  maxTurns?: number;
 
   /** Custom permission callback - called when tool needs approval */
   canUseTool?: CanUseToolCallback;
@@ -230,7 +252,56 @@ export interface SessionOptions {
   tools?: AnyAgentTool[];
 }
 
-export type PermissionMode = "default" | "acceptEdits" | "bypassPermissions";
+/**
+ * Options for createAgent() - full control over agent creation.
+ */
+export interface CreateAgentOptions {
+  /** Model to use (e.g., "claude-sonnet-4-20250514") */
+  model?: string;
+
+  /** Embedding model to use (e.g., "text-embedding-ada-002") */
+  embedding?: string;
+
+  /**
+   * System prompt configuration.
+   * - string: Use as the complete system prompt
+   * - SystemPromptPreset: Use a preset
+   * - { type: 'preset', preset, append? }: Use a preset with optional appended text
+   */
+  systemPrompt?: string | SystemPromptPreset | SystemPromptPresetConfigSDK;
+
+  /**
+   * Memory block configuration. Each item can be:
+   * - string: Preset block name ("persona", "human", "skills", "loaded_skills")
+   * - CreateBlock: Custom block definition (e.g., { label: "project", value: "..." })
+   * - { blockId: string }: Reference to existing shared block
+   */
+  memory?: MemoryItem[];
+
+  /** Convenience: Set persona block value directly */
+  persona?: string;
+
+  /** Convenience: Set human block value directly */
+  human?: string;
+
+  /** List of allowed tool names */
+  allowedTools?: string[];
+
+  /** Permission mode */
+  permissionMode?: PermissionMode;
+
+  /** Working directory for the CLI process */
+  cwd?: string;
+
+  /** Custom permission callback - called when tool needs approval */
+  canUseTool?: CanUseToolCallback;
+
+  /**
+   * Custom tools that execute locally in the SDK process.
+   * These tools are registered with the CLI and executed when the LLM calls them.
+   */
+  tools?: AnyAgentTool[];
+}
 
 // ═══════════════════════════════════════════════════════════════
 // SDK MESSAGE TYPES
@@ -281,6 +352,7 @@ export interface SDKResultMessage {
   success: boolean;
   result?: string;
   error?: string;
+  stopReason?: string;
   durationMs: number;
   totalCostUsd?: number;
   conversationId: string | null;

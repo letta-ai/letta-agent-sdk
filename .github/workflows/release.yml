@@ -141,9 +141,8 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Release ${{ steps.version.outputs.tag }}
           body: |
-            Release ${{ steps.version.outputs.tag }}
-            
             Changes from ${{ steps.version.outputs.old_version }} to ${{ steps.version.outputs.new_version }}
+          generate_release_notes: true
 
       - name: Publish to npm
         run: npm publish --access public --tag ${{ steps.version.outputs.npm_tag }}

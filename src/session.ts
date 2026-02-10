@@ -7,7 +7,7 @@
 
 import { SubprocessTransport } from "./transport.js";
 import type {
-  SessionOptions,
+  InternalSessionOptions,
   SDKMessage,
   SDKInitMessage,
   SDKAssistantMessage,
@@ -18,11 +18,16 @@ import type {
   CanUseToolResponse,
   CanUseToolResponseAllow,
   CanUseToolResponseDeny,
+  SendMessage,
   AnyAgentTool,
-  AgentToolResultContent,
   ExecuteExternalToolRequest,
 } from "./types.js";
-import { validateSessionOptions } from "./validation.js";
+
+
+// All logging gated behind DEBUG_SDK env var
+function sessionLog(tag: string, ...args: unknown[]) {
+  if (process.env.DEBUG_SDK) console.error(`[SDK-Session] [${tag}]`, ...args);
+}
 
 export class Session implements AsyncDisposable {
   private transport: SubprocessTransport;
@@ -32,13 +37,13 @@ export class Session implements AsyncDisposable {
   private initialized = false;
   private externalTools: Map<string, AnyAgentTool> = new Map();
 
+
   constructor(
-    private options: SessionOptions & { agentId?: string } = {}
+    private options: InternalSessionOptions = {}
   ) {
-    // Validate options before creating transport
-    validateSessionOptions(options);
+    // Note: Validation happens in public API functions (createSession, createAgent, etc.)
     this.transport = new SubprocessTransport(options);
-    
+
     // Store external tools in a map for quick lookup
     if (options.tools) {
       for (const tool of options.tools) {
@@ -55,7 +60,9 @@ export class Session implements AsyncDisposable {
       throw new Error("Session already initialized");
     }
 
+    sessionLog("init", "connecting transport...");
     await this.transport.connect();
+    sessionLog("init", "transport connected, sending initialize request");
 
     // Send initialize control request
     await this.transport.write({
@@ -65,7 +72,9 @@ export class Session implements AsyncDisposable {
     });
 
     // Wait for init message
+    sessionLog("init", "waiting for init message from CLI...");
     for await (const msg of this.transport.messages()) {
+      sessionLog("init", `received wire message: type=${msg.type}`);
       if (msg.type === "system" && "subtype" in msg && msg.subtype === "init") {
         const initMsg = msg as WireMessage & {
           agent_id: string;
@@ -90,6 +99,8 @@ export class Session implements AsyncDisposable {
           ...Array.from(this.externalTools.keys()),
         ];
 
+        sessionLog("init", `initialized: agent=${initMsg.agent_id} conversation=${initMsg.conversation_id} model=${initMsg.model} tools=${allTools.length} (${this.externalTools.size} external)`);
+
         return {
           type: "init",
           agentId: initMsg.agent_id,
@@ -101,7 +112,108 @@ export class Session implements AsyncDisposable {
       }
     }
 
+    sessionLog("init", "ERROR: transport closed before init message received");
     throw new Error("Failed to initialize session - no init message received");
+  }
+
+  /**
+   * Send a message to the agent
+   * 
+   * @param message - Text string or multimodal content array
+   * 
+   * @example
+   * // Simple text
+   * await session.send("Hello!");
+   * 
+   * @example
+   * // With image
+   * await session.send([
+   *   { type: "text", text: "What's in this image?" },
+   *   { type: "image", source: { type: "base64", mediaType: "image/png", data: "..." } }
+   * ]);
+   */
+  async send(message: SendMessage): Promise<void> {
+    if (!this.initialized) {
+      sessionLog("send", "auto-initializing (not yet initialized)");
+      await this.initialize();
+    }
+
+    const preview = typeof message === "string"
+      ? message.slice(0, 100)
+      : Array.isArray(message) ? `[multimodal: ${message.length} parts]` : String(message).slice(0, 100);
+    sessionLog("send", `sending message: ${preview}${typeof message === "string" && message.length > 100 ? "..." : ""}`);
+
+    await this.transport.write({
+      type: "user",
+      message: { role: "user", content: message },
+    });
+    sessionLog("send", "message written to transport");
+  }
+
+  /**
+   * Stream messages from the agent
+   */
+  async *stream(): AsyncGenerator<SDKMessage> {
+    const streamStart = Date.now();
+    let yieldCount = 0;
+    let dropCount = 0;
+    let gotResult = false;
+    sessionLog("stream", `starting stream (agent=${this._agentId}, conversation=${this._conversationId})`);
+
+    for await (const wireMsg of this.transport.messages()) {
+      // Handle CLI → SDK control requests (e.g., can_use_tool, execute_external_tool)
+      if (wireMsg.type === "control_request") {
+        const controlReq = wireMsg as ControlRequest;
+        // Widen to string to allow SDK-extension subtypes not in the protocol union
+        const subtype: string = controlReq.request.subtype;
+        sessionLog("stream", `control_request: subtype=${subtype} tool=${(controlReq.request as CanUseToolControlRequest).tool_name || "N/A"}`);
+
+        if (subtype === "can_use_tool") {
+          await this.handleCanUseTool(
+            controlReq.request_id,
+            controlReq.request as CanUseToolControlRequest
+          );
+          continue;
+        }
+        if (subtype === "execute_external_tool") {
+          // SDK extension: not in protocol ControlRequestBody union, extract fields via Record
+          const rawReq = controlReq.request as Record<string, unknown>;
+          await this.handleExecuteExternalTool(
+            controlReq.request_id,
+            {
+              subtype: "execute_external_tool",
+              tool_call_id: rawReq.tool_call_id as string,
+              tool_name: rawReq.tool_name as string,
+              input: rawReq.input as Record<string, unknown>,
+            }
+          );
+          continue;
+        }
+      }
+
+      const sdkMsg = this.transformMessage(wireMsg);
+      if (sdkMsg) {
+        yieldCount++;
+        sessionLog("stream", `yield #${yieldCount}: type=${sdkMsg.type}${sdkMsg.type === "result" ? ` success=${(sdkMsg as SDKResultMessage).success} error=${(sdkMsg as SDKResultMessage).error || "none"}` : ""}`);
+        yield sdkMsg;
+
+        // Stop on result message
+        if (sdkMsg.type === "result") {
+          gotResult = true;
+          break;
+        }
+      } else {
+        dropCount++;
+        const wireMsgAny = wireMsg as unknown as Record<string, unknown>;
+        sessionLog("stream", `DROPPED wire message #${dropCount}: type=${wireMsg.type} message_type=${wireMsgAny.message_type || "N/A"} subtype=${wireMsgAny.subtype || "N/A"}`);
+      }
+    }
+
+    const elapsed = Date.now() - streamStart;
+    sessionLog("stream", `stream ended: duration=${elapsed}ms yielded=${yieldCount} dropped=${dropCount} gotResult=${gotResult}`);
+    if (!gotResult) {
+      sessionLog("stream", `WARNING: stream ended WITHOUT a result message -- transport may have closed unexpectedly`);
+    }
   }
 
   /**
@@ -115,6 +227,8 @@ export class Session implements AsyncDisposable {
       // Convert TypeBox schema to plain JSON Schema
       parameters: this.schemaToJsonSchema(tool.parameters),
     }));
+
+    sessionLog("registerTools", `registering ${toolDefs.length} external tools: ${toolDefs.map(t => t.name).join(", ")}`);
 
     await this.transport.write({
       type: "control_request",
@@ -147,58 +261,6 @@ export class Session implements AsyncDisposable {
   }
 
   /**
-   * Send a message to the agent
-   */
-  async send(message: string): Promise<void> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-
-    await this.transport.write({
-      type: "user",
-      message: { role: "user", content: message },
-    });
-  }
-
-  /**
-   * Stream messages from the agent
-   */
-  async *stream(): AsyncGenerator<SDKMessage> {
-    for await (const wireMsg of this.transport.messages()) {
-      // Handle CLI → SDK control requests (e.g., can_use_tool, execute_external_tool)
-      if (wireMsg.type === "control_request") {
-        const controlReq = wireMsg as ControlRequest;
-        const subtype = (controlReq.request as { subtype: string }).subtype;
-        
-        if (subtype === "can_use_tool") {
-          await this.handleCanUseTool(
-            controlReq.request_id,
-            controlReq.request as CanUseToolControlRequest
-          );
-          continue;
-        }
-        if (subtype === "execute_external_tool") {
-          await this.handleExecuteExternalTool(
-            controlReq.request_id,
-            controlReq.request as unknown as ExecuteExternalToolRequest
-          );
-          continue;
-        }
-      }
-
-      const sdkMsg = this.transformMessage(wireMsg);
-      if (sdkMsg) {
-        yield sdkMsg;
-
-        // Stop on result message
-        if (sdkMsg.type === "result") {
-          break;
-        }
-      }
-    }
-  }
-
-  /**
    * Handle execute_external_tool control request from CLI
    */
   private async handleExecuteExternalTool(
@@ -209,6 +271,7 @@ export class Session implements AsyncDisposable {
     
     if (!tool) {
       // Tool not found - send error result
+      sessionLog("executeExternalTool", `ERROR: unknown tool ${req.tool_name}`);
       await this.transport.write({
         type: "control_response",
         response: {
@@ -223,6 +286,7 @@ export class Session implements AsyncDisposable {
     }
 
     try {
+      sessionLog("executeExternalTool", `executing ${req.tool_name} (call_id=${req.tool_call_id})`);
       // Execute the tool
       const result = await tool.execute(req.tool_call_id, req.input);
       
@@ -237,9 +301,11 @@ export class Session implements AsyncDisposable {
           is_error: false,
         },
       });
+      sessionLog("executeExternalTool", `${req.tool_name} completed successfully`);
     } catch (err) {
       // Send error result
       const errorMessage = err instanceof Error ? err.message : String(err);
+      sessionLog("executeExternalTool", `${req.tool_name} failed: ${errorMessage}`);
       await this.transport.write({
         type: "control_response",
         response: {
@@ -262,7 +328,17 @@ export class Session implements AsyncDisposable {
   ): Promise<void> {
     let response: CanUseToolResponse;
 
-    if (this.options.canUseTool) {
+    sessionLog("canUseTool", `tool=${req.tool_name} mode=${this.options.permissionMode || "default"} requestId=${requestId}`);
+
+    // If bypassPermissions mode, auto-allow all tools
+    if (this.options.permissionMode === "bypassPermissions") {
+      sessionLog("canUseTool", `AUTO-ALLOW ${req.tool_name} (bypassPermissions)`);
+      response = {
+        behavior: "allow",
+        updatedInput: null,
+        updatedPermissions: [],
+      } satisfies CanUseToolResponseAllow;
+    } else if (this.options.canUseTool) {
       try {
         const result = await this.options.canUseTool(req.tool_name, req.input);
         if (result.behavior === "allow") {
@@ -295,6 +371,8 @@ export class Session implements AsyncDisposable {
     }
 
     // Send control_response (Claude SDK compatible format)
+    const responseBehavior = "behavior" in response ? response.behavior : "unknown";
+    sessionLog("canUseTool", `responding: requestId=${requestId} behavior=${responseBehavior}`);
     await this.transport.write({
       type: "control_response",
       response: {
@@ -303,12 +381,14 @@ export class Session implements AsyncDisposable {
         response,
       },
     });
+    sessionLog("canUseTool", `response sent for ${req.tool_name}`);
   }
 
   /**
    * Abort the current operation (interrupt without closing the session)
    */
   async abort(): Promise<void> {
+    sessionLog("abort", `aborting session (agent=${this._agentId})`);
     await this.transport.write({
       type: "control_request",
       request_id: `interrupt-${Date.now()}`,
@@ -320,6 +400,7 @@ export class Session implements AsyncDisposable {
    * Close the session
    */
   close(): void {
+    sessionLog("close", `closing session (agent=${this._agentId}, conversation=${this._conversationId})`);
     this.transport.close();
   }
 
@@ -468,12 +549,14 @@ export class Session implements AsyncDisposable {
         duration_ms: number;
         total_cost_usd?: number;
         conversation_id: string;
+        stop_reason?: string;
       };
       return {
         type: "result",
         success: msg.subtype === "success",
         result: msg.result,
         error: msg.subtype !== "success" ? msg.subtype : undefined,
+        stopReason: msg.stop_reason,
         durationMs: msg.duration_ms,
         totalCostUsd: msg.total_cost_usd,
         conversationId: msg.conversation_id,

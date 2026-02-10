@@ -1,10 +1,16 @@
 /**
  * SDK Validation
  *
- * Validates SessionOptions before spawning the CLI.
+ * Validates user-provided options before spawning the CLI.
  */
 
-import type { SessionOptions, MemoryItem, CreateBlock } from "./types.js";
+import type { 
+  CreateSessionOptions,
+  CreateAgentOptions,
+  MemoryItem, 
+  CreateBlock,
+  SystemPromptPreset 
+} from "./types.js";
 
 /**
  * Extract block labels from memory items.
@@ -20,11 +26,41 @@ function getBlockLabels(memory: MemoryItem[]): string[] {
 }
 
 /**
- * Validate SessionOptions before spawning CLI.
- * Throws an error if validation fails.
+ * Validate systemPrompt preset value.
  */
-export function validateSessionOptions(options: SessionOptions): void {
-  // If memory is specified, validate that convenience props match included blocks
+function validateSystemPromptPreset(preset: string): void {
+  const validPresets = [
+    "default",
+    "letta-claude",
+    "letta-codex",
+    "letta-gemini",
+    "claude",
+    "codex",
+    "gemini",
+  ];
+  if (!validPresets.includes(preset)) {
+    throw new Error(
+      `Invalid system prompt preset '${preset}'. ` +
+        `Valid presets: ${validPresets.join(", ")}`
+    );
+  }
+}
+
+/**
+ * Validate CreateSessionOptions (used by createSession and resumeSession).
+ */
+export function validateCreateSessionOptions(options: CreateSessionOptions): void {
+  // Validate systemPrompt preset if provided
+  if (options.systemPrompt !== undefined) {
+    validateSystemPromptPreset(options.systemPrompt);
+  }
+}
+
+/**
+ * Validate CreateAgentOptions (used by createAgent).
+ */
+export function validateCreateAgentOptions(options: CreateAgentOptions): void {
+  // Validate memory/persona consistency
   if (options.memory !== undefined) {
     const blockLabels = getBlockLabels(options.memory);
 
@@ -41,20 +77,19 @@ export function validateSessionOptions(options: SessionOptions): void {
           "Either add 'human' to memory array or remove the human option."
       );
     }
-
-    if (options.project !== undefined && !blockLabels.includes("project")) {
-      throw new Error(
-        "Cannot set 'project' value - block not included in 'memory'. " +
-          "Either add 'project' to memory array or remove the project option."
-      );
-    }
   }
 
-  // Validate systemPrompt preset if provided
+  // Validate systemPrompt preset if provided as preset object
   if (
     options.systemPrompt !== undefined &&
     typeof options.systemPrompt === "object"
   ) {
+    validateSystemPromptPreset(options.systemPrompt.preset);
+  } else if (
+    options.systemPrompt !== undefined &&
+    typeof options.systemPrompt === "string"
+  ) {
+    // Check if it's a preset name (if so, validate it)
     const validPresets = [
       "default",
       "letta-claude",
@@ -63,50 +98,10 @@ export function validateSessionOptions(options: SessionOptions): void {
       "claude",
       "codex",
       "gemini",
-    ];
-    if (!validPresets.includes(options.systemPrompt.preset)) {
-      throw new Error(
-        `Invalid system prompt preset '${options.systemPrompt.preset}'. ` +
-          `Valid presets: ${validPresets.join(", ")}`
-      );
+    ] as const;
+    if (validPresets.includes(options.systemPrompt as SystemPromptPreset)) {
+      validateSystemPromptPreset(options.systemPrompt);
     }
+    // If not a preset, it's a custom string - no validation needed
   }
-
-  // Validate conversation options
-  if (options.conversationId && options.newConversation) {
-    throw new Error(
-      "Cannot use both 'conversationId' and 'newConversation'. " +
-        "Use conversationId to resume a specific conversation, or newConversation to create a new one."
-    );
-  }
-
-  if (options.continue && options.conversationId) {
-    throw new Error(
-      "Cannot use both 'continue' and 'conversationId'. " +
-        "Use continue to resume the last session, or conversationId to resume a specific conversation."
-    );
-  }
-
-  if (options.continue && options.newConversation) {
-    throw new Error(
-      "Cannot use both 'continue' and 'newConversation'. " +
-        "Use continue to resume the last session, or newConversation to create a new one."
-    );
-  }
-
-  if (options.defaultConversation && options.conversationId) {
-    throw new Error(
-      "Cannot use both 'defaultConversation' and 'conversationId'. " +
-        "Use defaultConversation with agentId, or conversationId alone."
-    );
-  }
-
-  if (options.defaultConversation && options.newConversation) {
-    throw new Error(
-      "Cannot use both 'defaultConversation' and 'newConversation'."
-    );
-  }
-
-  // Note: Validations that require agentId context happen in transport.ts buildArgs()
-  // because agentId is passed separately to resumeSession(), not in SessionOptions
 }
