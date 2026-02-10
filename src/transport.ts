@@ -17,7 +17,7 @@ export class SubprocessTransport {
   private process: ChildProcess | null = null;
   private stdout: Interface | null = null;
   private messageQueue: WireMessage[] = [];
-  private messageResolvers: Array<(msg: WireMessage) => void> = [];
+  private messageResolvers: Array<(msg: WireMessage | null) => void> = [];
   private closed = false;
   private agentId?: string;
   private wireMessageCount = 0;
@@ -96,7 +96,7 @@ export class SubprocessTransport {
       this.closed = true;
       // Flush pending readers so they don't hang forever (see comment above)
       for (const resolve of this.messageResolvers) {
-        resolve(null as unknown as WireMessage);
+        resolve(null);
       }
       this.messageResolvers = [];
     });
@@ -171,7 +171,7 @@ export class SubprocessTransport {
 
     // Resolve any pending readers with null
     for (const resolve of this.messageResolvers) {
-      resolve(null as unknown as WireMessage);
+      resolve(null);
     }
     this.messageResolvers = [];
   }
