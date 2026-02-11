@@ -6,6 +6,7 @@ updates:
       interval: "daily"
     allow:
       - dependency-name: "@letta-ai/letta-code"
+    versioning-strategy: "increase"
     labels:
       - "dependencies"
     commit-message:
