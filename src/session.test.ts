@@ -1,5 +1,151 @@
 import { describe, expect, test } from "bun:test";
 import { Session } from "./session.js";
+import type { SDKMessage, WireMessage } from "./types.js";
+
+const BUFFER_LIMIT = 100;
+
+class MockTransport {
+  writes: unknown[] = [];
+  private queue: WireMessage[] = [];
+  private resolvers: Array<(msg: WireMessage | null) => void> = [];
+  private closed = false;
+
+  async connect(): Promise<void> {
+    return;
+  }
+
+  async write(msg: unknown): Promise<void> {
+    this.writes.push(msg);
+  }
+
+  async *messages(): AsyncGenerator<WireMessage> {
+    while (true) {
+      const msg = await this.read();
+      if (msg === null) {
+        return;
+      }
+      yield msg;
+    }
+  }
+
+  push(msg: WireMessage): void {
+    if (this.closed) {
+      return;
+    }
+    if (this.resolvers.length > 0) {
+      const resolve = this.resolvers.shift()!;
+      resolve(msg);
+      return;
+    }
+    this.queue.push(msg);
+  }
+
+  close(): void {
+    this.end();
+  }
+
+  end(): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    for (const resolve of this.resolvers) {
+      resolve(null);
+    }
+    this.resolvers = [];
+  }
+
+  private async read(): Promise<WireMessage | null> {
+    if (this.queue.length > 0) {
+      return this.queue.shift()!;
+    }
+    if (this.closed) {
+      return null;
+    }
+    return new Promise((resolve) => {
+      this.resolvers.push(resolve);
+    });
+  }
+}
+
+function attachMockTransport(session: Session, transport: MockTransport): void {
+  (session as unknown as { transport: MockTransport }).transport = transport;
+}
+
+function createInitMessage(): WireMessage {
+  return {
+    type: "system",
+    subtype: "init",
+    agent_id: "agent-1",
+    session_id: "session-1",
+    conversation_id: "conversation-1",
+    model: "claude-sonnet-4",
+    tools: ["Bash"],
+  } as WireMessage;
+}
+
+function createAssistantMessage(index: number): WireMessage {
+  return {
+    type: "message",
+    message_type: "assistant_message",
+    uuid: `assistant-${index}`,
+    content: `msg-${index}`,
+  } as WireMessage;
+}
+
+function createResultMessage(): WireMessage {
+  return {
+    type: "result",
+    subtype: "success",
+    result: "done",
+    duration_ms: 1,
+    conversation_id: "conversation-1",
+    stop_reason: "end_turn",
+  } as WireMessage;
+}
+
+function createCanUseToolRequest(
+  requestId: string,
+  toolName: string,
+  input: Record<string, unknown>,
+): WireMessage {
+  return {
+    type: "control_request",
+    request_id: requestId,
+    request: {
+      subtype: "can_use_tool",
+      tool_name: toolName,
+      tool_call_id: `${requestId}-tool-call`,
+      input,
+      permission_suggestions: [],
+      blocked_path: null,
+    },
+  } as WireMessage;
+}
+
+function findControlResponseByRequestId(
+  writes: unknown[],
+  requestId: string,
+): Record<string, unknown> | undefined {
+  return writes.find((msg) => {
+    const payload = msg as { type?: string; response?: { request_id?: string } };
+    return payload.type === "control_response" && payload.response?.request_id === requestId;
+  }) as Record<string, unknown> | undefined;
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 1000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`Timed out after ${timeoutMs}ms`);
+}
 
 describe("Session", () => {
   describe("handleCanUseTool with bypassPermissions", () => {
@@ -134,7 +280,7 @@ describe("Session", () => {
     test("uses canUseTool callback when provided and not bypassPermissions", async () => {
       const session = new Session({
         permissionMode: "default",
-        canUseTool: async (toolName, input) => {
+        canUseTool: async (toolName) => {
           if (toolName === "Bash") {
             return { behavior: "allow" };
           }
@@ -157,6 +303,113 @@ describe("Session", () => {
           },
         },
       });
+    });
+  });
+
+  describe("background pump parity", () => {
+    test("handles can_use_tool control requests before stream iteration starts", async () => {
+      let callbackInvocations = 0;
+      const session = new Session({
+        permissionMode: "default",
+        canUseTool: () => {
+          callbackInvocations += 1;
+          return { behavior: "allow" };
+        },
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        transport.push(
+          createCanUseToolRequest("pre-stream-approval", "Bash", {
+            command: "pwd",
+          }),
+        );
+
+        await waitFor(() =>
+          findControlResponseByRequestId(
+            transport.writes,
+            "pre-stream-approval",
+          ) !== undefined,
+        );
+
+        expect(callbackInvocations).toBe(1);
+        expect(
+          findControlResponseByRequestId(
+            transport.writes,
+            "pre-stream-approval",
+          ),
+        ).toMatchObject({
+          type: "control_response",
+          response: {
+            subtype: "success",
+            request_id: "pre-stream-approval",
+            response: {
+              behavior: "allow",
+            },
+          },
+        });
+      } finally {
+        session.close();
+      }
+    });
+
+    test("bounds buffered stream messages and drops oldest deterministically", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      const assistantCount = BUFFER_LIMIT + 20;
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        for (let i = 1; i <= assistantCount; i++) {
+          transport.push(createAssistantMessage(i));
+        }
+        transport.push(createResultMessage());
+        transport.push(
+          createCanUseToolRequest("post-result-marker", "EnterPlanMode", {}),
+        );
+
+        await waitFor(() =>
+          findControlResponseByRequestId(
+            transport.writes,
+            "post-result-marker",
+          ) !== undefined,
+        );
+
+        const streamed: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          streamed.push(msg);
+        }
+
+        const assistants = streamed.filter(
+          (msg): msg is Extract<SDKMessage, { type: "assistant" }> =>
+            msg.type === "assistant",
+        );
+
+        const expectedAssistantCount = BUFFER_LIMIT - 1;
+        const expectedFirstAssistantIndex =
+          assistantCount - expectedAssistantCount + 1;
+
+        expect(assistants.length).toBe(expectedAssistantCount);
+        expect(assistants[0]?.content).toBe(
+          `msg-${expectedFirstAssistantIndex}`,
+        );
+        expect(assistants[assistants.length - 1]?.content).toBe(
+          `msg-${assistantCount}`,
+        );
+        expect(streamed[streamed.length - 1]?.type).toBe("result");
+      } finally {
+        session.close();
+      }
     });
   });
 });

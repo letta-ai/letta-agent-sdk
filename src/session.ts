@@ -33,6 +33,8 @@ function sessionLog(tag: string, ...args: unknown[]) {
   if (process.env.DEBUG_SDK) console.error(`[SDK-Session] [${tag}]`, ...args);
 }
 
+const MAX_BUFFERED_STREAM_MESSAGES = 100;
+
 export class Session implements AsyncDisposable {
   private transport: SubprocessTransport;
   private _agentId: string | null = null;
@@ -40,7 +42,11 @@ export class Session implements AsyncDisposable {
   private _conversationId: string | null = null;
   private initialized = false;
   private externalTools: Map<string, AnyAgentTool> = new Map();
-
+  private streamQueue: SDKMessage[] = [];
+  private streamResolvers: Array<(msg: SDKMessage | null) => void> = [];
+  private pumpPromise: Promise<void> | null = null;
+  private pumpClosed = false;
+  private droppedStreamMessages = 0;
 
   constructor(
     private options: InternalSessionOptions = {}
@@ -79,6 +85,16 @@ export class Session implements AsyncDisposable {
     sessionLog("init", "waiting for init message from CLI...");
     for await (const msg of this.transport.messages()) {
       sessionLog("init", `received wire message: type=${msg.type}`);
+
+      if (msg.type === "control_request") {
+        const handled = await this.handleControlRequest(msg as ControlRequest);
+        if (!handled) {
+          const wireMsgAny = msg as unknown as Record<string, unknown>;
+          sessionLog("init", `DROPPED unsupported control_request: subtype=${(wireMsgAny.request as Record<string, unknown>)?.subtype || "N/A"}`);
+        }
+        continue;
+      }
+
       if (msg.type === "system" && "subtype" in msg && msg.subtype === "init") {
         const initMsg = msg as WireMessage & {
           agent_id: string;
@@ -91,6 +107,7 @@ export class Session implements AsyncDisposable {
         this._sessionId = initMsg.session_id;
         this._conversationId = initMsg.conversation_id;
         this.initialized = true;
+        this.startBackgroundPump();
 
         // Register external tools with CLI
         if (this.externalTools.size > 0) {
@@ -160,64 +177,142 @@ export class Session implements AsyncDisposable {
   async *stream(): AsyncGenerator<SDKMessage> {
     const streamStart = Date.now();
     let yieldCount = 0;
-    let dropCount = 0;
     let gotResult = false;
+
+    this.startBackgroundPump();
     sessionLog("stream", `starting stream (agent=${this._agentId}, conversation=${this._conversationId})`);
 
-    for await (const wireMsg of this.transport.messages()) {
-      // Handle CLI → SDK control requests (e.g., can_use_tool, execute_external_tool)
-      if (wireMsg.type === "control_request") {
-        const controlReq = wireMsg as ControlRequest;
-        // Widen to string to allow SDK-extension subtypes not in the protocol union
-        const subtype: string = controlReq.request.subtype;
-        sessionLog("stream", `control_request: subtype=${subtype} tool=${(controlReq.request as CanUseToolControlRequest).tool_name || "N/A"}`);
-
-        if (subtype === "can_use_tool") {
-          await this.handleCanUseTool(
-            controlReq.request_id,
-            controlReq.request as CanUseToolControlRequest
-          );
-          continue;
-        }
-        if (subtype === "execute_external_tool") {
-          // SDK extension: not in protocol ControlRequestBody union, extract fields via Record
-          const rawReq = controlReq.request as Record<string, unknown>;
-          await this.handleExecuteExternalTool(
-            controlReq.request_id,
-            {
-              subtype: "execute_external_tool",
-              tool_call_id: rawReq.tool_call_id as string,
-              tool_name: rawReq.tool_name as string,
-              input: rawReq.input as Record<string, unknown>,
-            }
-          );
-          continue;
-        }
+    while (true) {
+      const sdkMsg = await this.nextBufferedMessage();
+      if (!sdkMsg) {
+        break;
       }
 
-      const sdkMsg = this.transformMessage(wireMsg);
-      if (sdkMsg) {
-        yieldCount++;
-        sessionLog("stream", `yield #${yieldCount}: type=${sdkMsg.type}${sdkMsg.type === "result" ? ` success=${(sdkMsg as SDKResultMessage).success} error=${(sdkMsg as SDKResultMessage).error || "none"}` : ""}`);
-        yield sdkMsg;
+      yieldCount++;
+      sessionLog("stream", `yield #${yieldCount}: type=${sdkMsg.type}${sdkMsg.type === "result" ? ` success=${(sdkMsg as SDKResultMessage).success} error=${(sdkMsg as SDKResultMessage).error || "none"}` : ""}`);
+      yield sdkMsg;
 
-        // Stop on result message
-        if (sdkMsg.type === "result") {
-          gotResult = true;
-          break;
-        }
-      } else {
-        dropCount++;
-        const wireMsgAny = wireMsg as unknown as Record<string, unknown>;
-        sessionLog("stream", `DROPPED wire message #${dropCount}: type=${wireMsg.type} message_type=${wireMsgAny.message_type || "N/A"} subtype=${wireMsgAny.subtype || "N/A"}`);
+      // Stop on result message
+      if (sdkMsg.type === "result") {
+        gotResult = true;
+        break;
       }
     }
 
     const elapsed = Date.now() - streamStart;
-    sessionLog("stream", `stream ended: duration=${elapsed}ms yielded=${yieldCount} dropped=${dropCount} gotResult=${gotResult}`);
+    sessionLog("stream", `stream ended: duration=${elapsed}ms yielded=${yieldCount} dropped=${this.droppedStreamMessages} gotResult=${gotResult}`);
     if (!gotResult) {
-      sessionLog("stream", `WARNING: stream ended WITHOUT a result message -- transport may have closed unexpectedly`);
+      sessionLog("stream", "WARNING: stream ended WITHOUT a result message -- transport may have closed unexpectedly");
     }
+  }
+
+  private startBackgroundPump(): void {
+    if (this.pumpPromise) {
+      return;
+    }
+
+    this.pumpClosed = false;
+    this.pumpPromise = this.runBackgroundPump()
+      .catch((err) => {
+        sessionLog("pump", `ERROR: ${err instanceof Error ? err.message : String(err)}`);
+      })
+      .finally(() => {
+        this.pumpClosed = true;
+        this.resolveAllStreamWaiters(null);
+      });
+  }
+
+  private async runBackgroundPump(): Promise<void> {
+    sessionLog("pump", "background pump started");
+
+    for await (const wireMsg of this.transport.messages()) {
+      if (wireMsg.type === "control_request") {
+        const handled = await this.handleControlRequest(wireMsg as ControlRequest);
+        if (!handled) {
+          const wireMsgAny = wireMsg as unknown as Record<string, unknown>;
+          sessionLog("pump", `DROPPED unsupported control_request: subtype=${(wireMsgAny.request as Record<string, unknown>)?.subtype || "N/A"}`);
+        }
+        continue;
+      }
+
+      const sdkMsg = this.transformMessage(wireMsg);
+      if (sdkMsg) {
+        this.enqueueStreamMessage(sdkMsg);
+      } else {
+        const wireMsgAny = wireMsg as unknown as Record<string, unknown>;
+        sessionLog("pump", `DROPPED wire message: type=${wireMsg.type} message_type=${wireMsgAny.message_type || "N/A"} subtype=${wireMsgAny.subtype || "N/A"}`);
+      }
+    }
+
+    sessionLog("pump", "background pump ended");
+  }
+
+  private async handleControlRequest(controlReq: ControlRequest): Promise<boolean> {
+    // Widen to string to allow SDK-extension subtypes not in the protocol union
+    const subtype: string = controlReq.request.subtype;
+    sessionLog("pump", `control_request: subtype=${subtype} tool=${(controlReq.request as CanUseToolControlRequest).tool_name || "N/A"}`);
+
+    if (subtype === "can_use_tool") {
+      await this.handleCanUseTool(
+        controlReq.request_id,
+        controlReq.request as CanUseToolControlRequest
+      );
+      return true;
+    }
+
+    if (subtype === "execute_external_tool") {
+      // SDK extension: not in protocol ControlRequestBody union, extract fields via Record
+      const rawReq = controlReq.request as Record<string, unknown>;
+      await this.handleExecuteExternalTool(
+        controlReq.request_id,
+        {
+          subtype: "execute_external_tool",
+          tool_call_id: rawReq.tool_call_id as string,
+          tool_name: rawReq.tool_name as string,
+          input: rawReq.input as Record<string, unknown>,
+        }
+      );
+      return true;
+    }
+
+    return false;
+  }
+
+  private enqueueStreamMessage(msg: SDKMessage): void {
+    if (this.streamResolvers.length > 0) {
+      const resolve = this.streamResolvers.shift()!;
+      resolve(msg);
+      return;
+    }
+
+    if (this.streamQueue.length >= MAX_BUFFERED_STREAM_MESSAGES) {
+      this.streamQueue.shift();
+      this.droppedStreamMessages++;
+      sessionLog("pump", `stream queue overflow: dropped oldest message (total_dropped=${this.droppedStreamMessages}, max=${MAX_BUFFERED_STREAM_MESSAGES})`);
+    }
+
+    this.streamQueue.push(msg);
+  }
+
+  private async nextBufferedMessage(): Promise<SDKMessage | null> {
+    if (this.streamQueue.length > 0) {
+      return this.streamQueue.shift()!;
+    }
+
+    if (this.pumpClosed) {
+      return null;
+    }
+
+    return new Promise((resolve) => {
+      this.streamResolvers.push(resolve);
+    });
+  }
+
+  private resolveAllStreamWaiters(msg: SDKMessage | null): void {
+    for (const resolve of this.streamResolvers) {
+      resolve(msg);
+    }
+    this.streamResolvers = [];
   }
 
   /**
@@ -430,6 +525,8 @@ export class Session implements AsyncDisposable {
   close(): void {
     sessionLog("close", `closing session (agent=${this._agentId}, conversation=${this._conversationId})`);
     this.transport.close();
+    this.pumpClosed = true;
+    this.resolveAllStreamWaiters(null);
   }
 
   /**
