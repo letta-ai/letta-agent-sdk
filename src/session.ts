@@ -607,8 +607,8 @@ export class Session implements AsyncDisposable {
         };
       }
 
-      // Tool call message
-      if (msg.message_type === "tool_call_message") {
+      // Tool call message (tool_call_message = auto-executed, approval_request_message = needs approval)
+      if (msg.message_type === "tool_call_message" || msg.message_type === "approval_request_message") {
         const toolCall = msg.tool_calls?.[0] || msg.tool_call;
         if (toolCall) {
           let toolInput: Record<string, unknown> = {};
