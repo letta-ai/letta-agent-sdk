@@ -208,6 +208,9 @@ export interface InternalSessionOptions {
   persona?: string;  // Convenience for persona block
   human?: string;    // Convenience for human block
 
+  // Tags (only for new agents)
+  tags?: string[];
+
   // Permissions
   allowedTools?: string[];
   disallowedTools?: string[];
