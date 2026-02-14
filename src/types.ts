@@ -217,6 +217,9 @@ export interface InternalSessionOptions {
   // Custom tools
   tools?: AnyAgentTool[];
 
+  // Memory filesystem
+  memfs?: boolean;  // true = --memfs, false = --no-memfs, undefined = don't change
+
   // Process settings
   cwd?: string;
 }
@@ -258,6 +261,9 @@ export interface CreateSessionOptions {
    * These tools are registered with the CLI and executed when the LLM calls them.
    */
   tools?: AnyAgentTool[];
+
+  /** Enable memory filesystem (git-backed persistent memory). Requires Letta Cloud. */
+  memfs?: boolean;
 }
 
 /**
@@ -312,6 +318,9 @@ export interface CreateAgentOptions {
    * These tools are registered with the CLI and executed when the LLM calls them.
    */
   tools?: AnyAgentTool[];
+
+  /** Enable memory filesystem (git-backed persistent memory). Requires Letta Cloud. */
+  memfs?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -328,6 +337,7 @@ export interface SDKInitMessage {
   conversationId: string;
   model: string;
   tools: string[];
+  memfsEnabled?: boolean;
 }
 
 export interface SDKAssistantMessage {

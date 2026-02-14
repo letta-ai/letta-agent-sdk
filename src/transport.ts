@@ -362,6 +362,13 @@ export class SubprocessTransport {
       args.push("--disallowedTools", this.options.disallowedTools.join(","));
     }
 
+    // Memory filesystem
+    if (this.options.memfs === true) {
+      args.push("--memfs");
+    } else if (this.options.memfs === false) {
+      args.push("--no-memfs");
+    }
+
     return args;
   }
 

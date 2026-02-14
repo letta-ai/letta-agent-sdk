@@ -102,6 +102,7 @@ export class Session implements AsyncDisposable {
           conversation_id: string;
           model: string;
           tools: string[];
+          memfs_enabled?: boolean;
         };
         this._agentId = initMsg.agent_id;
         this._sessionId = initMsg.session_id;
@@ -129,6 +130,7 @@ export class Session implements AsyncDisposable {
           conversationId: initMsg.conversation_id,
           model: initMsg.model,
           tools: allTools,
+          memfsEnabled: initMsg.memfs_enabled,
         };
       }
     }
@@ -569,6 +571,7 @@ export class Session implements AsyncDisposable {
         conversation_id: string;
         model: string;
         tools: string[];
+        memfs_enabled?: boolean;
       };
       return {
         type: "init",
@@ -577,6 +580,7 @@ export class Session implements AsyncDisposable {
         conversationId: msg.conversation_id,
         model: msg.model,
         tools: msg.tools,
+        memfsEnabled: msg.memfs_enabled,
       };
     }
 
