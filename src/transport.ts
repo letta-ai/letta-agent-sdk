@@ -364,9 +364,7 @@ export class SubprocessTransport {
 
     // Tags
     if (this.options.tags && this.options.tags.length > 0) {
-      for (const tag of this.options.tags) {
-        args.push("--tags", tag);
-      }
+      args.push("--tags", this.options.tags.join(","));
     }
 
     return args;
