@@ -258,6 +258,9 @@ export interface CreateSessionOptions {
    * These tools are registered with the CLI and executed when the LLM calls them.
    */
   tools?: AnyAgentTool[];
+
+  /** Tags to organize and categorize the agent */
+  tags?: string[];
 }
 
 /**
