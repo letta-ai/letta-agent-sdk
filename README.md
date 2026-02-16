@@ -32,6 +32,7 @@ import { createAgent, resumeSession } from "@letta-ai/letta-code-sdk";
 
 const agentId = await createAgent({
   persona: "You are a helpful coding assistant for TypeScript projects.",
+  memfs: true, // Enable git-backed memory filesystem for this new agent
 });
 
 await using session = resumeSession(agentId);

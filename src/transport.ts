@@ -367,6 +367,11 @@ export class SubprocessTransport {
       args.push("--tags", this.options.tags.join(","));
     }
 
+    // Memory filesystem
+    if (this.options.memfs) {
+      args.push("--memfs");
+    }
+
     return args;
   }
 

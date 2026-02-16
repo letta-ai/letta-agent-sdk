@@ -30,6 +30,7 @@ describe("transport args", () => {
     permissionMode?: "default" | "acceptEdits" | "plan" | "bypassPermissions";
     allowedTools?: string[];
     disallowedTools?: string[];
+    memfs?: boolean;
   } = {}): string[] {
     const transport = new SubprocessTransport(options);
     // Access private helper for deterministic argument testing.
@@ -65,5 +66,15 @@ describe("transport args", () => {
     expect(args).toContain("Read,Bash");
     expect(args).toContain("--disallowedTools");
     expect(args).toContain("EnterPlanMode,ExitPlanMode");
+  });
+
+  test("memfs true forwards --memfs", () => {
+    const args = buildArgsFor({ memfs: true });
+    expect(args).toContain("--memfs");
+  });
+
+  test("memfs false/undefined does not forward --memfs", () => {
+    expect(buildArgsFor({ memfs: false })).not.toContain("--memfs");
+    expect(buildArgsFor({})).not.toContain("--memfs");
   });
 });

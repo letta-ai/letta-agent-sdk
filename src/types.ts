@@ -211,6 +211,9 @@ export interface InternalSessionOptions {
   // Tags (only for new agents)
   tags?: string[];
 
+  // Memory filesystem (only for new agents)
+  memfs?: boolean;
+
   // Permissions
   allowedTools?: string[];
   disallowedTools?: string[];
@@ -318,6 +321,12 @@ export interface CreateAgentOptions {
 
   /** Tags to organize and categorize the agent */
   tags?: string[];
+
+  /**
+   * Enable git-backed memory filesystem for this newly created agent.
+   * Maps to Letta Code CLI `--memfs` during agent creation.
+   */
+  memfs?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════
