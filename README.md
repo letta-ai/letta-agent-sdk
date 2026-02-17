@@ -50,6 +50,25 @@ for await (const msg of session.stream()) {
 
 By default, `resumeSession(agentId)` continues the agent’s default conversation. To start a fresh thread, use `createSession(agentId)` (see docs).
 
+## Session configuration
+
+The SDK surfaces the same runtime controls as Letta Code CLI for skills, reminders, and sleeptime:
+
+```ts
+import { createSession } from "@letta-ai/letta-code-sdk";
+
+const session = createSession("agent-123", {
+  skillSources: ["project", "global"], // [] disables all skills (--no-skills)
+  systemInfoReminder: false, // maps to --no-system-info-reminder
+  sleeptime: {
+    trigger: "step-count", // off | step-count | compaction-event
+    behavior: "reminder", // reminder | auto-launch
+    stepCount: 8,
+  },
+  memfs: true, // true -> --memfs, false -> --no-memfs
+});
+```
+
 ## Links
 
 - Docs: https://docs.letta.com/letta-code-sdk

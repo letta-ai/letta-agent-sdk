@@ -368,8 +368,39 @@ export class SubprocessTransport {
     }
 
     // Memory filesystem
-    if (this.options.memfs) {
+    if (this.options.memfs === true) {
       args.push("--memfs");
+    } else if (this.options.memfs === false) {
+      args.push("--no-memfs");
+    }
+
+    // Skills sources
+    if (this.options.skillSources !== undefined) {
+      const sources = [...new Set(this.options.skillSources)];
+      if (sources.length === 0) {
+        args.push("--no-skills");
+      } else {
+        args.push("--skill-sources", sources.join(","));
+      }
+    }
+
+    // Session context reminder toggle
+    if (this.options.systemInfoReminder === false) {
+      args.push("--no-system-info-reminder");
+    }
+
+    // Sleeptime/reflection settings
+    if (this.options.sleeptime?.trigger !== undefined) {
+      args.push("--reflection-trigger", this.options.sleeptime.trigger);
+    }
+    if (this.options.sleeptime?.behavior !== undefined) {
+      args.push("--reflection-behavior", this.options.sleeptime.behavior);
+    }
+    if (this.options.sleeptime?.stepCount !== undefined) {
+      args.push(
+        "--reflection-step-count",
+        String(this.options.sleeptime.stepCount),
+      );
     }
 
     return args;

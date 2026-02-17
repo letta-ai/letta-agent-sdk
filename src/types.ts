@@ -62,6 +62,35 @@ export type MessageContentItem = TextContent | ImageContent;
 export type SendMessage = string | MessageContentItem[];
 
 // ═══════════════════════════════════════════════════════════════
+// SKILLS / REMINDER / SLEEPTIME TYPES
+// ═══════════════════════════════════════════════════════════════
+
+export type SkillSource = "bundled" | "global" | "agent" | "project";
+
+export type SleeptimeTrigger = "off" | "step-count" | "compaction-event";
+
+export type SleeptimeBehavior = "reminder" | "auto-launch";
+
+/**
+ * Sleeptime settings exposed through SDK options.
+ * Any omitted fields preserve server/CLI defaults.
+ */
+export interface SleeptimeOptions {
+  trigger?: SleeptimeTrigger;
+  behavior?: SleeptimeBehavior;
+  stepCount?: number;
+}
+
+/**
+ * Fully-resolved sleeptime settings emitted by init messages.
+ */
+export interface EffectiveSleeptimeSettings {
+  trigger: SleeptimeTrigger;
+  behavior: SleeptimeBehavior;
+  stepCount: number;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // SYSTEM PROMPT TYPES
 // ═══════════════════════════════════════════════════════════════
 
@@ -214,6 +243,11 @@ export interface InternalSessionOptions {
   // Memory filesystem (only for new agents)
   memfs?: boolean;
 
+  // Skills/reminders
+  skillSources?: SkillSource[];
+  systemInfoReminder?: boolean;
+  sleeptime?: SleeptimeOptions;
+
   // Permissions
   allowedTools?: string[];
   disallowedTools?: string[];
@@ -255,6 +289,29 @@ export interface CreateSessionOptions {
 
   /** Working directory for the CLI process */
   cwd?: string;
+
+  /**
+   * Enable/disable memory filesystem for this agent before running.
+   * true -> `--memfs`, false -> `--no-memfs`, undefined -> leave unchanged.
+   */
+  memfs?: boolean;
+
+  /**
+   * Restrict available skills by source.
+   * Empty array disables all skills (`--no-skills`).
+   */
+  skillSources?: SkillSource[];
+
+  /**
+   * Toggle first-turn system info reminder (device/git/cwd context).
+   * false -> `--no-system-info-reminder`.
+   */
+  systemInfoReminder?: boolean;
+
+  /**
+   * Configure sleeptime (reflection) settings, equivalent to `/sleeptime`.
+   */
+  sleeptime?: SleeptimeOptions;
 
   /** Custom permission callback - called when tool needs approval */
   canUseTool?: CanUseToolCallback;
@@ -327,6 +384,23 @@ export interface CreateAgentOptions {
    * Maps to Letta Code CLI `--memfs` during agent creation.
    */
   memfs?: boolean;
+
+  /**
+   * Restrict available skills by source.
+   * Empty array disables all skills (`--no-skills`).
+   */
+  skillSources?: SkillSource[];
+
+  /**
+   * Toggle first-turn system info reminder (device/git/cwd context).
+   * false -> `--no-system-info-reminder`.
+   */
+  systemInfoReminder?: boolean;
+
+  /**
+   * Configure sleeptime (reflection) settings, equivalent to `/sleeptime`.
+   */
+  sleeptime?: SleeptimeOptions;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -343,6 +417,10 @@ export interface SDKInitMessage {
   conversationId: string;
   model: string;
   tools: string[];
+  memfsEnabled?: boolean;
+  skillSources?: SkillSource[];
+  systemInfoReminderEnabled?: boolean;
+  sleeptime?: EffectiveSleeptimeSettings;
 }
 
 export interface SDKAssistantMessage {

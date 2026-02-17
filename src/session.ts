@@ -102,6 +102,12 @@ export class Session implements AsyncDisposable {
           conversation_id: string;
           model: string;
           tools: string[];
+          memfs_enabled?: boolean;
+          skill_sources?: Array<"bundled" | "global" | "agent" | "project">;
+          system_info_reminder_enabled?: boolean;
+          reflection_trigger?: "off" | "step-count" | "compaction-event";
+          reflection_behavior?: "reminder" | "auto-launch";
+          reflection_step_count?: number;
         };
         this._agentId = initMsg.agent_id;
         this._sessionId = initMsg.session_id;
@@ -129,6 +135,19 @@ export class Session implements AsyncDisposable {
           conversationId: initMsg.conversation_id,
           model: initMsg.model,
           tools: allTools,
+          memfsEnabled: initMsg.memfs_enabled,
+          skillSources: initMsg.skill_sources,
+          systemInfoReminderEnabled: initMsg.system_info_reminder_enabled,
+          sleeptime:
+            initMsg.reflection_trigger &&
+            initMsg.reflection_behavior &&
+            typeof initMsg.reflection_step_count === "number"
+              ? {
+                  trigger: initMsg.reflection_trigger,
+                  behavior: initMsg.reflection_behavior,
+                  stepCount: initMsg.reflection_step_count,
+                }
+              : undefined,
         };
       }
     }
@@ -569,6 +588,12 @@ export class Session implements AsyncDisposable {
         conversation_id: string;
         model: string;
         tools: string[];
+        memfs_enabled?: boolean;
+        skill_sources?: Array<"bundled" | "global" | "agent" | "project">;
+        system_info_reminder_enabled?: boolean;
+        reflection_trigger?: "off" | "step-count" | "compaction-event";
+        reflection_behavior?: "reminder" | "auto-launch";
+        reflection_step_count?: number;
       };
       return {
         type: "init",
@@ -577,6 +602,19 @@ export class Session implements AsyncDisposable {
         conversationId: msg.conversation_id,
         model: msg.model,
         tools: msg.tools,
+        memfsEnabled: msg.memfs_enabled,
+        skillSources: msg.skill_sources,
+        systemInfoReminderEnabled: msg.system_info_reminder_enabled,
+        sleeptime:
+          msg.reflection_trigger &&
+          msg.reflection_behavior &&
+          typeof msg.reflection_step_count === "number"
+            ? {
+                trigger: msg.reflection_trigger,
+                behavior: msg.reflection_behavior,
+                stepCount: msg.reflection_step_count,
+              }
+            : undefined,
       };
     }
 

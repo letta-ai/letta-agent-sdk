@@ -72,7 +72,9 @@ function attachMockTransport(session: Session, transport: MockTransport): void {
   (session as unknown as { transport: MockTransport }).transport = transport;
 }
 
-function createInitMessage(): WireMessage {
+function createInitMessage(
+  overrides: Record<string, unknown> = {},
+): WireMessage {
   return {
     type: "system",
     subtype: "init",
@@ -81,6 +83,7 @@ function createInitMessage(): WireMessage {
     conversation_id: "conversation-1",
     model: "claude-sonnet-4",
     tools: ["Bash"],
+    ...overrides,
   } as WireMessage;
 }
 
@@ -148,6 +151,37 @@ async function waitFor(
 }
 
 describe("Session", () => {
+  test("initialize returns optional init settings when provided by CLI", async () => {
+    const session = new Session();
+    const transport = new MockTransport();
+    attachMockTransport(session, transport);
+
+    try {
+      transport.push(
+        createInitMessage({
+          memfs_enabled: true,
+          skill_sources: ["project", "agent"],
+          system_info_reminder_enabled: false,
+          reflection_trigger: "step-count",
+          reflection_behavior: "reminder",
+          reflection_step_count: 9,
+        }),
+      );
+
+      const init = await session.initialize();
+      expect(init.memfsEnabled).toBe(true);
+      expect(init.skillSources).toEqual(["project", "agent"]);
+      expect(init.systemInfoReminderEnabled).toBe(false);
+      expect(init.sleeptime).toEqual({
+        trigger: "step-count",
+        behavior: "reminder",
+        stepCount: 9,
+      });
+    } finally {
+      session.close();
+    }
+  });
+
   describe("handleCanUseTool with bypassPermissions", () => {
     async function invokeCanUseTool(
       session: Session,

@@ -31,6 +31,13 @@ describe("transport args", () => {
     allowedTools?: string[];
     disallowedTools?: string[];
     memfs?: boolean;
+    skillSources?: Array<"bundled" | "global" | "agent" | "project">;
+    systemInfoReminder?: boolean;
+    sleeptime?: {
+      trigger?: "off" | "step-count" | "compaction-event";
+      behavior?: "reminder" | "auto-launch";
+      stepCount?: number;
+    };
   } = {}): string[] {
     const transport = new SubprocessTransport(options);
     // Access private helper for deterministic argument testing.
@@ -73,8 +80,48 @@ describe("transport args", () => {
     expect(args).toContain("--memfs");
   });
 
-  test("memfs false/undefined does not forward --memfs", () => {
-    expect(buildArgsFor({ memfs: false })).not.toContain("--memfs");
+  test("memfs false forwards --no-memfs", () => {
+    const args = buildArgsFor({ memfs: false });
+    expect(args).toContain("--no-memfs");
+    expect(args).not.toContain("--memfs");
+  });
+
+  test("memfs undefined does not forward memfs flags", () => {
     expect(buildArgsFor({})).not.toContain("--memfs");
+    expect(buildArgsFor({})).not.toContain("--no-memfs");
+  });
+
+  test("empty skillSources forwards --no-skills", () => {
+    const args = buildArgsFor({ skillSources: [] });
+    expect(args).toContain("--no-skills");
+    expect(args).not.toContain("--skill-sources");
+  });
+
+  test("skillSources list forwards --skill-sources csv", () => {
+    const args = buildArgsFor({ skillSources: ["project", "global"] });
+    expect(args).toContain("--skill-sources");
+    expect(args).toContain("project,global");
+    expect(args).not.toContain("--no-skills");
+  });
+
+  test("systemInfoReminder false forwards --no-system-info-reminder", () => {
+    const args = buildArgsFor({ systemInfoReminder: false });
+    expect(args).toContain("--no-system-info-reminder");
+  });
+
+  test("sleeptime options forward reflection flags", () => {
+    const args = buildArgsFor({
+      sleeptime: {
+        trigger: "step-count",
+        behavior: "reminder",
+        stepCount: 12,
+      },
+    });
+    expect(args).toContain("--reflection-trigger");
+    expect(args).toContain("step-count");
+    expect(args).toContain("--reflection-behavior");
+    expect(args).toContain("reminder");
+    expect(args).toContain("--reflection-step-count");
+    expect(args).toContain("12");
   });
 });

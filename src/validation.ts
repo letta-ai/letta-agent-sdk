@@ -9,8 +9,17 @@ import type {
   CreateAgentOptions,
   MemoryItem, 
   CreateBlock,
-  SystemPromptPreset 
+  SystemPromptPreset,
+  SkillSource,
+  SleeptimeOptions,
 } from "./types.js";
+
+const VALID_SKILL_SOURCES: SkillSource[] = [
+  "bundled",
+  "global",
+  "agent",
+  "project",
+];
 
 /**
  * Extract block labels from memory items.
@@ -46,6 +55,53 @@ function validateSystemPromptPreset(preset: string): void {
   }
 }
 
+function validateSkillSources(sources: SkillSource[] | undefined): void {
+  if (sources === undefined) {
+    return;
+  }
+
+  for (const source of sources) {
+    if (!VALID_SKILL_SOURCES.includes(source)) {
+      throw new Error(
+        `Invalid skill source '${source}'. Valid values: ${VALID_SKILL_SOURCES.join(", ")}`
+      );
+    }
+  }
+}
+
+function validateSleeptimeOptions(sleeptime: SleeptimeOptions | undefined): void {
+  if (sleeptime === undefined) {
+    return;
+  }
+
+  if (
+    sleeptime.trigger !== undefined &&
+    !["off", "step-count", "compaction-event"].includes(sleeptime.trigger)
+  ) {
+    throw new Error(
+      `Invalid sleeptime.trigger '${String(sleeptime.trigger)}'. Valid values: off, step-count, compaction-event`
+    );
+  }
+
+  if (
+    sleeptime.behavior !== undefined &&
+    !["reminder", "auto-launch"].includes(sleeptime.behavior)
+  ) {
+    throw new Error(
+      `Invalid sleeptime.behavior '${String(sleeptime.behavior)}'. Valid values: reminder, auto-launch`
+    );
+  }
+
+  if (
+    sleeptime.stepCount !== undefined &&
+    (!Number.isInteger(sleeptime.stepCount) || sleeptime.stepCount <= 0)
+  ) {
+    throw new Error(
+      "Invalid sleeptime.stepCount. Expected a positive integer."
+    );
+  }
+}
+
 /**
  * Validate CreateSessionOptions (used by createSession and resumeSession).
  */
@@ -54,6 +110,9 @@ export function validateCreateSessionOptions(options: CreateSessionOptions): voi
   if (options.systemPrompt !== undefined) {
     validateSystemPromptPreset(options.systemPrompt);
   }
+
+  validateSkillSources(options.skillSources);
+  validateSleeptimeOptions(options.sleeptime);
 }
 
 /**
@@ -104,4 +163,7 @@ export function validateCreateAgentOptions(options: CreateAgentOptions): void {
     }
     // If not a preset, it's a custom string - no validation needed
   }
+
+  validateSkillSources(options.skillSources);
+  validateSleeptimeOptions(options.sleeptime);
 }
