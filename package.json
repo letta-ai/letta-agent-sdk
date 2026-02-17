@@ -26,7 +26,7 @@
     "url": "https://github.com/letta-ai/letta-code-sdk"
   },
   "dependencies": {
-    "@letta-ai/letta-code": "0.15.1"
+    "@letta-ai/letta-code": "0.15.3"
   },
   "devDependencies": {
     "@types/bun": "latest",
