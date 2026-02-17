@@ -34,8 +34,8 @@ describe("headless skills reminder contract", () => {
 
     // Newer CLIs that inject skills reminders must include gating primitives
     // to avoid prefixing on every follow-up SDK message.
-    expect(cliSource).toContain("prependSkillsReminderToContent");
-    expect(cliSource).toContain("shouldReinjectSkillsAfterCompaction");
+    expect(cliSource.includes("prependSkillsReminderToContent")).toBe(true);
+    expect(cliSource.includes("shouldReinjectSkillsAfterCompaction")).toBe(true);
     expect(segment).toContain("hasInjectedSkillsReminder");
     expect(segment).toContain("pendingSkillsReinject");
     expect(segment).toContain("cachedSkillsReminder");
