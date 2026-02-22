@@ -44,6 +44,8 @@ export type {
   SDKReasoningMessage,
   SDKResultMessage,
   SDKStreamEventMessage,
+  SDKErrorMessage,
+  SDKRetryMessage,
   SkillSource,
   SleeptimeOptions,
   SleeptimeTrigger,

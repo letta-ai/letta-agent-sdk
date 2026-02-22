@@ -726,6 +726,44 @@ export class Session implements AsyncDisposable {
       };
     }
 
+    // Error message — carries the actual error detail from the CLI.
+    // The subsequent type=result only has the opaque string "error";
+    // this message has the human-readable description and API error.
+    if (wireMsg.type === "error") {
+      const msg = wireMsg as WireMessage & {
+        message: string;
+        stop_reason: string;
+        run_id?: string;
+        api_error?: Record<string, unknown>;
+      };
+      return {
+        type: "error" as const,
+        message: msg.message,
+        stopReason: msg.stop_reason,
+        runId: msg.run_id,
+        apiError: msg.api_error,
+      };
+    }
+
+    // Retry message — the CLI is retrying after a transient failure.
+    if (wireMsg.type === "retry") {
+      const msg = wireMsg as WireMessage & {
+        reason: string;
+        attempt: number;
+        max_attempts: number;
+        delay_ms: number;
+        run_id?: string;
+      };
+      return {
+        type: "retry" as const,
+        reason: msg.reason,
+        attempt: msg.attempt,
+        maxAttempts: msg.max_attempts,
+        delayMs: msg.delay_ms,
+        runId: msg.run_id,
+      };
+    }
+
     // Skip other message types (system_message, user_message, etc.)
     return null;
   }

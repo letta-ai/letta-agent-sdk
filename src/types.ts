@@ -473,6 +473,41 @@ export interface SDKStreamEventMessage {
   uuid: string;
 }
 
+/**
+ * Error message from the CLI — carries the actual error detail that
+ * would otherwise be lost (the subsequent `type=result` only has
+ * the opaque string "error" as its error field).
+ */
+export interface SDKErrorMessage {
+  type: "error";
+  /** Human-readable error description from the CLI */
+  message: string;
+  /** Why the run stopped (e.g. "error", "llm_api_error", "max_steps") */
+  stopReason: string;
+  /** Run that produced the error, if available */
+  runId?: string;
+  /** Nested Letta API error when the error originated server-side */
+  apiError?: Record<string, unknown>;
+}
+
+/**
+ * Retry message — the CLI is retrying after a transient failure.
+ * Emitted before each retry attempt so consumers can log / display progress.
+ */
+export interface SDKRetryMessage {
+  type: "retry";
+  /** The stop reason that triggered the retry */
+  reason: string;
+  /** Current attempt number (1-based) */
+  attempt: number;
+  /** Maximum attempts before giving up */
+  maxAttempts: number;
+  /** Delay in ms before the next attempt */
+  delayMs: number;
+  /** Run that triggered the retry, if available */
+  runId?: string;
+}
+
 /** Union of all SDK message types */
 export type SDKMessage =
   | SDKInitMessage
@@ -481,7 +516,9 @@ export type SDKMessage =
   | SDKToolResultMessage
   | SDKReasoningMessage
   | SDKResultMessage
-  | SDKStreamEventMessage;
+  | SDKStreamEventMessage
+  | SDKErrorMessage
+  | SDKRetryMessage;
 
 // ═══════════════════════════════════════════════════════════════
 // EXTERNAL TOOL PROTOCOL TYPES
