@@ -493,6 +493,38 @@ export type SDKMessage =
   | SDKStreamEventMessage;
 
 // ═══════════════════════════════════════════════════════════════
+// LIST MESSAGES API
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Options for session.listMessages().
+ */
+export interface ListMessagesOptions {
+  /** Explicit conversation ID (e.g. "conv-123"). If omitted, uses agent default. */
+  conversationId?: string;
+  /** Return messages before this message ID (cursor for older pages). */
+  before?: string;
+  /** Return messages after this message ID (cursor for newer pages). */
+  after?: string;
+  /** Sort order. Defaults to "desc" (newest first). */
+  order?: "asc" | "desc";
+  /** Max messages per page. Defaults to 50. */
+  limit?: number;
+}
+
+/**
+ * Result from session.listMessages().
+ * `messages` are raw Letta API message objects in the requested order.
+ */
+export interface ListMessagesResult {
+  messages: unknown[];
+  /** ID of the oldest message in this page; use as `before` for the next page. */
+  nextBefore?: string | null;
+  /** Whether more pages exist in the requested direction. */
+  hasMore?: boolean;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // EXTERNAL TOOL PROTOCOL TYPES
 // ═══════════════════════════════════════════════════════════════
 

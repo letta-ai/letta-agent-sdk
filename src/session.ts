@@ -21,6 +21,8 @@ import type {
   SendMessage,
   AnyAgentTool,
   ExecuteExternalToolRequest,
+  ListMessagesOptions,
+  ListMessagesResult,
 } from "./types.js";
 import {
   isHeadlessAutoAllowTool,
@@ -47,6 +49,13 @@ export class Session implements AsyncDisposable {
   private pumpPromise: Promise<void> | null = null;
   private pumpClosed = false;
   private droppedStreamMessages = 0;
+  // Waiters for SDK-initiated control requests (e.g., listMessages).
+  // Keyed by request_id; pump resolves the matching waiter when it sees
+  // a control_response with that request_id instead of queuing it as a stream msg.
+  private controlResponseWaiters = new Map<
+    string,
+    (response: { subtype: string; response?: unknown; error?: string }) => void
+  >();
 
   constructor(
     private options: InternalSessionOptions = {}
@@ -254,6 +263,23 @@ export class Session implements AsyncDisposable {
         continue;
       }
 
+      // Route control_response to a registered waiter (e.g., from listMessages).
+      // Unmatched control_responses are logged and dropped — they never reach the stream.
+      if (wireMsg.type === "control_response") {
+        const respMsg = wireMsg as unknown as {
+          response: { subtype: string; request_id?: string; response?: unknown; error?: string };
+        };
+        const requestId = respMsg.response?.request_id;
+        if (requestId && this.controlResponseWaiters.has(requestId)) {
+          const resolve = this.controlResponseWaiters.get(requestId)!;
+          this.controlResponseWaiters.delete(requestId);
+          resolve(respMsg.response);
+        } else {
+          sessionLog("pump", `DROPPED unmatched control_response: request_id=${requestId ?? "N/A"}`);
+        }
+        continue;
+      }
+
       const sdkMsg = this.transformMessage(wireMsg);
       if (sdkMsg) {
         this.enqueueStreamMessage(sdkMsg);
@@ -332,6 +358,11 @@ export class Session implements AsyncDisposable {
       resolve(msg);
     }
     this.streamResolvers = [];
+    // Also cancel any in-flight control request waiters (e.g., listMessages)
+    for (const resolve of this.controlResponseWaiters.values()) {
+      resolve({ subtype: "error", error: "session closed" });
+    }
+    this.controlResponseWaiters.clear();
   }
 
   /**
@@ -536,6 +567,65 @@ export class Session implements AsyncDisposable {
       request_id: `interrupt-${Date.now()}`,
       request: { subtype: "interrupt" },
     });
+  }
+
+  /**
+   * Fetch a page of conversation messages via the CLI control protocol.
+   *
+   * The session must be initialized before calling this method.
+   * Safe to call concurrently with an active stream() — the pump routes
+   * matching control_response messages to this waiter without touching the
+   * stream queue.
+   */
+  async listMessages(options: ListMessagesOptions = {}): Promise<ListMessagesResult> {
+    if (!this.initialized) {
+      throw new Error("Session must be initialized before calling listMessages()");
+    }
+
+    const requestId = `list-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    const responsePromise = new Promise<{
+      subtype: string;
+      response?: unknown;
+      error?: string;
+    }>((resolve) => {
+      this.controlResponseWaiters.set(requestId, resolve);
+    });
+
+    await this.transport.write({
+      type: "control_request",
+      request_id: requestId,
+      request: {
+        subtype: "list_messages",
+        ...(options.conversationId ? { conversation_id: options.conversationId } : {}),
+        ...(options.before ? { before: options.before } : {}),
+        ...(options.after ? { after: options.after } : {}),
+        ...(options.order ? { order: options.order } : {}),
+        ...(options.limit !== undefined ? { limit: options.limit } : {}),
+      },
+    });
+
+    // Race against session close (pump sets pumpClosed and resolves all waiters with null)
+    const resp = await responsePromise;
+
+    if (!resp) {
+      throw new Error("Session closed before listMessages response arrived");
+    }
+    if (resp.subtype === "error") {
+      throw new Error(resp.error ?? "listMessages failed");
+    }
+
+    const payload = resp.response as {
+      messages?: unknown[];
+      next_before?: string | null;
+      has_more?: boolean;
+    } | undefined;
+
+    return {
+      messages: payload?.messages ?? [],
+      nextBefore: payload?.next_before ?? null,
+      hasMore: payload?.has_more ?? false,
+    };
   }
 
   /**

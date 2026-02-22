@@ -59,6 +59,9 @@ export type {
   ImageContent,
   MessageContentItem,
   SendMessage,
+  // List messages API
+  ListMessagesOptions,
+  ListMessagesResult,
   // Tool types
   AgentTool,
   AgentToolResult,
