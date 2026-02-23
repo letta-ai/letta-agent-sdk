@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Session } from "./session.js";
-import type { SDKMessage, WireMessage } from "./types.js";
+import type { MessageWire, SDKMessage, WireMessage } from "./types.js";
 
 const BUFFER_LIMIT = 100;
 
@@ -94,6 +94,26 @@ function createAssistantMessage(index: number): WireMessage {
     uuid: `assistant-${index}`,
     content: `msg-${index}`,
   } as WireMessage;
+}
+
+function createApprovalRequestMessage(
+  index: number,
+  toolCall: {
+    name: string;
+    arguments: string;
+    tool_call_id: string;
+  },
+): MessageWire {
+  return {
+    type: "message",
+    session_id: "session-1",
+    message_type: "approval_request_message",
+    id: `message-approval-${index}`,
+    date: "2026-01-01T00:00:00.000000+00:00",
+    uuid: `approval-${index}`,
+    tool_call: toolCall,
+    tool_calls: [toolCall],
+  };
 }
 
 function createResultMessage(): WireMessage {
@@ -336,6 +356,48 @@ describe("Session", () => {
             behavior: "allow",
           },
         },
+      });
+    });
+  });
+
+  describe("transformMessage tool-call mapping", () => {
+    test("maps approval_request_message to SDK tool_call message", () => {
+      const session = new Session();
+      const wireMsg = createApprovalRequestMessage(1, {
+        name: "Bash",
+        arguments: JSON.stringify({ command: "pwd" }),
+        tool_call_id: "call-approval-1",
+      });
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toEqual({
+        type: "tool_call",
+        toolCallId: "call-approval-1",
+        toolName: "Bash",
+        toolInput: { command: "pwd" },
+        uuid: "approval-1",
+      });
+    });
+
+    test("falls back to raw tool arguments when approval_request_message args are not JSON", () => {
+      const session = new Session();
+      const wireMsg = createApprovalRequestMessage(2, {
+        name: "Read",
+        arguments: "path=/tmp/foo.txt",
+        tool_call_id: "call-approval-2",
+      });
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toEqual({
+        type: "tool_call",
+        toolCallId: "call-approval-2",
+        toolName: "Read",
+        toolInput: { raw: "path=/tmp/foo.txt" },
+        uuid: "approval-2",
       });
     });
   });

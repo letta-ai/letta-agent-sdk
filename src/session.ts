@@ -12,6 +12,7 @@ import type {
   SDKInitMessage,
   SDKAssistantMessage,
   SDKResultMessage,
+  MessageWire,
   WireMessage,
   ControlRequest,
   CanUseToolControlRequest,
@@ -669,7 +670,7 @@ export class Session implements AsyncDisposable {
   /**
    * Transform wire message to SDK message
    */
-  private transformMessage(wireMsg: WireMessage): SDKMessage | null {
+  private transformMessage(wireMsg: WireMessage | MessageWire): SDKMessage | null {
     // Init message
     if (wireMsg.type === "system" && "subtype" in wireMsg && wireMsg.subtype === "init") {
       const msg = wireMsg as WireMessage & {
