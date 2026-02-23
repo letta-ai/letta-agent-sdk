@@ -13,6 +13,177 @@ function sdkLog(tag: string, ...args: unknown[]) {
   if (process.env.DEBUG_SDK) console.error(`[SDK-Transport] [${tag}]`, ...args);
 }
 
+/**
+ * Build the CLI argument array for a given set of session options.
+ *
+ * Exported as a pure function for testing — this IS the real production code
+ * path. SubprocessTransport.buildArgs() delegates here.
+ */
+export function buildCliArgs(options: InternalSessionOptions): string[] {
+  const args: string[] = [
+    "--output-format",
+    "stream-json",
+    "--input-format",
+    "stream-json",
+  ];
+
+  // Conversation and agent handling
+  if (options.conversationId) {
+    args.push("--conversation", options.conversationId);
+  } else if (options.agentId) {
+    args.push("--agent", options.agentId);
+    if (options.newConversation) {
+      args.push("--new");
+    } else if (options.defaultConversation) {
+      args.push("--default");
+    }
+  } else if (options.createOnly) {
+    args.push("--new-agent");
+  } else if (options.newConversation) {
+    args.push("--new");
+  }
+
+  // Model
+  if (options.model) {
+    args.push("-m", options.model);
+  }
+
+  // Partial message streaming
+  if (options.includePartialMessages) {
+    args.push("--include-partial-messages");
+  }
+
+  // Embedding model
+  if (options.embedding) {
+    args.push("--embedding", options.embedding);
+  }
+
+  // System prompt configuration
+  if (options.systemPrompt !== undefined) {
+    if (typeof options.systemPrompt === "string") {
+      const validPresets = [
+        "default",
+        "letta-claude",
+        "letta-codex",
+        "letta-gemini",
+        "claude",
+        "codex",
+        "gemini",
+      ];
+      if (validPresets.includes(options.systemPrompt)) {
+        args.push("--system", options.systemPrompt);
+      } else {
+        args.push("--system-custom", options.systemPrompt);
+      }
+    } else {
+      args.push("--system", options.systemPrompt.preset);
+      if (options.systemPrompt.append) {
+        args.push("--system-append", options.systemPrompt.append);
+      }
+    }
+  }
+
+  // Memory blocks (only for new agents)
+  if (options.memory !== undefined && !options.agentId) {
+    if (options.memory.length === 0) {
+      args.push("--init-blocks", "");
+    } else {
+      const presetNames: string[] = [];
+      const memoryBlocksJson: Array<
+        | { label: string; value: string }
+        | { blockId: string }
+      > = [];
+
+      for (const item of options.memory) {
+        if (typeof item === "string") {
+          presetNames.push(item);
+        } else if ("blockId" in item) {
+          memoryBlocksJson.push(item as { blockId: string });
+        } else {
+          memoryBlocksJson.push(item as { label: string; value: string });
+        }
+      }
+
+      if (memoryBlocksJson.length > 0) {
+        args.push("--memory-blocks", JSON.stringify(memoryBlocksJson));
+        if (presetNames.length > 0) {
+          console.warn(
+            "[letta-code-sdk] Using custom memory blocks. " +
+            `Preset blocks are ignored when custom blocks are provided: ${presetNames.join(", ")}`
+          );
+        }
+      } else if (presetNames.length > 0) {
+        args.push("--init-blocks", presetNames.join(","));
+      }
+    }
+  }
+
+  // Convenience props for block values (only for new agents)
+  if (!options.agentId) {
+    if (options.persona !== undefined) {
+      args.push("--block-value", `persona=${options.persona}`);
+    }
+    if (options.human !== undefined) {
+      args.push("--block-value", `human=${options.human}`);
+    }
+  }
+
+  // Permission mode
+  if (options.permissionMode === "bypassPermissions") {
+    args.push("--yolo");
+  } else if (options.permissionMode && options.permissionMode !== "default") {
+    args.push("--permission-mode", options.permissionMode);
+  }
+
+  // Allowed / disallowed tools
+  if (options.allowedTools) {
+    args.push("--allowedTools", options.allowedTools.join(","));
+  }
+  if (options.disallowedTools) {
+    args.push("--disallowedTools", options.disallowedTools.join(","));
+  }
+
+  // Tags
+  if (options.tags && options.tags.length > 0) {
+    args.push("--tags", options.tags.join(","));
+  }
+
+  // Memory filesystem
+  if (options.memfs === true) {
+    args.push("--memfs");
+  } else if (options.memfs === false) {
+    args.push("--no-memfs");
+  }
+
+  // Skills sources
+  if (options.skillSources !== undefined) {
+    const sources = [...new Set(options.skillSources)];
+    if (sources.length === 0) {
+      args.push("--no-skills");
+    } else {
+      args.push("--skill-sources", sources.join(","));
+    }
+  }
+
+  // Session context reminder toggle
+  if (options.systemInfoReminder === false) {
+    args.push("--no-system-info-reminder");
+  }
+
+  // Sleeptime / reflection settings
+  if (options.sleeptime?.trigger !== undefined) {
+    args.push("--reflection-trigger", options.sleeptime.trigger);
+  }
+  if (options.sleeptime?.behavior !== undefined) {
+    args.push("--reflection-behavior", options.sleeptime.behavior);
+  }
+  if (options.sleeptime?.stepCount !== undefined) {
+    args.push("--reflection-step-count", String(options.sleeptime.stepCount));
+  }
+
+  return args;
+}
+
 export class SubprocessTransport {
   private process: ChildProcess | null = null;
   private stdout: Interface | null = null;
@@ -218,198 +389,10 @@ export class SubprocessTransport {
   }
 
   private buildArgs(): string[] {
-    const args: string[] = [
-      "--output-format",
-      "stream-json",
-      "--input-format",
-      "stream-json",
-    ];
-
-    // Note: All validation happens in validateInternalSessionOptions() called from Session constructor
-
-    // Conversation and agent handling
-    if (this.options.conversationId) {
-      // Resume specific conversation (derives agent automatically)
-      args.push("--conversation", this.options.conversationId);
-    } else if (this.options.agentId) {
-      // Resume existing agent
-      args.push("--agent", this.options.agentId);
-      if (this.options.newConversation) {
-        // Create new conversation on this agent
-        args.push("--new");
-      } else if (this.options.defaultConversation) {
-        // Use agent's default conversation explicitly
-        args.push("--default");
-      }
-    } else if (this.options.createOnly) {
-      // createAgent() - explicitly create new agent
-      args.push("--new-agent");
-    } else if (this.options.newConversation) {
-      // createSession() without agentId - LRU agent + new conversation
-      args.push("--new");
-    }
-    // else: no agent flags = default behavior (LRU agent, default conversation)
-
-    // Model
-    if (this.options.model) {
-      args.push("-m", this.options.model);
-    }
-
-    // Partial message streaming (token-level stream_event chunks)
-    if (this.options.includePartialMessages) {
-      args.push("--include-partial-messages");
-    }
-
-    // Embedding model
-    if (this.options.embedding) {
-      args.push("--embedding", this.options.embedding);
-    }
-
-    // System prompt configuration
-    if (this.options.systemPrompt !== undefined) {
-      if (typeof this.options.systemPrompt === "string") {
-        // Check if it's a valid preset name or custom string
-        const validPresets = [
-          "default",
-          "letta-claude",
-          "letta-codex",
-          "letta-gemini",
-          "claude",
-          "codex",
-          "gemini",
-        ];
-        if (validPresets.includes(this.options.systemPrompt)) {
-          // Preset name → --system
-          args.push("--system", this.options.systemPrompt);
-        } else {
-          // Custom string → --system-custom
-          args.push("--system-custom", this.options.systemPrompt);
-        }
-      } else {
-        // Preset object → --system (+ optional --system-append)
-        args.push("--system", this.options.systemPrompt.preset);
-        if (this.options.systemPrompt.append) {
-          args.push("--system-append", this.options.systemPrompt.append);
-        }
-      }
-    }
-
-    // Memory blocks (only for new agents)
-    if (this.options.memory !== undefined && !this.options.agentId) {
-      if (this.options.memory.length === 0) {
-        // Empty array → no memory blocks (just core)
-        args.push("--init-blocks", "");
-      } else {
-        // Separate preset names from custom/reference blocks
-        const presetNames: string[] = [];
-        const memoryBlocksJson: Array<
-          | { label: string; value: string }
-          | { blockId: string }
-        > = [];
-
-        for (const item of this.options.memory) {
-          if (typeof item === "string") {
-            // Preset name
-            presetNames.push(item);
-          } else if ("blockId" in item) {
-            // Block reference - pass to --memory-blocks
-            memoryBlocksJson.push(item as { blockId: string });
-          } else {
-            // CreateBlock
-            memoryBlocksJson.push(item as { label: string; value: string });
-          }
-        }
-
-        // NOTE: When custom blocks are provided via --memory-blocks, they define the complete
-        // memory configuration. Preset blocks (--init-blocks) cannot be mixed with custom blocks.
-        if (memoryBlocksJson.length > 0) {
-          // Use custom blocks only
-          args.push("--memory-blocks", JSON.stringify(memoryBlocksJson));
-          if (presetNames.length > 0) {
-            console.warn(
-              "[letta-code-sdk] Using custom memory blocks. " +
-              `Preset blocks are ignored when custom blocks are provided: ${presetNames.join(", ")}`
-            );
-          }
-        } else if (presetNames.length > 0) {
-          // Use presets only
-          args.push("--init-blocks", presetNames.join(","));
-        }
-      }
-    }
-
-    // Convenience props for block values (only for new agents)
-    if (!this.options.agentId) {
-      if (this.options.persona !== undefined) {
-        args.push("--block-value", `persona=${this.options.persona}`);
-      }
-      if (this.options.human !== undefined) {
-        args.push("--block-value", `human=${this.options.human}`);
-      }
-    }
-
-    // Permission mode
-    if (this.options.permissionMode === "bypassPermissions") {
-      // Keep using alias for backwards compatibility
-      args.push("--yolo");
-    } else if (
-      this.options.permissionMode &&
-      this.options.permissionMode !== "default"
-    ) {
-      args.push("--permission-mode", this.options.permissionMode);
-    }
-
-    // Allowed tools
-    if (this.options.allowedTools) {
-      args.push("--allowedTools", this.options.allowedTools.join(","));
-    }
-    if (this.options.disallowedTools) {
-      args.push("--disallowedTools", this.options.disallowedTools.join(","));
-    }
-
-    // Tags
-    if (this.options.tags && this.options.tags.length > 0) {
-      args.push("--tags", this.options.tags.join(","));
-    }
-
-    // Memory filesystem
-    if (this.options.memfs === true) {
-      args.push("--memfs");
-    } else if (this.options.memfs === false) {
-      args.push("--no-memfs");
-    }
-
-    // Skills sources
-    if (this.options.skillSources !== undefined) {
-      const sources = [...new Set(this.options.skillSources)];
-      if (sources.length === 0) {
-        args.push("--no-skills");
-      } else {
-        args.push("--skill-sources", sources.join(","));
-      }
-    }
-
-    // Session context reminder toggle
-    if (this.options.systemInfoReminder === false) {
-      args.push("--no-system-info-reminder");
-    }
-
-    // Sleeptime/reflection settings
-    if (this.options.sleeptime?.trigger !== undefined) {
-      args.push("--reflection-trigger", this.options.sleeptime.trigger);
-    }
-    if (this.options.sleeptime?.behavior !== undefined) {
-      args.push("--reflection-behavior", this.options.sleeptime.behavior);
-    }
-    if (this.options.sleeptime?.stepCount !== undefined) {
-      args.push(
-        "--reflection-step-count",
-        String(this.options.sleeptime.stepCount),
-      );
-    }
-
-    return args;
+    return buildCliArgs(this.options);
   }
+
+
 
   private async findCli(): Promise<string> {
     // Try multiple resolution strategies
