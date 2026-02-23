@@ -127,6 +127,36 @@ function createResultMessage(): WireMessage {
   } as WireMessage;
 }
 
+function createErrorWireMessage(): WireMessage {
+  return {
+    type: "error",
+    session_id: "session-1",
+    uuid: "error-1",
+    message: "Rate limit exceeded",
+    stop_reason: "llm_api_error",
+    run_id: "run-1",
+    api_error: {
+      error_type: "llm_api_error",
+      message: "429 from upstream provider",
+      message_type: "error_message",
+      run_id: "run-1",
+    },
+  } as WireMessage;
+}
+
+function createRetryWireMessage(): WireMessage {
+  return {
+    type: "retry",
+    session_id: "session-1",
+    uuid: "retry-1",
+    reason: "llm_api_error",
+    attempt: 2,
+    max_attempts: 4,
+    delay_ms: 1500,
+    run_id: "run-1",
+  } as WireMessage;
+}
+
 function createCanUseToolRequest(
   requestId: string,
   toolName: string,
@@ -402,6 +432,46 @@ describe("Session", () => {
     });
   });
 
+  describe("transformMessage error/retry mapping", () => {
+    test("maps error wire message to SDK error message", () => {
+      const session = new Session();
+      const wireMsg = createErrorWireMessage();
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toEqual({
+        type: "error",
+        message: "Rate limit exceeded",
+        stopReason: "llm_api_error",
+        runId: "run-1",
+        apiError: {
+          error_type: "llm_api_error",
+          message: "429 from upstream provider",
+          message_type: "error_message",
+          run_id: "run-1",
+        },
+      });
+    });
+
+    test("maps retry wire message to SDK retry message", () => {
+      const session = new Session();
+      const wireMsg = createRetryWireMessage();
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toEqual({
+        type: "retry",
+        reason: "llm_api_error",
+        attempt: 2,
+        maxAttempts: 4,
+        delayMs: 1500,
+        runId: "run-1",
+      });
+    });
+  });
+
   describe("background pump parity", () => {
     test("handles can_use_tool control requests before stream iteration starts", async () => {
       let callbackInvocations = 0;
@@ -502,6 +572,34 @@ describe("Session", () => {
         expect(assistants[assistants.length - 1]?.content).toBe(
           `msg-${assistantCount}`,
         );
+        expect(streamed[streamed.length - 1]?.type).toBe("result");
+      } finally {
+        session.close();
+      }
+    });
+
+    test("emits error and retry messages instead of dropping them", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        transport.push(createErrorWireMessage());
+        transport.push(createRetryWireMessage());
+        transport.push(createResultMessage());
+
+        const streamed: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          streamed.push(msg);
+        }
+
+        expect(streamed.some((msg) => msg.type === "error")).toBe(true);
+        expect(streamed.some((msg) => msg.type === "retry")).toBe(true);
         expect(streamed[streamed.length - 1]?.type).toBe("result");
       } finally {
         session.close();
