@@ -200,7 +200,7 @@ describe("buildCliArgs — system prompt", () => {
 
   test("preset object → --system <preset> + --system-append <text>", () => {
     const args = buildCliArgs({
-      systemPrompt: { preset: "default", append: "extra context" },
+      systemPrompt: { type: "preset", preset: "default", append: "extra context" },
     });
     expect(args).toContain("--system");
     expect(args).toContain("default");
