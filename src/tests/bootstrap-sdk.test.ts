@@ -9,7 +9,7 @@
  */
 import { describe, expect, mock, test } from "bun:test";
 import { buildCliArgs } from "../transport";
-import type { InternalSessionOptions } from "../types";
+import type { BootstrapStateResult, InternalSessionOptions } from "../types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // B1: transport arg forwarding
@@ -151,7 +151,7 @@ describe("BootstrapStateResult type", () => {
   });
 
   test("timings field is optional", () => {
-    const withoutTimings = {
+    const withoutTimings: BootstrapStateResult = {
       agentId: "a",
       conversationId: "c",
       model: undefined,
@@ -163,7 +163,7 @@ describe("BootstrapStateResult type", () => {
       hasPendingApproval: false,
     };
 
-    const withTimings = {
+    const withTimings: BootstrapStateResult = {
       ...withoutTimings,
       timings: { resolve_ms: 1, list_messages_ms: 5, total_ms: 6 },
     };
