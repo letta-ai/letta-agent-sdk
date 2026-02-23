@@ -77,3 +77,38 @@ const session = createSession("agent-123", {
 ---
 
 Made with 💜 in San Francisco
+
+## Live integration tests (opt-in)
+
+The SDK includes live integration tests that hit real Letta Cloud endpoints and verify runtime contracts for:
+
+- session init shape
+- send/stream lifecycle (`assistant`, `reasoning`, `stream_event`, `result`)
+- `listMessages()` backfill/pagination shape
+- concurrent `listMessages()` during active stream
+- tool lifecycle (`tool_call` -> `tool_result`)
+
+These tests are opt-in and skipped by default.
+
+```bash
+# Required
+export LETTA_API_KEY=sk-let-...
+
+# Optional
+export LETTA_AGENT_ID=agent-...            # force a specific agent
+export LETTA_CONVERSATION_ID=conv-...      # force a specific conversation for init test
+export LETTA_BASE_URL=https://api.letta.com
+export LETTA_LIVE_TEST_TIMEOUT_MS=180000
+
+# Run live tests
+bun run test:live
+
+# Run and record sanitized fixtures to src/tests/fixtures/live/
+bun run test:live:record
+```
+
+Safety notes:
+
+- live tests create/use real conversations on the target account
+- fixture recording redacts obvious secrets/tokens and local home paths
+- keep fixture recording disabled in CI unless you explicitly want refreshed snapshots

@@ -24,6 +24,7 @@ import type {
   ExecuteExternalToolRequest,
   ListMessagesOptions,
   ListMessagesResult,
+  SDKStreamEventPayload,
 } from "./types.js";
 import {
   isHeadlessAutoAllowTool,
@@ -780,17 +781,13 @@ export class Session implements AsyncDisposable {
     // Stream event (partial message updates)
     if (wireMsg.type === "stream_event") {
       const msg = wireMsg as WireMessage & {
-        event: {
-          type: string;
-          index?: number;
-          delta?: { type?: string; text?: string; reasoning?: string };
-          content_block?: { type?: string; text?: string };
-        };
+        event: unknown;
         uuid: string;
       };
+      const eventPayload = (msg.event ?? {}) as SDKStreamEventPayload;
       return {
         type: "stream_event",
-        event: msg.event,
+        event: eventPayload,
         uuid: msg.uuid,
       };
     }

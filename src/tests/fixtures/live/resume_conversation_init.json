@@ -1,0 +1,36 @@
+{
+  "type": "init",
+  "agentId": "agent-d0ab297f-c180-4347-b3ab-20165fbe0f2f",
+  "sessionId": "agent-d0ab297f-c180-4347-b3ab-20165fbe0f2f",
+  "conversationId": "conv-d87b461c-e855-49d6-9688-f69e3864f44e",
+  "model": "claude-sonnet-4-5-20250929",
+  "tools": [
+    "AskUserQuestion",
+    "Bash",
+    "TaskOutput",
+    "Edit",
+    "EnterPlanMode",
+    "ExitPlanMode",
+    "Glob",
+    "Grep",
+    "TaskStop",
+    "Read",
+    "Skill",
+    "Task",
+    "TodoWrite",
+    "Write"
+  ],
+  "memfsEnabled": false,
+  "skillSources": [
+    "bundled",
+    "global",
+    "agent",
+    "project"
+  ],
+  "systemInfoReminderEnabled": true,
+  "sleeptime": {
+    "trigger": "step-count",
+    "behavior": "reminder",
+    "stepCount": 25
+  }
+}

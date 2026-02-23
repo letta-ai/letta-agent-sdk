@@ -471,14 +471,43 @@ export interface SDKResultMessage {
   conversationId: string | null;
 }
 
+export interface SDKStreamEventDeltaPayload {
+  type: string;
+  index?: number;
+  delta?: { type?: string; text?: string; reasoning?: string };
+  content_block?: { type?: string; text?: string };
+  [key: string]: unknown;
+}
+
+export interface SDKStreamEventMessagePayload {
+  message_type: string;
+  id?: string;
+  otid?: string | null;
+  content?: unknown;
+  reasoning?: string;
+  name?: string;
+  tool_call?: unknown;
+  tool_calls?: unknown;
+  tool_call_id?: string;
+  tool_return?: string;
+  status?: string;
+  [key: string]: unknown;
+}
+
+export interface SDKUnknownStreamEventPayload {
+  type?: string;
+  message_type?: string;
+  [key: string]: unknown;
+}
+
+export type SDKStreamEventPayload =
+  | SDKStreamEventDeltaPayload
+  | SDKStreamEventMessagePayload
+  | SDKUnknownStreamEventPayload;
+
 export interface SDKStreamEventMessage {
   type: "stream_event";
-  event: {
-    type: string;  // "content_block_start" | "content_block_delta" | "content_block_stop"
-    index?: number;
-    delta?: { type?: string; text?: string; reasoning?: string };
-    content_block?: { type?: string; text?: string };
-  };
+  event: SDKStreamEventPayload;
   uuid: string;
 }
 

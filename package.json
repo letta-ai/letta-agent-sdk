@@ -19,7 +19,9 @@
     "build": "bun run build.ts",
     "dev": "bun run build.ts --watch",
     "check": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "test:live": "LETTA_LIVE_INTEGRATION=1 bun test src/tests/live.integration.test.ts",
+    "test:live:record": "LETTA_LIVE_INTEGRATION=1 LETTA_RECORD_FIXTURES=1 bun test src/tests/live.integration.test.ts"
   },
   "repository": {
     "type": "git",

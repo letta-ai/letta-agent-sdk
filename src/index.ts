@@ -44,6 +44,10 @@ export type {
   SDKReasoningMessage,
   SDKResultMessage,
   SDKStreamEventMessage,
+  SDKStreamEventPayload,
+  SDKStreamEventDeltaPayload,
+  SDKStreamEventMessagePayload,
+  SDKUnknownStreamEventPayload,
   SDKErrorMessage,
   SDKRetryMessage,
   SkillSource,
@@ -73,6 +77,8 @@ export type {
 } from "./types.js";
 
 export { Session } from "./session.js";
+
+export { extractStreamTextDelta } from "./stream-events.js";
 
 // Tool helpers
 export {

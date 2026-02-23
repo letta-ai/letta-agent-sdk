@@ -1,0 +1,51 @@
+{
+  "init": {
+    "type": "init",
+    "agentId": "agent-d0ab297f-c180-4347-b3ab-20165fbe0f2f",
+    "sessionId": "agent-d0ab297f-c180-4347-b3ab-20165fbe0f2f",
+    "conversationId": "conv-3b89b7f3-c9b9-4ae2-94c5-55e3e5d44234",
+    "model": "claude-sonnet-4-5-20250929",
+    "tools": [
+      "AskUserQuestion",
+      "Bash",
+      "TaskOutput",
+      "Edit",
+      "EnterPlanMode",
+      "ExitPlanMode",
+      "Glob",
+      "Grep",
+      "TaskStop",
+      "Read",
+      "Skill",
+      "Task",
+      "TodoWrite",
+      "Write"
+    ],
+    "memfsEnabled": false,
+    "skillSources": [
+      "bundled",
+      "global",
+      "agent",
+      "project"
+    ],
+    "systemInfoReminderEnabled": true,
+    "sleeptime": {
+      "trigger": "step-count",
+      "behavior": "reminder",
+      "stepCount": 25
+    }
+  },
+  "page1Summary": {
+    "count": 4,
+    "hasMore": false,
+    "nextBefore": "message-2fcbada1-fd32-4004-88cb-395bc7cf1e88",
+    "sampleId": "message-5c16d0db-1c1c-4e5c-ac66-30f72367759c",
+    "sampleDiscriminator": "reasoning_message"
+  },
+  "page2Summary": {
+    "count": 0,
+    "hasMore": false,
+    "nextBefore": null,
+    "sampleId": null
+  }
+}
