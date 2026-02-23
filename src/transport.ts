@@ -148,11 +148,16 @@ export function buildCliArgs(options: InternalSessionOptions): string[] {
     args.push("--tags", options.tags.join(","));
   }
 
-  // Memory filesystem
+  // Memory filesystem enable/disable
   if (options.memfs === true) {
     args.push("--memfs");
   } else if (options.memfs === false) {
     args.push("--no-memfs");
+  }
+
+  // Memory filesystem startup policy
+  if (options.memfsStartup !== undefined) {
+    args.push("--memfs-startup", options.memfsStartup);
   }
 
   // Skills sources

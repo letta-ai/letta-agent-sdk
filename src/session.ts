@@ -24,6 +24,8 @@ import type {
   ExecuteExternalToolRequest,
   ListMessagesOptions,
   ListMessagesResult,
+  BootstrapStateOptions,
+  BootstrapStateResult,
   SDKStreamEventPayload,
 } from "./types.js";
 import {
@@ -627,6 +629,86 @@ export class Session implements AsyncDisposable {
       messages: payload?.messages ?? [],
       nextBefore: payload?.next_before ?? null,
       hasMore: payload?.has_more ?? false,
+    };
+  }
+
+  /**
+   * Fetch all data needed to render the initial conversation view in one round-trip.
+   *
+   * Returns resolved session metadata + initial history page + pending approval flag
+   * + optional timing breakdown.  This is faster than separate initialize() + listMessages()
+   * calls because the CLI collects and returns everything in a single control response.
+   *
+   * The session must be initialized before calling this method.
+   */
+  async bootstrapState(
+    options: BootstrapStateOptions = {},
+  ): Promise<BootstrapStateResult> {
+    if (!this.initialized) {
+      throw new Error(
+        "Session must be initialized before calling bootstrapState()",
+      );
+    }
+
+    const requestId = `bootstrap-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    const responsePromise = new Promise<{
+      subtype: string;
+      response?: unknown;
+      error?: string;
+    }>((resolve) => {
+      this.controlResponseWaiters.set(requestId, resolve);
+    });
+
+    await this.transport.write({
+      type: "control_request",
+      request_id: requestId,
+      request: {
+        subtype: "bootstrap_session_state",
+        ...(options.limit !== undefined ? { limit: options.limit } : {}),
+        ...(options.order ? { order: options.order } : {}),
+      },
+    });
+
+    const resp = await responsePromise;
+
+    if (!resp) {
+      throw new Error("Session closed before bootstrapState response arrived");
+    }
+    if (resp.subtype === "error") {
+      throw new Error(
+        (resp as { error?: string }).error ?? "bootstrapState failed",
+      );
+    }
+
+    const payload = resp.response as {
+      agent_id?: string;
+      conversation_id?: string;
+      model?: string;
+      tools?: string[];
+      memfs_enabled?: boolean;
+      messages?: unknown[];
+      next_before?: string | null;
+      has_more?: boolean;
+      has_pending_approval?: boolean;
+      timings?: {
+        resolve_ms: number;
+        list_messages_ms: number;
+        total_ms: number;
+      };
+    } | undefined;
+
+    return {
+      agentId: payload?.agent_id ?? this._agentId ?? "",
+      conversationId: payload?.conversation_id ?? this._conversationId ?? "",
+      model: payload?.model,
+      tools: payload?.tools ?? [],
+      memfsEnabled: payload?.memfs_enabled ?? false,
+      messages: payload?.messages ?? [],
+      nextBefore: payload?.next_before ?? null,
+      hasMore: payload?.has_more ?? false,
+      hasPendingApproval: payload?.has_pending_approval ?? false,
+      timings: payload?.timings,
     };
   }
 

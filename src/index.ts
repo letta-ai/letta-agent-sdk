@@ -68,6 +68,9 @@ export type {
   // List messages API
   ListMessagesOptions,
   ListMessagesResult,
+  // Bootstrap API
+  BootstrapStateOptions,
+  BootstrapStateResult,
   // Tool types
   AgentTool,
   AgentToolResult,
@@ -214,6 +217,61 @@ export async function prompt(
     }
 
     return result;
+  } finally {
+    session.close();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SESSIONLESS APIs
+// ═══════════════════════════════════════════════════════════════
+
+import type { ListMessagesOptions, ListMessagesResult } from "./types.js";
+
+/**
+ * Fetch conversation messages without requiring a pre-existing session.
+ *
+ * Creates a transient CLI subprocess, fetches the requested message page, and
+ * closes the subprocess.  Useful for prefetching conversation histories before
+ * opening a full session (e.g. desktop sidebar warm-up).
+ *
+ * Routing follows the same semantics as session.listMessages():
+ * - Pass a conv-xxx conversationId to read a specific conversation.
+ * - Omit conversationId to read the agent's default conversation.
+ *
+ * @param agentId - Agent ID to fetch messages for.
+ * @param options - Pagination / filtering options (same as ListMessagesOptions).
+ *
+ * @example
+ * ```typescript
+ * // Prefetch default conversation
+ * const { messages } = await listMessagesDirect(agentId);
+ *
+ * // Prefetch a specific conversation
+ * const { messages, hasMore, nextBefore } = await listMessagesDirect(agentId, {
+ *   conversationId: 'conv-abc',
+ *   limit: 20,
+ *   order: 'desc',
+ * });
+ * ```
+ */
+export async function listMessagesDirect(
+  agentId: string,
+  options: ListMessagesOptions = {},
+): Promise<ListMessagesResult> {
+  // resumeSession uses --default which maps to the agent's default conversation.
+  // The session is transient: we only need it long enough to list messages.
+  const session = resumeSession(agentId, {
+    permissionMode: "bypassPermissions",
+    // Use skip policy so we don't wait on a git pull for a read-only prefetch.
+    memfsStartup: "skip",
+    // Disable skills/reminders to minimise startup overhead.
+    skillSources: [],
+    systemInfoReminder: false,
+  });
+  await session.initialize();
+  try {
+    return await session.listMessages(options);
   } finally {
     session.close();
   }

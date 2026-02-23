@@ -262,6 +262,12 @@ export interface InternalSessionOptions {
 
   /** If true, pass --include-partial-messages to CLI for token-level stream_event chunks */
   includePartialMessages?: boolean;
+
+  /**
+   * Controls how the git-backed memory pull runs at session startup.
+   * Maps to --memfs-startup <blocking|background|skip> CLI flag.
+   */
+  memfsStartup?: "blocking" | "background" | "skip";
 }
 
 export type PermissionMode =
@@ -330,6 +336,17 @@ export interface CreateSessionOptions {
    * stream_event chunks for incremental assistant/reasoning rendering.
    */
   includePartialMessages?: boolean;
+
+  /**
+   * Controls how the git-backed memory pull runs at session startup.
+   *
+   * - "blocking"  (default): await pull before emitting init; exit on conflict.
+   * - "background": fire pull async; session init proceeds immediately.
+   * - "skip": skip the pull entirely this session (fastest cold-open).
+   *
+   * Maps to the CLI --memfs-startup flag.
+   */
+  memfsStartup?: "blocking" | "background" | "skip";
 }
 
 /**
@@ -588,6 +605,53 @@ export interface ListMessagesResult {
   nextBefore?: string | null;
   /** Whether more pages exist in the requested direction. */
   hasMore?: boolean;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BOOTSTRAP SESSION STATE API
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Options for session.bootstrapState().
+ */
+export interface BootstrapStateOptions {
+  /** Max messages to include in the initial history page. Defaults to 50. */
+  limit?: number;
+  /** Sort order for initial history page. Defaults to "desc" (newest first). */
+  order?: "asc" | "desc";
+}
+
+/**
+ * Result from session.bootstrapState().
+ *
+ * Contains all data needed to render the initial conversation view
+ * without additional round-trips.
+ */
+export interface BootstrapStateResult {
+  /** Resolved agent ID for this session. */
+  agentId: string;
+  /** Resolved conversation ID for this session. */
+  conversationId: string;
+  /** LLM model handle. */
+  model: string | undefined;
+  /** Tool names registered on the agent. */
+  tools: string[];
+  /** Whether memfs (git-backed memory) is enabled. */
+  memfsEnabled: boolean;
+  /** Initial history page (same shape as listMessages.messages). */
+  messages: unknown[];
+  /** Cursor to fetch older messages. Null when no more pages. */
+  nextBefore: string | null;
+  /** Whether more history pages exist. */
+  hasMore: boolean;
+  /** Whether there is a pending approval waiting for a response. */
+  hasPendingApproval: boolean;
+  /** Wall-clock timing breakdown in milliseconds (if provided by CLI). */
+  timings?: {
+    resolve_ms: number;
+    list_messages_ms: number;
+    total_ms: number;
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════
