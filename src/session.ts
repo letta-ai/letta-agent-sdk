@@ -684,6 +684,24 @@ export class Session implements AsyncDisposable {
           uuid: msg.uuid,
         };
       }
+
+      // Stop reason message — carries error detail when the agent run terminates.
+      // Without this, the error info is lost and only the opaque result "error" surfaces.
+      if (msg.message_type === "stop_reason") {
+        const stopMsg = wireMsg as WireMessage & {
+          stop_reason?: string;
+          reason?: string;
+        };
+        const reason = stopMsg.stop_reason || stopMsg.reason || "unknown";
+        // Only surface as error if it's not a normal completion
+        if (reason !== "end_turn" && reason !== "max_tokens") {
+          return {
+            type: "error" as const,
+            message: `Agent stopped: ${reason}`,
+            stopReason: reason,
+          };
+        }
+      }
     }
 
     // Stream event (partial message updates)
