@@ -40,6 +40,68 @@ function toolChunk(
   } as unknown as WireMessage;
 }
 
+function indexedToolChunk(
+  index: number,
+  args: string,
+  uuid: string,
+  opts: {
+    toolCallId?: string;
+    toolName?: string;
+    messageType?: "tool_call_message" | "approval_request_message";
+  } = {}
+): WireMessage {
+  const toolCall: Record<string, unknown> = {
+    name: opts.toolName ?? "Bash",
+    arguments: args,
+    index,
+  };
+
+  if (opts.toolCallId) {
+    toolCall.tool_call_id = opts.toolCallId;
+  }
+
+  return {
+    type: "message",
+    message_type: opts.messageType ?? "tool_call_message",
+    uuid,
+    tool_calls: [toolCall],
+  } as unknown as WireMessage;
+}
+
+function nestedFunctionChunk(
+  index: number,
+  args: string,
+  uuid: string,
+  opts: {
+    toolCallId?: string;
+    toolId?: string;
+    toolName?: string;
+    messageType?: "tool_call_message" | "approval_request_message";
+  } = {}
+): WireMessage {
+  const toolCall: Record<string, unknown> = {
+    index,
+    function: {
+      name: opts.toolName ?? "Bash",
+      arguments: args,
+    },
+  };
+
+  if (opts.toolCallId) {
+    toolCall.tool_call_id = opts.toolCallId;
+  }
+  if (opts.toolId) {
+    toolCall.id = opts.toolId;
+  }
+
+  return {
+    type: "message",
+    message_type: opts.messageType ?? "tool_call_message",
+    uuid,
+    tool_calls: [toolCall],
+  } as unknown as WireMessage;
+}
+
 function reasoningChunk(uuid: string, text = "done"): WireMessage {
   return {
     type: "message",
@@ -150,5 +212,77 @@ describe("tool call argument accumulation", () => {
     const toolMsg = msgs.find((m) => m.type === "tool_call");
     expect(toolMsg).toBeDefined();
     expect(toolMsg?.toolInput).toEqual({ command: "echo hi" });
+  });
+
+  test("accumulates index-only continuation chunks after first id-bearing chunk", async () => {
+    const { transport } = makeFakeTransport([
+      indexedToolChunk(0, '{"command":"echo', "msg-7", { toolCallId: "tc-4" }),
+      indexedToolChunk(0, ' hi"}', "msg-7"),
+      reasoningChunk("msg-8"),
+    ]);
+
+    const session = new Session({ agentId: "agent-test" });
+    (session as unknown as { transport: FakeTransport }).transport = transport;
+
+    await (session as unknown as { runBackgroundPump: () => Promise<void> })
+      .runBackgroundPump();
+
+    const msgs = queuedMessages(session);
+    const toolMsg = msgs.find((m) => m.type === "tool_call");
+    expect(toolMsg).toBeDefined();
+    expect(toolMsg?.toolCallId).toBe("tc-4");
+    expect(toolMsg?.toolInput).toEqual({ command: "echo hi" });
+  });
+
+  test("handles nested OpenAI function chunks with tool_call_id + index continuation", async () => {
+    const { transport } = makeFakeTransport([
+      nestedFunctionChunk(1, '{"command":"echo', "msg-9", {
+        toolCallId: "tc-5",
+        toolName: "Bash",
+      }),
+      nestedFunctionChunk(1, ' hi"}', "msg-9", {
+        toolName: "Bash",
+      }),
+      reasoningChunk("msg-10"),
+    ]);
+
+    const session = new Session({ agentId: "agent-test" });
+    (session as unknown as { transport: FakeTransport }).transport = transport;
+
+    await (session as unknown as { runBackgroundPump: () => Promise<void> })
+      .runBackgroundPump();
+
+    const msgs = queuedMessages(session);
+    const toolMsg = msgs.find((m) => m.type === "tool_call");
+    expect(toolMsg).toBeDefined();
+    expect(toolMsg?.toolCallId).toBe("tc-5");
+    expect(toolMsg?.toolName).toBe("Bash");
+    expect(toolMsg?.toolInput).toEqual({ command: "echo hi" });
+  });
+
+  test("handles nested OpenAI function chunks keyed by id + index continuation", async () => {
+    const { transport } = makeFakeTransport([
+      nestedFunctionChunk(2, '{"query":"hello', "msg-11", {
+        toolId: "call_abc123",
+        toolName: "web_search",
+      }),
+      nestedFunctionChunk(2, ' world"}', "msg-11", {
+        toolName: "web_search",
+      }),
+      reasoningChunk("msg-12"),
+    ]);
+
+    const session = new Session({ agentId: "agent-test" });
+    (session as unknown as { transport: FakeTransport }).transport = transport;
+
+    await (session as unknown as { runBackgroundPump: () => Promise<void> })
+      .runBackgroundPump();
+
+    const msgs = queuedMessages(session);
+    const toolMsg = msgs.find((m) => m.type === "tool_call");
+    expect(toolMsg).toBeDefined();
+    expect(toolMsg?.toolCallId).toBe("call_abc123");
+    expect(toolMsg?.toolName).toBe("web_search");
+    expect(toolMsg?.toolInput).toEqual({ query: "hello world" });
   });
 });

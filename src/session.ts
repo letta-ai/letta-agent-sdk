@@ -298,7 +298,7 @@ export class Session implements AsyncDisposable {
       if (!tc) return null;
 
       // Resolve tool_call_id: direct field, or via index mapping from first chunk
-      let tcId = tc.tool_call_id as string | undefined;
+      let tcId = (tc.tool_call_id as string | undefined) ?? (tc.id as string | undefined);
       const tcIndex = tc.index as number | undefined;
 
       // Extract args from either flat format or OpenAI nested `function` format
@@ -323,15 +323,34 @@ export class Session implements AsyncDisposable {
     };
 
     const flushPendingToolCalls = () => {
+      const patchToolCallArgs = (
+        tc: Record<string, unknown>,
+        args: string,
+      ): Record<string, unknown> => {
+        const fnObj = tc.function as Record<string, unknown> | undefined;
+        return {
+          ...tc,
+          // Keep top-level args up to date for flat-wire consumers.
+          arguments: args,
+          // Also patch nested OpenAI function args when present.
+          ...(fnObj ? { function: { ...fnObj, arguments: args } } : {}),
+        };
+      };
+
       for (const [, pending] of pendingToolCalls) {
         // Patch the accumulated arguments into the wire message before transforming
         const patched = { ...pending.wireMsg } as Record<string, unknown>;
-        const toolCalls = patched.tool_calls as Array<{ name: string; arguments: string; tool_call_id: string }> | undefined;
-        const toolCall = patched.tool_call as { name: string; arguments: string; tool_call_id: string } | undefined;
+        const toolCalls = patched.tool_calls as Array<Record<string, unknown>> | undefined;
+        const toolCall = patched.tool_call as Record<string, unknown> | undefined;
         if (toolCalls?.[0]) {
-          patched.tool_calls = [{ ...toolCalls[0], arguments: pending.accumulatedArgs }];
+          patched.tool_calls = [
+            patchToolCallArgs(toolCalls[0], pending.accumulatedArgs),
+          ];
         } else if (toolCall) {
-          patched.tool_call = { ...toolCall, arguments: pending.accumulatedArgs };
+          patched.tool_call = patchToolCallArgs(
+            toolCall,
+            pending.accumulatedArgs,
+          );
         }
         const sdkMsg = this.transformMessage(patched as unknown as WireMessage);
         if (sdkMsg) {
@@ -950,18 +969,35 @@ export class Session implements AsyncDisposable {
 
       // Tool call message (tool_call_message = auto-executed, approval_request_message = needs approval)
       if (msg.message_type === "tool_call_message" || msg.message_type === "approval_request_message") {
-        const toolCall = msg.tool_calls?.[0] || msg.tool_call;
-        if (toolCall) {
+        const toolCallRaw = (msg.tool_calls?.[0] || msg.tool_call) as Record<string, unknown> | undefined;
+        if (toolCallRaw) {
+          const fnObj = toolCallRaw.function as Record<string, unknown> | undefined;
+          const toolCallId =
+            (toolCallRaw.tool_call_id as string | undefined) ??
+            (toolCallRaw.id as string | undefined);
+          if (!toolCallId) {
+            return null;
+          }
+
+          const toolName =
+            (toolCallRaw.name as string | undefined) ??
+            (fnObj?.name as string | undefined) ??
+            "?";
+          const toolArgs =
+            (toolCallRaw.arguments as string | undefined) ??
+            (fnObj?.arguments as string | undefined) ??
+            "";
+
           let toolInput: Record<string, unknown> = {};
           try {
-            toolInput = JSON.parse(toolCall.arguments);
+            toolInput = JSON.parse(toolArgs);
           } catch {
-            toolInput = { raw: toolCall.arguments };
+            toolInput = { raw: toolArgs };
           }
           return {
             type: "tool_call",
-            toolCallId: toolCall.tool_call_id,
-            toolName: toolCall.name,
+            toolCallId,
+            toolName,
             toolInput,
             uuid: msg.uuid,
           };
