@@ -1,7 +1,7 @@
 import { describe, expect, test, mock, beforeAll, afterAll } from "bun:test";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { imageFromFile, imageFromBase64, imageFromURL } from "./index.js";
+import { imageFromFile, imageFromBase64, imageFromURL } from "../index.js";
 
 describe("Image helpers", () => {
   describe("imageFromFile", () => {

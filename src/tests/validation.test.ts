@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { validateCreateAgentOptions, validateCreateSessionOptions } from "./validation.js";
+import { validateCreateAgentOptions, validateCreateSessionOptions } from "../validation.js";
 
 describe("validation", () => {
   test("accepts valid session skill/reminder/sleeptime options", () => {

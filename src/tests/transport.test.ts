@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
-import { SubprocessTransport } from "./transport.js";
+import { SubprocessTransport } from "../transport.js";
 
 describe("CLI resolution", () => {
   test("resolves @letta-ai/letta-code via package main export", () => {

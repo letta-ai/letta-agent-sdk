@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Session } from "./session.js";
-import type { MessageWire, SDKMessage, WireMessage } from "./types.js";
+import { Session } from "../session.js";
+import type { MessageWire, SDKMessage, WireMessage } from "../types.js";
 
 const BUFFER_LIMIT = 100;
 
