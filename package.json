@@ -1,6 +1,6 @@
 {
   "name": "@letta-ai/letta-code-sdk",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "SDK for programmatic control of Letta Code CLI",
   "type": "module",
   "main": "./dist/index.js",

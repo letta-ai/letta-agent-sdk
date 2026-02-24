@@ -263,112 +263,21 @@ export class Session implements AsyncDisposable {
   private async runBackgroundPump(): Promise<void> {
     sessionLog("pump", "background pump started");
 
-    // Buffer for accumulating tool_call_message arguments.
-    // The CLI streams tool_call_message in chunks with partial `arguments`.
-    // We accumulate args per tool_call_id and flush the complete message when
-    // a different message type arrives or the pump ends.
+    // Tool call chunks are emitted immediately (no buffering).
+    // Consumers that need complete arguments should accumulate rawArguments
+    // across chunks sharing the same toolCallId on their side.
     //
-    // IMPORTANT: The Letta API follows the OpenAI streaming format for parallel
-    // tool calls -- only the FIRST chunk per tool call includes `tool_call_id`.
-    // Subsequent chunks identify themselves via `index` only. We maintain an
-    // index-to-id mapping to associate argument deltas with their parent call.
-    const pendingToolCalls = new Map<string, {
-      wireMsg: WireMessage;
-      accumulatedArgs: string;
-    }>();
+    // Index-to-ID mapping: The Letta API follows the OpenAI streaming format
+    // for parallel tool calls -- only the first chunk per tool call includes
+    // tool_call_id, subsequent chunks identify themselves via index only.
+    // We maintain a lightweight index->id map so transformMessage() can
+    // resolve the ID for every chunk without buffering.
     const indexToToolCallId = new Map<number, string>();
-
-    const mergeToolArgs = (existing: string, incoming: string): string => {
-      if (!incoming) return existing;
-      if (!existing) return incoming;
-      if (incoming === existing) return existing;
-
-      // Handle cumulative chunking where the latest chunk already includes prior text.
-      if (incoming.startsWith(existing)) return incoming;
-      if (existing.endsWith(incoming)) return existing;
-
-      // Handle delta chunking where each chunk is an append.
-      return `${existing}${incoming}`;
-    };
-
-    const extractToolCall = (wireMsgAny: Record<string, unknown>) => {
-      const toolCalls = wireMsgAny.tool_calls as Array<Record<string, unknown>> | undefined;
-      const toolCall = wireMsgAny.tool_call as Record<string, unknown> | undefined;
-      const tc = toolCalls?.[0] || toolCall;
-      if (!tc) return null;
-
-      // Resolve tool_call_id: direct field, or via index mapping from first chunk
-      let tcId = (tc.tool_call_id as string | undefined) ?? (tc.id as string | undefined);
-      const tcIndex = tc.index as number | undefined;
-
-      // Extract args from either flat format or OpenAI nested `function` format
-      const fnObj = tc.function as Record<string, unknown> | undefined;
-      const argsText = (tc.arguments as string | undefined) ?? (fnObj?.arguments as string | undefined) ?? "";
-      const toolName = (tc.name as string | undefined) ?? (fnObj?.name as string | undefined);
-
-      if (tcId && tcIndex !== undefined) {
-        // First chunk for this index: establish index -> id mapping
-        indexToToolCallId.set(tcIndex, tcId);
-      } else if (!tcId && tcIndex !== undefined) {
-        // Subsequent chunk: look up id by index
-        tcId = indexToToolCallId.get(tcIndex);
-      }
-
-      if (!tcId) return null;
-      return {
-        id: tcId,
-        name: toolName ?? "?",
-        args: argsText,
-      };
-    };
-
-    const flushPendingToolCalls = () => {
-      const patchToolCallArgs = (
-        tc: Record<string, unknown>,
-        args: string,
-      ): Record<string, unknown> => {
-        const fnObj = tc.function as Record<string, unknown> | undefined;
-        return {
-          ...tc,
-          // Keep top-level args up to date for flat-wire consumers.
-          arguments: args,
-          // Also patch nested OpenAI function args when present.
-          ...(fnObj ? { function: { ...fnObj, arguments: args } } : {}),
-        };
-      };
-
-      for (const [, pending] of pendingToolCalls) {
-        // Patch the accumulated arguments into the wire message before transforming
-        const patched = { ...pending.wireMsg } as Record<string, unknown>;
-        const toolCalls = patched.tool_calls as Array<Record<string, unknown>> | undefined;
-        const toolCall = patched.tool_call as Record<string, unknown> | undefined;
-        if (toolCalls?.[0]) {
-          patched.tool_calls = [
-            patchToolCallArgs(toolCalls[0], pending.accumulatedArgs),
-          ];
-        } else if (toolCall) {
-          patched.tool_call = patchToolCallArgs(
-            toolCall,
-            pending.accumulatedArgs,
-          );
-        }
-        const sdkMsg = this.transformMessage(patched as unknown as WireMessage);
-        if (sdkMsg) {
-          this.enqueueStreamMessage(sdkMsg);
-        }
-      }
-      pendingToolCalls.clear();
-      indexToToolCallId.clear();
-    };
 
     for await (const wireMsg of this.transport.messages()) {
       const wireMsgAny = wireMsg as unknown as Record<string, unknown>;
 
       if (wireMsg.type === "control_request") {
-        // Ensure tool rows/args are visible before any runtime approval callback.
-        if (pendingToolCalls.size > 0) {
-          flushPendingToolCalls();
-        }
         const handled = await this.handleControlRequest(wireMsg as ControlRequest);
         if (!handled) {
           sessionLog("pump", `DROPPED unsupported control_request: subtype=${(wireMsgAny.request as Record<string, unknown>)?.subtype || "N/A"}`);
@@ -393,39 +302,33 @@ export class Session implements AsyncDisposable {
         continue;
       }
 
-      // Accumulate tool_call_message arguments across streaming chunks.
-      // The CLI sends partial args in each chunk; we concatenate and flush
-      // the complete message when a different type arrives.
+      // For tool_call_message chunks, resolve index-based IDs before transform.
+      // The first chunk has both tool_call_id and index; subsequent chunks have
+      // only index. Patch the wire message so transformMessage() always sees an ID.
       const messageType = wireMsgAny.message_type as string | undefined;
-
       if (wireMsg.type === "message" && (messageType === "tool_call_message" || messageType === "approval_request_message")) {
-        const toolCall = extractToolCall(wireMsgAny);
-        if (toolCall) {
-          const existing = pendingToolCalls.get(toolCall.id);
-          if (existing) {
-            // Same tool_call_id: accumulate arguments
-            existing.accumulatedArgs = mergeToolArgs(
-              existing.accumulatedArgs,
-              toolCall.args
-            );
-            sessionLog("pump", `tool_call args accumulated for ${toolCall.id}: +${toolCall.args.length} chars`);
-          } else {
-            // New tool_call_id: buffer it
-            pendingToolCalls.set(toolCall.id, {
-              wireMsg,
-              accumulatedArgs: toolCall.args,
-            });
-            sessionLog("pump", `tool_call buffered: ${toolCall.name} id=${toolCall.id}`);
-          }
-          continue;
-        }
-        // No tool_call_id -- fall through to normal processing
-      }
+        const toolCalls = wireMsgAny.tool_calls as Array<Record<string, unknown>> | undefined;
+        const toolCall = wireMsgAny.tool_call as Record<string, unknown> | undefined;
+        const tc = toolCalls?.[0] || toolCall;
+        if (tc) {
+          const fnObj = tc.function as Record<string, unknown> | undefined;
+          const tcId = (tc.tool_call_id as string | undefined) ?? (tc.id as string | undefined);
+          const tcIndex = tc.index as number | undefined;
 
-      // Non-tool_call message: flush any pending tool calls first.
-      // Skip flush for stream_event to avoid premature flush of incomplete tool calls.
-      if (pendingToolCalls.size > 0 && wireMsg.type !== "stream_event") {
-        flushPendingToolCalls();
+          if (tcId && tcIndex !== undefined) {
+            indexToToolCallId.set(tcIndex, tcId);
+          } else if (!tcId && tcIndex !== undefined) {
+            const resolvedId = indexToToolCallId.get(tcIndex);
+            if (resolvedId) {
+              // Patch the resolved ID into the wire message for transformMessage
+              if (fnObj) {
+                tc.id = resolvedId;
+              } else {
+                tc.tool_call_id = resolvedId;
+              }
+            }
+          }
+        }
       }
 
       const sdkMsg = this.transformMessage(wireMsg);
@@ -434,11 +337,6 @@ export class Session implements AsyncDisposable {
       } else {
         sessionLog("pump", `DROPPED wire message: type=${wireMsg.type} message_type=${wireMsgAny.message_type || "N/A"} subtype=${wireMsgAny.subtype || "N/A"}`);
       }
-    }
-
-    // Flush any remaining buffered tool calls on pump end
-    if (pendingToolCalls.size > 0) {
-      flushPendingToolCalls();
     }
 
     sessionLog("pump", "background pump ended");
@@ -999,6 +897,7 @@ export class Session implements AsyncDisposable {
             toolCallId,
             toolName,
             toolInput,
+            rawArguments: toolArgs || undefined,
             uuid: msg.uuid,
           };
         }

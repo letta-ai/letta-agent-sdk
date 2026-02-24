@@ -111,25 +111,13 @@ function reasoningChunk(uuid: string, text = "done"): WireMessage {
   } as unknown as WireMessage;
 }
 
-function canUseToolRequest(requestId: string): WireMessage {
-  return {
-    type: "control_request",
-    request_id: requestId,
-    request: {
-      subtype: "can_use_tool",
-      tool_name: "Bash",
-      input: { command: "echo hi" },
-    },
-  } as unknown as WireMessage;
-}
-
 function queuedMessages(session: Session) {
   return ((session as unknown as { streamQueue: unknown[] }).streamQueue ??
     []) as Array<Record<string, unknown>>;
 }
 
-describe("tool call argument accumulation", () => {
-  test("accumulates delta chunks and parses final tool input", async () => {
+describe("tool call streaming passthrough", () => {
+  test("emits each chunk immediately with rawArguments", async () => {
     const { transport } = makeFakeTransport([
       toolChunk("tc-1", '{"command":"echo', "msg-1"),
       toolChunk("tc-1", ' hi"}', "msg-1"),
@@ -143,62 +131,46 @@ describe("tool call argument accumulation", () => {
       .runBackgroundPump();
 
     const msgs = queuedMessages(session);
-    const toolMsg = msgs.find((m) => m.type === "tool_call");
-    expect(toolMsg).toBeDefined();
-    expect(toolMsg?.toolInput).toEqual({ command: "echo hi" });
+    const toolMsgs = msgs.filter((m) => m.type === "tool_call");
+
+    // Both chunks should be emitted individually (no buffering)
+    expect(toolMsgs.length).toBe(2);
+
+    // First chunk has partial args
+    expect(toolMsgs[0]?.toolCallId).toBe("tc-1");
+    expect(toolMsgs[0]?.rawArguments).toBe('{"command":"echo');
+
+    // Second chunk has the continuation
+    expect(toolMsgs[1]?.toolCallId).toBe("tc-1");
+    expect(toolMsgs[1]?.rawArguments).toBe(' hi"}');
+
+    // Reasoning message also present
+    expect(msgs.some((m) => m.type === "reasoning")).toBe(true);
   });
 
-  test("flushes pending tool call before control_request callback runs", async () => {
-    const queueSizesSeenByCallback: number[] = [];
-
-    const canUseTool = mock(() => {
-      queueSizesSeenByCallback.push(
-        queuedMessages(session).filter((m) => m.type === "tool_call").length
-      );
-      return {
-        behavior: "allow" as const,
-        updatedInput: null,
-        updatedPermissions: [],
-      };
-    });
-
-    const { transport, writes } = makeFakeTransport([
-      toolChunk("tc-2", '{"command":"echo', "msg-3"),
-      toolChunk("tc-2", ' hi"}', "msg-3"),
-      canUseToolRequest("can-use-1"),
+  test("emits single complete chunk with parsed toolInput", async () => {
+    const { transport } = makeFakeTransport([
+      toolChunk("tc-2", '{"command":"echo hi"}', "msg-3"),
       reasoningChunk("msg-4"),
     ]);
 
-    const session = new Session({
-      agentId: "agent-test",
-      canUseTool,
-    });
+    const session = new Session({ agentId: "agent-test" });
     (session as unknown as { transport: FakeTransport }).transport = transport;
 
     await (session as unknown as { runBackgroundPump: () => Promise<void> })
       .runBackgroundPump();
 
-    expect(canUseTool).toHaveBeenCalledTimes(1);
-    expect(queueSizesSeenByCallback[0]).toBe(1);
-    expect(
-      writes.some((w) => {
-        const wire = w as {
-          type?: string;
-          response?: { request_id?: string; subtype?: string };
-        };
-        return (
-          wire.type === "control_response" &&
-          wire.response?.request_id === "can-use-1" &&
-          wire.response?.subtype === "success"
-        );
-      })
-    ).toBe(true);
+    const msgs = queuedMessages(session);
+    const toolMsg = msgs.find((m) => m.type === "tool_call");
+    expect(toolMsg).toBeDefined();
+    expect(toolMsg?.toolInput).toEqual({ command: "echo hi" });
+    expect(toolMsg?.rawArguments).toBe('{"command":"echo hi"}');
   });
 
-  test("handles cumulative chunks without duplicating prior arguments", async () => {
+  test("resolves index-only continuation chunks to correct toolCallId", async () => {
     const { transport } = makeFakeTransport([
-      toolChunk("tc-3", '{"command":"ec', "msg-5"),
-      toolChunk("tc-3", '{"command":"echo hi"}', "msg-5"),
+      indexedToolChunk(0, '{"command":"echo', "msg-5", { toolCallId: "tc-3" }),
+      indexedToolChunk(0, ' hi"}', "msg-5"),
       reasoningChunk("msg-6"),
     ]);
 
@@ -209,15 +181,23 @@ describe("tool call argument accumulation", () => {
       .runBackgroundPump();
 
     const msgs = queuedMessages(session);
-    const toolMsg = msgs.find((m) => m.type === "tool_call");
-    expect(toolMsg).toBeDefined();
-    expect(toolMsg?.toolInput).toEqual({ command: "echo hi" });
+    const toolMsgs = msgs.filter((m) => m.type === "tool_call");
+
+    // Both chunks emitted, both resolved to same toolCallId
+    expect(toolMsgs.length).toBe(2);
+    expect(toolMsgs[0]?.toolCallId).toBe("tc-3");
+    expect(toolMsgs[1]?.toolCallId).toBe("tc-3");
   });
 
-  test("accumulates index-only continuation chunks after first id-bearing chunk", async () => {
+  test("resolves nested OpenAI function chunks with id + index continuation", async () => {
     const { transport } = makeFakeTransport([
-      indexedToolChunk(0, '{"command":"echo', "msg-7", { toolCallId: "tc-4" }),
-      indexedToolChunk(0, ' hi"}', "msg-7"),
+      nestedFunctionChunk(1, '{"command":"echo', "msg-7", {
+        toolCallId: "tc-4",
+        toolName: "Bash",
+      }),
+      nestedFunctionChunk(1, ' hi"}', "msg-7", {
+        toolName: "Bash",
+      }),
       reasoningChunk("msg-8"),
     ]);
 
@@ -228,20 +208,22 @@ describe("tool call argument accumulation", () => {
       .runBackgroundPump();
 
     const msgs = queuedMessages(session);
-    const toolMsg = msgs.find((m) => m.type === "tool_call");
-    expect(toolMsg).toBeDefined();
-    expect(toolMsg?.toolCallId).toBe("tc-4");
-    expect(toolMsg?.toolInput).toEqual({ command: "echo hi" });
+    const toolMsgs = msgs.filter((m) => m.type === "tool_call");
+
+    expect(toolMsgs.length).toBe(2);
+    expect(toolMsgs[0]?.toolCallId).toBe("tc-4");
+    expect(toolMsgs[0]?.toolName).toBe("Bash");
+    expect(toolMsgs[1]?.toolCallId).toBe("tc-4");
   });
 
-  test("handles nested OpenAI function chunks with tool_call_id + index continuation", async () => {
+  test("resolves nested OpenAI function chunks keyed by id field", async () => {
     const { transport } = makeFakeTransport([
-      nestedFunctionChunk(1, '{"command":"echo', "msg-9", {
-        toolCallId: "tc-5",
-        toolName: "Bash",
+      nestedFunctionChunk(2, '{"query":"hello', "msg-9", {
+        toolId: "call_abc123",
+        toolName: "web_search",
       }),
-      nestedFunctionChunk(1, ' hi"}', "msg-9", {
-        toolName: "Bash",
+      nestedFunctionChunk(2, ' world"}', "msg-9", {
+        toolName: "web_search",
       }),
       reasoningChunk("msg-10"),
     ]);
@@ -253,22 +235,22 @@ describe("tool call argument accumulation", () => {
       .runBackgroundPump();
 
     const msgs = queuedMessages(session);
-    const toolMsg = msgs.find((m) => m.type === "tool_call");
-    expect(toolMsg).toBeDefined();
-    expect(toolMsg?.toolCallId).toBe("tc-5");
-    expect(toolMsg?.toolName).toBe("Bash");
-    expect(toolMsg?.toolInput).toEqual({ command: "echo hi" });
+    const toolMsgs = msgs.filter((m) => m.type === "tool_call");
+
+    expect(toolMsgs.length).toBe(2);
+    expect(toolMsgs[0]?.toolCallId).toBe("call_abc123");
+    expect(toolMsgs[0]?.toolName).toBe("web_search");
+    expect(toolMsgs[1]?.toolCallId).toBe("call_abc123");
   });
 
-  test("handles nested OpenAI function chunks keyed by id + index continuation", async () => {
+  test("parallel tool calls emit independently with correct IDs", async () => {
     const { transport } = makeFakeTransport([
-      nestedFunctionChunk(2, '{"query":"hello', "msg-11", {
-        toolId: "call_abc123",
-        toolName: "web_search",
-      }),
-      nestedFunctionChunk(2, ' world"}', "msg-11", {
-        toolName: "web_search",
-      }),
+      // Tool A: first chunk
+      indexedToolChunk(0, '{"command":"ls"}', "msg-11", { toolCallId: "tc-A" }),
+      // Tool B: first chunk
+      indexedToolChunk(1, '{"query":"test"}', "msg-11", { toolCallId: "tc-B", toolName: "web_search" }),
+      // Tool A: second chunk
+      indexedToolChunk(0, '', "msg-11"),
       reasoningChunk("msg-12"),
     ]);
 
@@ -279,10 +261,12 @@ describe("tool call argument accumulation", () => {
       .runBackgroundPump();
 
     const msgs = queuedMessages(session);
-    const toolMsg = msgs.find((m) => m.type === "tool_call");
-    expect(toolMsg).toBeDefined();
-    expect(toolMsg?.toolCallId).toBe("call_abc123");
-    expect(toolMsg?.toolName).toBe("web_search");
-    expect(toolMsg?.toolInput).toEqual({ query: "hello world" });
+    const toolMsgs = msgs.filter((m) => m.type === "tool_call");
+
+    // 3 tool_call chunks emitted (2 for A, 1 for B)
+    expect(toolMsgs.length).toBe(3);
+    expect(toolMsgs[0]?.toolCallId).toBe("tc-A");
+    expect(toolMsgs[1]?.toolCallId).toBe("tc-B");
+    expect(toolMsgs[2]?.toolCallId).toBe("tc-A"); // continuation via index
   });
 });

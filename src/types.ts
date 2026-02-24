@@ -460,6 +460,8 @@ export interface SDKToolCallMessage {
   toolCallId: string;
   toolName: string;
   toolInput: Record<string, unknown>;
+  /** Raw unparsed arguments string from the wire for consumer-side accumulation. */
+  rawArguments?: string;
   uuid: string;
 }
 

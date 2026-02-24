@@ -407,6 +407,7 @@ describe("Session", () => {
         toolCallId: "call-approval-1",
         toolName: "Bash",
         toolInput: { command: "pwd" },
+        rawArguments: JSON.stringify({ command: "pwd" }),
         uuid: "approval-1",
       });
     });
@@ -427,6 +428,7 @@ describe("Session", () => {
         toolCallId: "call-approval-2",
         toolName: "Read",
         toolInput: { raw: "path=/tmp/foo.txt" },
+        rawArguments: "path=/tmp/foo.txt",
         uuid: "approval-2",
       });
     });
