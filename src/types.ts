@@ -19,6 +19,10 @@ export type {
   CanUseToolResponse,
   CanUseToolResponseAllow,
   CanUseToolResponseDeny,
+  // Diff preview types (for approval UI rendering)
+  DiffPreview,
+  DiffHunk,
+  DiffHunkLine,
   // Configuration types
   SystemPromptPresetConfig,
   CreateBlock,
