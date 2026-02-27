@@ -198,6 +198,7 @@ export class SubprocessTransport {
   private agentId?: string;
   private wireMessageCount = 0;
   private lastMessageAt = 0;
+  private stderrLines: string[] = [];
 
   constructor(
     private options: InternalSessionOptions = {}
@@ -247,11 +248,13 @@ export class SubprocessTransport {
     });
 
     // Log stderr for debugging (CLI errors, auth failures, etc.)
+    // Also buffer lines so session.initialize() can include them in errors.
     if (this.process.stderr) {
       this.process.stderr.on("data", (data: Buffer) => {
         const msg = data.toString().trim();
         if (msg) {
           console.error("[letta-code-sdk] CLI stderr:", msg);
+          this.stderrLines.push(msg);
         }
       });
     }
@@ -354,6 +357,11 @@ export class SubprocessTransport {
 
   get isClosed(): boolean {
     return this.closed;
+  }
+
+  /** Return buffered stderr output from the CLI subprocess. */
+  getStderr(): string {
+    return this.stderrLines.join("\n");
   }
 
   private handleMessage(msg: WireMessage): void {
