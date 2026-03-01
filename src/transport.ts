@@ -1,7 +1,8 @@
 /**
- * SubprocessTransport
+ * Transport Layer
  *
- * Spawns the Letta Code CLI and communicates via stdin/stdout JSON streams.
+ * Defines the Transport interface for communicating with Letta Code,
+ * and provides SubprocessTransport (stdin/stdout JSON streams).
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -13,7 +14,30 @@ function sdkLog(tag: string, ...args: unknown[]) {
   if (process.env.DEBUG_SDK) console.error(`[SDK-Transport] [${tag}]`, ...args);
 }
 
-export class SubprocessTransport {
+/**
+ * Transport interface for communicating with a Letta Code instance.
+ *
+ * Implementations handle the connection lifecycle and bidirectional
+ * JSON message passing. The Session class is transport-agnostic —
+ * it works identically over stdio (SubprocessTransport) or
+ * WebSocket (WebSocketTransport).
+ */
+export interface Transport {
+  /** Establish the connection (spawn process, open WebSocket, etc.) */
+  connect(): Promise<void>;
+  /** Send a JSON message to the Letta Code instance */
+  write(data: object): Promise<void>;
+  /** Read the next message, or null if the connection is closed */
+  read(): Promise<WireMessage | null>;
+  /** Async iterator over all incoming messages until closed */
+  messages(): AsyncGenerator<WireMessage>;
+  /** Close the connection */
+  close(): void;
+  /** Whether the connection has been closed */
+  readonly isClosed: boolean;
+}
+
+export class SubprocessTransport implements Transport {
   private process: ChildProcess | null = null;
   private stdout: Interface | null = null;
   private messageQueue: WireMessage[] = [];

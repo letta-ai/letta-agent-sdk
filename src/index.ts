@@ -29,11 +29,13 @@
  */
 
 import { Session } from "./session.js";
-import type { CreateSessionOptions, CreateAgentOptions, SDKResultMessage } from "./types.js";
+import type { ConnectOptions, CreateSessionOptions, CreateAgentOptions, SDKResultMessage } from "./types.js";
+import { WebSocketTransport } from "./websocket-transport.js";
 import { validateCreateSessionOptions, validateCreateAgentOptions } from "./validation.js";
 
 // Re-export types
 export type {
+  ConnectOptions,
   CreateSessionOptions,
   CreateAgentOptions,
   SDKMessage,
@@ -68,6 +70,8 @@ export type {
 } from "./types.js";
 
 export { Session } from "./session.js";
+export type { Transport } from "./transport.js";
+export { WebSocketTransport } from "./websocket-transport.js";
 
 // Tool helpers
 export {
@@ -206,6 +210,69 @@ export async function prompt(
   } finally {
     session.close();
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// WEBSOCKET CONNECTION
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Connect to a remote Letta Code instance over WebSocket.
+ *
+ * Instead of spawning a local subprocess, this connects to a Letta Code
+ * agent running on a remote server (e.g. via `letta serve`). The agent
+ * is specified by URL query parameters.
+ *
+ * @example
+ * ```typescript
+ * // Connect to a remote agent
+ * const session = connect({
+ *   url: "ws://localhost:8374",
+ *   agentId: "agent-xxx",
+ *   permissionMode: "bypassPermissions",
+ * });
+ *
+ * await session.send("What files are in the current directory?");
+ * for await (const msg of session.stream()) {
+ *   if (msg.type === "assistant") console.log(msg.content);
+ *   if (msg.type === "result") break;
+ * }
+ * session.close();
+ * ```
+ *
+ * @example
+ * ```typescript
+ * // Connect with auth header (e.g. for cloud-hosted agents)
+ * const session = connect({
+ *   url: "wss://my-deployment.example.com",
+ *   agentId: "agent-xxx",
+ *   headers: { Authorization: `Bearer ${apiKey}` },
+ * });
+ * ```
+ */
+export function connect(options: ConnectOptions): Session {
+  // Build URL with agent/conversation query params
+  const wsUrl = new URL(options.url);
+  if (options.agentId) wsUrl.searchParams.set("agent", options.agentId);
+  if (options.conversationId)
+    wsUrl.searchParams.set("conversation", options.conversationId);
+  if (options.newConversation) wsUrl.searchParams.set("new", "true");
+  if (options.includePartialMessages)
+    wsUrl.searchParams.set("include-partial-messages", "true");
+
+  const transport = new WebSocketTransport(wsUrl.toString(), {
+    headers: options.headers,
+  });
+
+  return new Session(
+    {
+      permissionMode: options.permissionMode,
+      canUseTool: options.canUseTool,
+      tools: options.tools,
+      includePartialMessages: options.includePartialMessages,
+    },
+    transport,
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════

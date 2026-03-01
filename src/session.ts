@@ -5,7 +5,7 @@
  * Implements the V2 API pattern: send() / receive()
  */
 
-import { SubprocessTransport } from "./transport.js";
+import { SubprocessTransport, type Transport } from "./transport.js";
 import type {
   InternalSessionOptions,
   SDKMessage,
@@ -36,7 +36,7 @@ function sessionLog(tag: string, ...args: unknown[]) {
 const MAX_BUFFERED_STREAM_MESSAGES = 100;
 
 export class Session implements AsyncDisposable {
-  private transport: SubprocessTransport;
+  private transport: Transport;
   private _agentId: string | null = null;
   private _sessionId: string | null = null;
   private _conversationId: string | null = null;
@@ -49,10 +49,12 @@ export class Session implements AsyncDisposable {
   private droppedStreamMessages = 0;
 
   constructor(
-    private options: InternalSessionOptions = {}
+    private options: InternalSessionOptions = {},
+    transport?: Transport,
   ) {
     // Note: Validation happens in public API functions (createSession, createAgent, etc.)
-    this.transport = new SubprocessTransport(options);
+    // Use provided transport (e.g. WebSocket) or default to subprocess
+    this.transport = transport ?? new SubprocessTransport(options);
 
     // Store external tools in a map for quick lookup
     if (options.tools) {

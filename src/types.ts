@@ -413,6 +413,56 @@ export interface CreateAgentOptions {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// WEBSOCKET CONNECTION OPTIONS
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Options for connect() - connect to a remote Letta Code instance over WebSocket.
+ *
+ * Use this to drive a Letta Code agent running on a remote server
+ * (e.g. via `letta serve`) without spawning a local subprocess.
+ *
+ * @example
+ * ```typescript
+ * const session = connect({
+ *   url: "ws://localhost:8374",
+ *   agentId: "agent-xxx",
+ *   permissionMode: "bypassPermissions",
+ * });
+ * await session.send("Hello!");
+ * for await (const msg of session.stream()) { ... }
+ * ```
+ */
+export interface ConnectOptions {
+  /** WebSocket URL of the Letta Code serve endpoint */
+  url: string;
+
+  /** Additional headers for the WebSocket handshake (e.g. Authorization) */
+  headers?: Record<string, string>;
+
+  /** Agent ID to connect to (sent as query param) */
+  agentId?: string;
+
+  /** Conversation ID to resume (sent as query param) */
+  conversationId?: string;
+
+  /** Start a new conversation on the agent */
+  newConversation?: boolean;
+
+  /** Permission mode for this session */
+  permissionMode?: PermissionMode;
+
+  /** Custom permission callback */
+  canUseTool?: CanUseToolCallback;
+
+  /** Custom tools that execute locally in the SDK process */
+  tools?: AnyAgentTool[];
+
+  /** If true, receive token-level stream_event chunks */
+  includePartialMessages?: boolean;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // SDK MESSAGE TYPES
 // ═══════════════════════════════════════════════════════════════
 
