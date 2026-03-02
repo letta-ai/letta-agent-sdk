@@ -488,6 +488,8 @@ export interface SDKResultMessage {
   durationMs: number;
   totalCostUsd?: number;
   conversationId: string | null;
+  /** Run IDs associated with this turn (if provided by the CLI). */
+  runIds?: string[];
 }
 
 export interface SDKStreamEventDeltaPayload {

@@ -116,7 +116,16 @@ function createApprovalRequestMessage(
   };
 }
 
-function createResultMessage(): WireMessage {
+function createResultMessage(
+  overrides: Partial<{
+    subtype: string;
+    result: string | null;
+    duration_ms: number;
+    conversation_id: string;
+    stop_reason: string;
+    run_ids: unknown[];
+  }> = {},
+): WireMessage {
   return {
     type: "result",
     subtype: "success",
@@ -124,6 +133,7 @@ function createResultMessage(): WireMessage {
     duration_ms: 1,
     conversation_id: "conversation-1",
     stop_reason: "end_turn",
+    ...overrides,
   } as WireMessage;
 }
 
@@ -430,6 +440,45 @@ describe("Session", () => {
         toolInput: { raw: "path=/tmp/foo.txt" },
         rawArguments: "path=/tmp/foo.txt",
         uuid: "approval-2",
+      });
+    });
+  });
+
+  describe("transformMessage result mapping", () => {
+    test("maps result wire message run_ids to SDK runIds", () => {
+      const session = new Session();
+      const wireMsg = createResultMessage({
+        run_ids: ["run-1", "run-2"],
+      });
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toEqual({
+        type: "result",
+        success: true,
+        result: "done",
+        error: undefined,
+        stopReason: "end_turn",
+        durationMs: 1,
+        totalCostUsd: undefined,
+        conversationId: "conversation-1",
+        runIds: ["run-1", "run-2"],
+      });
+    });
+
+    test("filters non-string run_ids and preserves valid values", () => {
+      const session = new Session();
+      const wireMsg = createResultMessage({
+        run_ids: ["run-1", 42, null, "run-2"],
+      });
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toMatchObject({
+        type: "result",
+        runIds: ["run-1", "run-2"],
       });
     });
   });

@@ -947,7 +947,11 @@ export class Session implements AsyncDisposable {
         total_cost_usd?: number;
         conversation_id: string;
         stop_reason?: string;
+        run_ids?: unknown[];
       };
+      const runIds = Array.isArray(msg.run_ids)
+        ? msg.run_ids.filter((id): id is string => typeof id === "string")
+        : undefined;
       return {
         type: "result",
         success: msg.subtype === "success",
@@ -957,6 +961,7 @@ export class Session implements AsyncDisposable {
         durationMs: msg.duration_ms,
         totalCostUsd: msg.total_cost_usd,
         conversationId: msg.conversation_id,
+        runIds,
       };
     }
 
