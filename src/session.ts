@@ -53,11 +53,15 @@ export class Session implements AsyncDisposable {
   private pumpPromise: Promise<void> | null = null;
   private pumpClosed = false;
   private droppedStreamMessages = 0;
-  // Monotonic counter incremented after each send(). Messages enqueued by the
-  // pump are tagged with the current generation; stream() filters out messages
-  // from earlier generations to prevent N-1 desync (stale events from a
-  // previous run leaking into the current run's stream).
+  // Monotonic counter incremented before each send()'s transport write.
+  // Messages enqueued by the pump are associated (via WeakMap) with the
+  // current generation; stream() filters out messages from earlier generations
+  // to prevent N-1 desync (stale events from a previous run leaking into
+  // the current run's stream).
   private sendGeneration = 0;
+  // Side-channel for generation tagging — avoids attaching internal metadata
+  // to SDK message objects that are visible to consumers.
+  private messageGenerations = new WeakMap<SDKMessage, number>();
   // Waiters for SDK-initiated control requests (e.g., listMessages).
   // Keyed by request_id; pump resolves the matching waiter when it sees
   // a control_response with that request_id instead of queuing it as a stream msg.
@@ -207,16 +211,17 @@ export class Session implements AsyncDisposable {
       this.streamQueue.length = 0;
     }
 
+    // Advance generation BEFORE the write so that any stale messages the pump
+    // enqueues from the previous run during or after the await are tagged with
+    // the new generation boundary, preventing them from slipping through
+    // stream()'s filter after send() resolves.
+    this.sendGeneration++;
+    sessionLog("send", `generation advanced to ${this.sendGeneration}, writing to transport`);
+
     await this.transport.write({
       type: "user",
       message: { role: "user", content: message },
     });
-
-    // Advance generation AFTER the write so any messages the pump enqueues
-    // during the await (from the previous run's lingering events) are tagged
-    // with the old generation and will be filtered by stream().
-    this.sendGeneration++;
-    sessionLog("send", `message written to transport (generation=${this.sendGeneration})`);
   }
 
   /**
@@ -239,8 +244,8 @@ export class Session implements AsyncDisposable {
       }
 
       // Filter stale messages from previous runs. Messages enqueued before
-      // the current send() carry an older generation tag.
-      const msgGen = (sdkMsg as SDKMessage & { _generation?: number })._generation;
+      // the current send() carry an older generation tag (stored in a WeakMap).
+      const msgGen = this.messageGenerations.get(sdkMsg);
       if (msgGen !== undefined && msgGen < minGeneration) {
         staleCount++;
         sessionLog("stream", `discarding stale message: type=${sdkMsg.type} generation=${msgGen} (current=${minGeneration})`);
@@ -395,8 +400,10 @@ export class Session implements AsyncDisposable {
   }
 
   private enqueueStreamMessage(msg: SDKMessage): void {
-    // Tag with current generation so stream() can filter stale messages.
-    (msg as SDKMessage & { _generation?: number })._generation = this.sendGeneration;
+    // Associate with current generation so stream() can filter stale messages.
+    // Uses a WeakMap side-channel to avoid leaking internal metadata on
+    // public SDK message objects.
+    this.messageGenerations.set(msg, this.sendGeneration);
 
     if (this.streamResolvers.length > 0) {
       const resolve = this.streamResolvers.shift()!;

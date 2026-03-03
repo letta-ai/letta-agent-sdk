@@ -680,8 +680,11 @@ describe("Session", () => {
         expect(firstMessages).toHaveLength(2);
 
         // Simulate a stale message arriving (pump pushes it before next send clears queue).
-        // We inject it directly into the streamQueue with the OLD generation.
-        const staleMsg = { type: "assistant" as const, content: "stale", uuid: "stale-1", _generation: 1 };
+        // We inject it directly into the streamQueue with the OLD generation
+        // stored in the private WeakMap (mirrors what enqueueStreamMessage does).
+        const staleMsg = { type: "assistant" as const, content: "stale", uuid: "stale-1" } as SDKMessage;
+        // @ts-expect-error - accessing private field to simulate pump race
+        session.messageGenerations.set(staleMsg, 1);
         // @ts-expect-error - accessing private field to simulate pump race
         session.streamQueue.push(staleMsg);
 
@@ -692,9 +695,9 @@ describe("Session", () => {
 
         // But inject ANOTHER stale message after send() clears -- simulating
         // the pump pushing during the await in send().
-        const raceStalMsg = { type: "assistant" as const, content: "race-stale", uuid: "stale-2" };
+        const raceStalMsg = { type: "assistant" as const, content: "race-stale", uuid: "stale-2" } as SDKMessage;
         // @ts-expect-error - accessing private field
-        (raceStalMsg as unknown as { _generation: number })._generation = 1;
+        session.messageGenerations.set(raceStalMsg, 1);
         // @ts-expect-error - accessing private field
         session.streamQueue.unshift(raceStalMsg);
 
@@ -706,7 +709,7 @@ describe("Session", () => {
         // The stale message should be filtered -- only fresh messages from gen 2
         expect(secondMessages).toHaveLength(2);
         expect((secondMessages[0] as { content: string }).content).toBe("msg-2");
-        expect(secondMessages[1].type).toBe("result");
+        expect(secondMessages[1]!.type).toBe("result");
       } finally {
         session.close();
       }
