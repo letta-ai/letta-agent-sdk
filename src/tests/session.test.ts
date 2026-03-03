@@ -657,4 +657,157 @@ describe("Session", () => {
       }
     });
   });
+
+  describe("generation-based stale message filtering", () => {
+    test("filters stale messages enqueued before the current send()", async () => {
+      const session = new Session();
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        // First send + stream (establishes generation 1)
+        transport.push(createAssistantMessage(1));
+        transport.push(createResultMessage({ result: "first" }));
+        await session.send("first message");
+
+        const firstMessages: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          firstMessages.push(msg);
+        }
+        expect(firstMessages).toHaveLength(2);
+
+        // Simulate a stale message arriving (pump pushes it before next send clears queue).
+        // We inject it directly into the streamQueue with the OLD generation.
+        const staleMsg = { type: "assistant" as const, content: "stale", uuid: "stale-1", _generation: 1 };
+        // @ts-expect-error - accessing private field to simulate pump race
+        session.streamQueue.push(staleMsg);
+
+        // Second send (advances generation to 2, clears queue first)
+        transport.push(createAssistantMessage(2));
+        transport.push(createResultMessage({ result: "second" }));
+        await session.send("second message");
+
+        // But inject ANOTHER stale message after send() clears -- simulating
+        // the pump pushing during the await in send().
+        const raceStalMsg = { type: "assistant" as const, content: "race-stale", uuid: "stale-2" };
+        // @ts-expect-error - accessing private field
+        (raceStalMsg as unknown as { _generation: number })._generation = 1;
+        // @ts-expect-error - accessing private field
+        session.streamQueue.unshift(raceStalMsg);
+
+        const secondMessages: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          secondMessages.push(msg);
+        }
+
+        // The stale message should be filtered -- only fresh messages from gen 2
+        expect(secondMessages).toHaveLength(2);
+        expect((secondMessages[0] as { content: string }).content).toBe("msg-2");
+        expect(secondMessages[1].type).toBe("result");
+      } finally {
+        session.close();
+      }
+    });
+  });
+
+  describe("transformMessage run_id pass-through", () => {
+    test("includes runId on assistant messages", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "assistant_message",
+        uuid: "a-1",
+        content: "hello",
+        run_id: "run-abc",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({
+        type: "assistant",
+        content: "hello",
+        runId: "run-abc",
+      });
+    });
+
+    test("includes runId on tool_call messages", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "tool_call_message",
+        uuid: "tc-1",
+        run_id: "run-abc",
+        tool_calls: [{
+          tool_call_id: "call-1",
+          name: "Edit",
+          arguments: "{}",
+        }],
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({
+        type: "tool_call",
+        toolName: "Edit",
+        runId: "run-abc",
+      });
+    });
+
+    test("includes runId on reasoning messages", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "reasoning_message",
+        uuid: "r-1",
+        reasoning: "thinking...",
+        run_id: "run-abc",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({
+        type: "reasoning",
+        content: "thinking...",
+        runId: "run-abc",
+      });
+    });
+
+    test("includes runId on tool_result messages", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "tool_return_message",
+        uuid: "tr-1",
+        tool_call_id: "call-1",
+        tool_return: "success",
+        status: "success",
+        run_id: "run-abc",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({
+        type: "tool_result",
+        runId: "run-abc",
+      });
+    });
+
+    test("runId is undefined when wire message lacks run_id", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "assistant_message",
+        uuid: "a-2",
+        content: "no run id",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({ type: "assistant" });
+      expect((transformed as { runId?: string }).runId).toBeUndefined();
+    });
+  });
 });

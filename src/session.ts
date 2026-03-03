@@ -53,6 +53,11 @@ export class Session implements AsyncDisposable {
   private pumpPromise: Promise<void> | null = null;
   private pumpClosed = false;
   private droppedStreamMessages = 0;
+  // Monotonic counter incremented after each send(). Messages enqueued by the
+  // pump are tagged with the current generation; stream() filters out messages
+  // from earlier generations to prevent N-1 desync (stale events from a
+  // previous run leaking into the current run's stream).
+  private sendGeneration = 0;
   // Waiters for SDK-initiated control requests (e.g., listMessages).
   // Keyed by request_id; pump resolves the matching waiter when it sees
   // a control_response with that request_id instead of queuing it as a stream msg.
@@ -206,7 +211,12 @@ export class Session implements AsyncDisposable {
       type: "user",
       message: { role: "user", content: message },
     });
-    sessionLog("send", "message written to transport");
+
+    // Advance generation AFTER the write so any messages the pump enqueues
+    // during the await (from the previous run's lingering events) are tagged
+    // with the old generation and will be filtered by stream().
+    this.sendGeneration++;
+    sessionLog("send", `message written to transport (generation=${this.sendGeneration})`);
   }
 
   /**
@@ -214,16 +224,27 @@ export class Session implements AsyncDisposable {
    */
   async *stream(): AsyncGenerator<SDKMessage> {
     const streamStart = Date.now();
+    const minGeneration = this.sendGeneration;
     let yieldCount = 0;
+    let staleCount = 0;
     let gotResult = false;
 
     this.startBackgroundPump();
-    sessionLog("stream", `starting stream (agent=${this._agentId}, conversation=${this._conversationId})`);
+    sessionLog("stream", `starting stream (agent=${this._agentId}, conversation=${this._conversationId}, generation=${minGeneration})`);
 
     while (true) {
       const sdkMsg = await this.nextBufferedMessage();
       if (!sdkMsg) {
         break;
+      }
+
+      // Filter stale messages from previous runs. Messages enqueued before
+      // the current send() carry an older generation tag.
+      const msgGen = (sdkMsg as SDKMessage & { _generation?: number })._generation;
+      if (msgGen !== undefined && msgGen < minGeneration) {
+        staleCount++;
+        sessionLog("stream", `discarding stale message: type=${sdkMsg.type} generation=${msgGen} (current=${minGeneration})`);
+        continue;
       }
 
       yieldCount++;
@@ -238,7 +259,7 @@ export class Session implements AsyncDisposable {
     }
 
     const elapsed = Date.now() - streamStart;
-    sessionLog("stream", `stream ended: duration=${elapsed}ms yielded=${yieldCount} dropped=${this.droppedStreamMessages} gotResult=${gotResult}`);
+    sessionLog("stream", `stream ended: duration=${elapsed}ms yielded=${yieldCount} staleFiltered=${staleCount} dropped=${this.droppedStreamMessages} gotResult=${gotResult}`);
     if (!gotResult) {
       sessionLog("stream", "WARNING: stream ended WITHOUT a result message -- transport may have closed unexpectedly");
     }
@@ -374,6 +395,9 @@ export class Session implements AsyncDisposable {
   }
 
   private enqueueStreamMessage(msg: SDKMessage): void {
+    // Tag with current generation so stream() can filter stale messages.
+    (msg as SDKMessage & { _generation?: number })._generation = this.sendGeneration;
+
     if (this.streamResolvers.length > 0) {
       const resolve = this.streamResolvers.shift()!;
       resolve(msg);
@@ -843,6 +867,7 @@ export class Session implements AsyncDisposable {
       const msg = wireMsg as WireMessage & {
         message_type: string;
         uuid: string;
+        run_id?: string;
         // assistant_message fields
         content?: string;
         // tool_call_message fields
@@ -856,12 +881,15 @@ export class Session implements AsyncDisposable {
         reasoning?: string;
       };
 
+      const runId = msg.run_id || undefined;
+
       // Assistant message
       if (msg.message_type === "assistant_message" && msg.content) {
         return {
           type: "assistant",
           content: msg.content,
           uuid: msg.uuid,
+          runId,
         };
       }
 
@@ -899,6 +927,7 @@ export class Session implements AsyncDisposable {
             toolInput,
             rawArguments: toolArgs || undefined,
             uuid: msg.uuid,
+            runId,
           };
         }
       }
@@ -911,6 +940,7 @@ export class Session implements AsyncDisposable {
           content: msg.tool_return || "",
           isError: msg.status === "error",
           uuid: msg.uuid,
+          runId,
         };
       }
 
@@ -920,6 +950,7 @@ export class Session implements AsyncDisposable {
           type: "reasoning",
           content: msg.reasoning,
           uuid: msg.uuid,
+          runId,
         };
       }
     }
