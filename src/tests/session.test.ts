@@ -87,12 +87,20 @@ function createInitMessage(
   } as WireMessage;
 }
 
-function createAssistantMessage(index: number): WireMessage {
+function createAssistantMessage(
+  index: number,
+  overrides: Partial<{
+    uuid: string;
+    content: string;
+    run_id: string;
+  }> = {},
+): WireMessage {
   return {
     type: "message",
     message_type: "assistant_message",
     uuid: `assistant-${index}`,
     content: `msg-${index}`,
+    ...overrides,
   } as WireMessage;
 }
 
@@ -116,7 +124,16 @@ function createApprovalRequestMessage(
   };
 }
 
-function createResultMessage(): WireMessage {
+function createResultMessage(
+  overrides: Partial<{
+    subtype: string;
+    result: string | null;
+    duration_ms: number;
+    conversation_id: string;
+    stop_reason: string;
+    run_ids: unknown[];
+  }> = {},
+): WireMessage {
   return {
     type: "result",
     subtype: "success",
@@ -124,6 +141,7 @@ function createResultMessage(): WireMessage {
     duration_ms: 1,
     conversation_id: "conversation-1",
     stop_reason: "end_turn",
+    ...overrides,
   } as WireMessage;
 }
 
@@ -434,6 +452,45 @@ describe("Session", () => {
     });
   });
 
+  describe("transformMessage result mapping", () => {
+    test("maps result wire message run_ids to SDK runIds", () => {
+      const session = new Session();
+      const wireMsg = createResultMessage({
+        run_ids: ["run-1", "run-2"],
+      });
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toEqual({
+        type: "result",
+        success: true,
+        result: "done",
+        error: undefined,
+        stopReason: "end_turn",
+        durationMs: 1,
+        totalCostUsd: undefined,
+        conversationId: "conversation-1",
+        runIds: ["run-1", "run-2"],
+      });
+    });
+
+    test("filters non-string run_ids and preserves valid values", () => {
+      const session = new Session();
+      const wireMsg = createResultMessage({
+        run_ids: ["run-1", 42, null, "run-2"],
+      });
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toMatchObject({
+        type: "result",
+        runIds: ["run-1", "run-2"],
+      });
+    });
+  });
+
   describe("transformMessage error/retry mapping", () => {
     test("maps error wire message to SDK error message", () => {
       const session = new Session();
@@ -606,6 +663,198 @@ describe("Session", () => {
       } finally {
         session.close();
       }
+    });
+  });
+
+  describe("generation-based stale message filtering", () => {
+    test("filters stale messages that arrive late from the previous run_id", async () => {
+      const session = new Session();
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        // First send + stream establishes run-1 as completed.
+        transport.push(createAssistantMessage(1, { run_id: "run-1" }));
+        transport.push(
+          createResultMessage({
+            result: "first",
+            run_ids: ["run-1"],
+          }),
+        );
+        await session.send("first message");
+
+        const firstMessages: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          firstMessages.push(msg);
+        }
+        expect(firstMessages).toHaveLength(2);
+
+        // Second send starts a new run, but an old run-1 message arrives late.
+        await session.send("second message");
+        transport.push(
+          createAssistantMessage(999, {
+            uuid: "assistant-stale-old-run",
+            content: "stale-old-run",
+            run_id: "run-1",
+          }),
+        );
+        transport.push(createAssistantMessage(2, { run_id: "run-2" }));
+        transport.push(
+          createResultMessage({
+            result: "second",
+            run_ids: ["run-2"],
+          }),
+        );
+
+        const secondMessages: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          secondMessages.push(msg);
+        }
+
+        // The stale run-1 message should be filtered; only fresh run-2 messages remain.
+        expect(secondMessages).toHaveLength(2);
+        expect((secondMessages[0] as { content: string }).content).toBe("msg-2");
+        expect(secondMessages[1]?.type).toBe("result");
+      } finally {
+        session.close();
+      }
+    });
+
+    test("does not leak internal generation metadata on emitted SDK messages", async () => {
+      const session = new Session();
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        transport.push(createAssistantMessage(1, { run_id: "run-1" }));
+        transport.push(createResultMessage({ run_ids: ["run-1"] }));
+        await session.send("hello");
+
+        const streamed: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          streamed.push(msg);
+        }
+
+        const assistant = streamed.find(
+          (msg): msg is Extract<SDKMessage, { type: "assistant" }> =>
+            msg.type === "assistant",
+        );
+        expect(assistant).toBeDefined();
+        if (assistant) {
+          expect(
+            "_generation" in (assistant as unknown as Record<string, unknown>),
+          ).toBe(
+            false,
+          );
+          expect(Object.keys(assistant)).not.toContain("_generation");
+        }
+      } finally {
+        session.close();
+      }
+    });
+  });
+
+  describe("transformMessage run_id pass-through", () => {
+    test("includes runId on assistant messages", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "assistant_message",
+        uuid: "a-1",
+        content: "hello",
+        run_id: "run-abc",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({
+        type: "assistant",
+        content: "hello",
+        runId: "run-abc",
+      });
+    });
+
+    test("includes runId on tool_call messages", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "tool_call_message",
+        uuid: "tc-1",
+        run_id: "run-abc",
+        tool_calls: [{
+          tool_call_id: "call-1",
+          name: "Edit",
+          arguments: "{}",
+        }],
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({
+        type: "tool_call",
+        toolName: "Edit",
+        runId: "run-abc",
+      });
+    });
+
+    test("includes runId on reasoning messages", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "reasoning_message",
+        uuid: "r-1",
+        reasoning: "thinking...",
+        run_id: "run-abc",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({
+        type: "reasoning",
+        content: "thinking...",
+        runId: "run-abc",
+      });
+    });
+
+    test("includes runId on tool_result messages", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "tool_return_message",
+        uuid: "tr-1",
+        tool_call_id: "call-1",
+        tool_return: "success",
+        status: "success",
+        run_id: "run-abc",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({
+        type: "tool_result",
+        runId: "run-abc",
+      });
+    });
+
+    test("runId is undefined when wire message lacks run_id", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "assistant_message",
+        uuid: "a-2",
+        content: "no run id",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({ type: "assistant" });
+      expect((transformed as { runId?: string }).runId).toBeUndefined();
     });
   });
 });

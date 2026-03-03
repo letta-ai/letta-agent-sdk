@@ -41,6 +41,12 @@ function sessionLog(tag: string, ...args: unknown[]) {
 
 const MAX_BUFFERED_STREAM_MESSAGES = 100;
 
+type BufferedStreamMessage = {
+  message: SDKMessage;
+  generation: number;
+  runId?: string;
+};
+
 export class Session implements AsyncDisposable {
   private transport: SubprocessTransport;
   private _agentId: string | null = null;
@@ -48,11 +54,19 @@ export class Session implements AsyncDisposable {
   private _conversationId: string | null = null;
   private initialized = false;
   private externalTools: Map<string, AnyAgentTool> = new Map();
-  private streamQueue: SDKMessage[] = [];
-  private streamResolvers: Array<(msg: SDKMessage | null) => void> = [];
+  private streamQueue: BufferedStreamMessage[] = [];
+  private streamResolvers: Array<(msg: BufferedStreamMessage | null) => void> = [];
   private pumpPromise: Promise<void> | null = null;
   private pumpClosed = false;
   private droppedStreamMessages = 0;
+  // Monotonic counter incremented after each send(). Messages enqueued by the
+  // pump are tagged with the current generation; stream() filters out messages
+  // from earlier generations to prevent N-1 desync (stale events from a
+  // previous run leaking into the current run's stream).
+  private sendGeneration = 0;
+  // Run IDs that completed in the previous streamed turn. Used to drop
+  // late-arriving stale events from the old run if they arrive after send().
+  private lastCompletedRunIds = new Set<string>();
   // Waiters for SDK-initiated control requests (e.g., listMessages).
   // Keyed by request_id; pump resolves the matching waiter when it sees
   // a control_response with that request_id instead of queuing it as a stream msg.
@@ -206,7 +220,12 @@ export class Session implements AsyncDisposable {
       type: "user",
       message: { role: "user", content: message },
     });
-    sessionLog("send", "message written to transport");
+
+    // Advance generation AFTER the write so any messages the pump enqueues
+    // during the await (from the previous run's lingering events) are tagged
+    // with the old generation and will be filtered by stream().
+    this.sendGeneration++;
+    sessionLog("send", `message written to transport (generation=${this.sendGeneration})`);
   }
 
   /**
@@ -214,18 +233,44 @@ export class Session implements AsyncDisposable {
    */
   async *stream(): AsyncGenerator<SDKMessage> {
     const streamStart = Date.now();
+    const minGeneration = this.sendGeneration;
     let yieldCount = 0;
+    let staleCount = 0;
+    let staleRunIdCount = 0;
     let gotResult = false;
+    const currentStreamRunIds = new Set<string>();
+    const staleRunIds = new Set(this.lastCompletedRunIds);
 
     this.startBackgroundPump();
-    sessionLog("stream", `starting stream (agent=${this._agentId}, conversation=${this._conversationId})`);
+    sessionLog("stream", `starting stream (agent=${this._agentId}, conversation=${this._conversationId}, generation=${minGeneration})`);
 
     while (true) {
-      const sdkMsg = await this.nextBufferedMessage();
-      if (!sdkMsg) {
+      const bufferedMsg = await this.nextBufferedMessage();
+      if (!bufferedMsg) {
         break;
       }
 
+      // Filter stale messages from previous runs. Messages enqueued before
+      // the current send() carry an older generation tag.
+      if (bufferedMsg.generation < minGeneration) {
+        staleCount++;
+        sessionLog("stream", `discarding stale message: type=${bufferedMsg.message.type} generation=${bufferedMsg.generation} (current=${minGeneration})`);
+        continue;
+      }
+
+      // Filter late old-run messages that arrive after send() has already
+      // advanced generation and stream queue was cleared.
+      if (bufferedMsg.runId && staleRunIds.has(bufferedMsg.runId)) {
+        staleRunIdCount++;
+        sessionLog("stream", `discarding stale message: type=${bufferedMsg.message.type} runId=${bufferedMsg.runId}`);
+        continue;
+      }
+
+      if (bufferedMsg.runId) {
+        currentStreamRunIds.add(bufferedMsg.runId);
+      }
+
+      const sdkMsg = bufferedMsg.message;
       yieldCount++;
       sessionLog("stream", `yield #${yieldCount}: type=${sdkMsg.type}${sdkMsg.type === "result" ? ` success=${(sdkMsg as SDKResultMessage).success} error=${(sdkMsg as SDKResultMessage).error || "none"}` : ""}`);
       yield sdkMsg;
@@ -233,12 +278,13 @@ export class Session implements AsyncDisposable {
       // Stop on result message
       if (sdkMsg.type === "result") {
         gotResult = true;
+        this.updateCompletedRunIds((sdkMsg as SDKResultMessage).runIds, currentStreamRunIds);
         break;
       }
     }
 
     const elapsed = Date.now() - streamStart;
-    sessionLog("stream", `stream ended: duration=${elapsed}ms yielded=${yieldCount} dropped=${this.droppedStreamMessages} gotResult=${gotResult}`);
+    sessionLog("stream", `stream ended: duration=${elapsed}ms yielded=${yieldCount} staleFiltered=${staleCount} staleRunIdFiltered=${staleRunIdCount} dropped=${this.droppedStreamMessages} gotResult=${gotResult}`);
     if (!gotResult) {
       sessionLog("stream", "WARNING: stream ended WITHOUT a result message -- transport may have closed unexpectedly");
     }
@@ -374,9 +420,15 @@ export class Session implements AsyncDisposable {
   }
 
   private enqueueStreamMessage(msg: SDKMessage): void {
+    const bufferedMsg: BufferedStreamMessage = {
+      message: msg,
+      generation: this.sendGeneration,
+      runId: this.getMessageRunId(msg),
+    };
+
     if (this.streamResolvers.length > 0) {
       const resolve = this.streamResolvers.shift()!;
-      resolve(msg);
+      resolve(bufferedMsg);
       return;
     }
 
@@ -386,10 +438,10 @@ export class Session implements AsyncDisposable {
       sessionLog("pump", `stream queue overflow: dropped oldest message (total_dropped=${this.droppedStreamMessages}, max=${MAX_BUFFERED_STREAM_MESSAGES})`);
     }
 
-    this.streamQueue.push(msg);
+    this.streamQueue.push(bufferedMsg);
   }
 
-  private async nextBufferedMessage(): Promise<SDKMessage | null> {
+  private async nextBufferedMessage(): Promise<BufferedStreamMessage | null> {
     if (this.streamQueue.length > 0) {
       return this.streamQueue.shift()!;
     }
@@ -403,7 +455,7 @@ export class Session implements AsyncDisposable {
     });
   }
 
-  private resolveAllStreamWaiters(msg: SDKMessage | null): void {
+  private resolveAllStreamWaiters(msg: BufferedStreamMessage | null): void {
     for (const resolve of this.streamResolvers) {
       resolve(msg);
     }
@@ -413,6 +465,43 @@ export class Session implements AsyncDisposable {
       resolve({ subtype: "error", error: "session closed" });
     }
     this.controlResponseWaiters.clear();
+  }
+
+  private getMessageRunId(msg: SDKMessage): string | undefined {
+    switch (msg.type) {
+      case "assistant":
+      case "tool_call":
+      case "tool_result":
+      case "reasoning":
+      case "error":
+      case "retry":
+        return msg.runId;
+      default:
+        return undefined;
+    }
+  }
+
+  private updateCompletedRunIds(
+    resultRunIds: string[] | undefined,
+    streamedRunIds: Set<string>,
+  ): void {
+    const nextRunIds = new Set<string>();
+
+    if (Array.isArray(resultRunIds)) {
+      for (const runId of resultRunIds) {
+        if (runId) {
+          nextRunIds.add(runId);
+        }
+      }
+    }
+
+    for (const runId of streamedRunIds) {
+      if (runId) {
+        nextRunIds.add(runId);
+      }
+    }
+
+    this.lastCompletedRunIds = nextRunIds;
   }
 
   /**
@@ -843,6 +932,7 @@ export class Session implements AsyncDisposable {
       const msg = wireMsg as WireMessage & {
         message_type: string;
         uuid: string;
+        run_id?: string;
         // assistant_message fields
         content?: string;
         // tool_call_message fields
@@ -856,12 +946,15 @@ export class Session implements AsyncDisposable {
         reasoning?: string;
       };
 
+      const runId = msg.run_id || undefined;
+
       // Assistant message
       if (msg.message_type === "assistant_message" && msg.content) {
         return {
           type: "assistant",
           content: msg.content,
           uuid: msg.uuid,
+          runId,
         };
       }
 
@@ -899,6 +992,7 @@ export class Session implements AsyncDisposable {
             toolInput,
             rawArguments: toolArgs || undefined,
             uuid: msg.uuid,
+            runId,
           };
         }
       }
@@ -911,6 +1005,7 @@ export class Session implements AsyncDisposable {
           content: msg.tool_return || "",
           isError: msg.status === "error",
           uuid: msg.uuid,
+          runId,
         };
       }
 
@@ -920,6 +1015,7 @@ export class Session implements AsyncDisposable {
           type: "reasoning",
           content: msg.reasoning,
           uuid: msg.uuid,
+          runId,
         };
       }
     }
@@ -947,7 +1043,11 @@ export class Session implements AsyncDisposable {
         total_cost_usd?: number;
         conversation_id: string;
         stop_reason?: string;
+        run_ids?: unknown[];
       };
+      const runIds = Array.isArray(msg.run_ids)
+        ? msg.run_ids.filter((id): id is string => typeof id === "string")
+        : undefined;
       return {
         type: "result",
         success: msg.subtype === "success",
@@ -957,6 +1057,7 @@ export class Session implements AsyncDisposable {
         durationMs: msg.duration_ms,
         totalCostUsd: msg.total_cost_usd,
         conversationId: msg.conversation_id,
+        runIds,
       };
     }
 

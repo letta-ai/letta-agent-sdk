@@ -453,6 +453,8 @@ export interface SDKAssistantMessage {
   type: "assistant";
   content: string;
   uuid: string;
+  /** Run ID from the Letta API for this event (used for stale-run detection). */
+  runId?: string;
 }
 
 export interface SDKToolCallMessage {
@@ -463,6 +465,8 @@ export interface SDKToolCallMessage {
   /** Raw unparsed arguments string from the wire for consumer-side accumulation. */
   rawArguments?: string;
   uuid: string;
+  /** Run ID from the Letta API for this event (used for stale-run detection). */
+  runId?: string;
 }
 
 export interface SDKToolResultMessage {
@@ -471,12 +475,16 @@ export interface SDKToolResultMessage {
   content: string;
   isError: boolean;
   uuid: string;
+  /** Run ID from the Letta API for this event (used for stale-run detection). */
+  runId?: string;
 }
 
 export interface SDKReasoningMessage {
   type: "reasoning";
   content: string;
   uuid: string;
+  /** Run ID from the Letta API for this event (used for stale-run detection). */
+  runId?: string;
 }
 
 export interface SDKResultMessage {
@@ -488,6 +496,8 @@ export interface SDKResultMessage {
   durationMs: number;
   totalCostUsd?: number;
   conversationId: string | null;
+  /** Run IDs associated with this turn (if provided by the CLI). */
+  runIds?: string[];
 }
 
 export interface SDKStreamEventDeltaPayload {
