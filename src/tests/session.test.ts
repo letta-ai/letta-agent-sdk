@@ -87,12 +87,20 @@ function createInitMessage(
   } as WireMessage;
 }
 
-function createAssistantMessage(index: number): WireMessage {
+function createAssistantMessage(
+  index: number,
+  overrides: Partial<{
+    uuid: string;
+    content: string;
+    run_id: string;
+  }> = {},
+): WireMessage {
   return {
     type: "message",
     message_type: "assistant_message",
     uuid: `assistant-${index}`,
     content: `msg-${index}`,
+    ...overrides,
   } as WireMessage;
 }
 
@@ -659,7 +667,7 @@ describe("Session", () => {
   });
 
   describe("generation-based stale message filtering", () => {
-    test("filters stale messages enqueued before the current send()", async () => {
+    test("filters stale messages that arrive late from the previous run_id", async () => {
       const session = new Session();
       const transport = new MockTransport();
       attachMockTransport(session, transport);
@@ -668,9 +676,14 @@ describe("Session", () => {
         transport.push(createInitMessage());
         await session.initialize();
 
-        // First send + stream (establishes generation 1)
-        transport.push(createAssistantMessage(1));
-        transport.push(createResultMessage({ result: "first" }));
+        // First send + stream establishes run-1 as completed.
+        transport.push(createAssistantMessage(1, { run_id: "run-1" }));
+        transport.push(
+          createResultMessage({
+            result: "first",
+            run_ids: ["run-1"],
+          }),
+        );
         await session.send("first message");
 
         const firstMessages: SDKMessage[] = [];
@@ -679,37 +692,68 @@ describe("Session", () => {
         }
         expect(firstMessages).toHaveLength(2);
 
-        // Simulate a stale message arriving (pump pushes it before next send clears queue).
-        // We inject it directly into the streamQueue with the OLD generation
-        // stored in the private WeakMap (mirrors what enqueueStreamMessage does).
-        const staleMsg = { type: "assistant" as const, content: "stale", uuid: "stale-1" } as SDKMessage;
-        // @ts-expect-error - accessing private field to simulate pump race
-        session.messageGenerations.set(staleMsg, 1);
-        // @ts-expect-error - accessing private field to simulate pump race
-        session.streamQueue.push(staleMsg);
-
-        // Second send (advances generation to 2, clears queue first)
-        transport.push(createAssistantMessage(2));
-        transport.push(createResultMessage({ result: "second" }));
+        // Second send starts a new run, but an old run-1 message arrives late.
         await session.send("second message");
-
-        // But inject ANOTHER stale message after send() clears -- simulating
-        // the pump pushing during the await in send().
-        const raceStalMsg = { type: "assistant" as const, content: "race-stale", uuid: "stale-2" } as SDKMessage;
-        // @ts-expect-error - accessing private field
-        session.messageGenerations.set(raceStalMsg, 1);
-        // @ts-expect-error - accessing private field
-        session.streamQueue.unshift(raceStalMsg);
+        transport.push(
+          createAssistantMessage(999, {
+            uuid: "assistant-stale-old-run",
+            content: "stale-old-run",
+            run_id: "run-1",
+          }),
+        );
+        transport.push(createAssistantMessage(2, { run_id: "run-2" }));
+        transport.push(
+          createResultMessage({
+            result: "second",
+            run_ids: ["run-2"],
+          }),
+        );
 
         const secondMessages: SDKMessage[] = [];
         for await (const msg of session.stream()) {
           secondMessages.push(msg);
         }
 
-        // The stale message should be filtered -- only fresh messages from gen 2
+        // The stale run-1 message should be filtered; only fresh run-2 messages remain.
         expect(secondMessages).toHaveLength(2);
         expect((secondMessages[0] as { content: string }).content).toBe("msg-2");
-        expect(secondMessages[1]!.type).toBe("result");
+        expect(secondMessages[1]?.type).toBe("result");
+      } finally {
+        session.close();
+      }
+    });
+
+    test("does not leak internal generation metadata on emitted SDK messages", async () => {
+      const session = new Session();
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        transport.push(createAssistantMessage(1, { run_id: "run-1" }));
+        transport.push(createResultMessage({ run_ids: ["run-1"] }));
+        await session.send("hello");
+
+        const streamed: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          streamed.push(msg);
+        }
+
+        const assistant = streamed.find(
+          (msg): msg is Extract<SDKMessage, { type: "assistant" }> =>
+            msg.type === "assistant",
+        );
+        expect(assistant).toBeDefined();
+        if (assistant) {
+          expect(
+            "_generation" in (assistant as unknown as Record<string, unknown>),
+          ).toBe(
+            false,
+          );
+          expect(Object.keys(assistant)).not.toContain("_generation");
+        }
       } finally {
         session.close();
       }
