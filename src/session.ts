@@ -179,8 +179,10 @@ export class Session implements AsyncDisposable {
       }
     }
 
-    sessionLog("init", "ERROR: transport closed before init message received");
-    throw new Error("Failed to initialize session - no init message received");
+    const stderr = this.transport.getStderr();
+    const detail = stderr ? `\nCLI stderr:\n${stderr}` : '';
+    sessionLog("init", `ERROR: transport closed before init message received${detail}`);
+    throw new Error(`Failed to initialize session - no init message received${detail}`);
   }
 
   /**
