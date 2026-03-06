@@ -96,10 +96,12 @@ describe("buildCliArgs — conversation and agent routing", () => {
     expect(args).not.toContain("--default");
   });
 
-  test("agentId + defaultConversation → --agent + --default", () => {
+  test("agentId + defaultConversation → --agent + --conversation default", () => {
     const args = buildCliArgs({ agentId: "agent-1", defaultConversation: true });
     expect(args).toContain("--agent");
-    expect(args).toContain("--default");
+    const idx = args.indexOf("--conversation");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("default");
     expect(args).not.toContain("--new");
   });
 
