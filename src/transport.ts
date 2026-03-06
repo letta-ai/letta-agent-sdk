@@ -35,7 +35,7 @@ export function buildCliArgs(options: InternalSessionOptions): string[] {
     if (options.newConversation) {
       args.push("--new");
     } else if (options.defaultConversation) {
-      args.push("--default");
+      args.push("--conversation", "default");
     }
   } else if (options.createOnly) {
     args.push("--new-agent");
