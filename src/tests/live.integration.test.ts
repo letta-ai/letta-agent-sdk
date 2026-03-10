@@ -175,6 +175,16 @@ function summarizeMessage(message: SDKMessage): Record<string, unknown> {
       base.delayMs = message.delayMs;
       base.runId = message.runId;
       break;
+    case "compaction_start":
+      base.eventType = message.eventType;
+      base.eventData = sanitizeValue(message.eventData);
+      base.runId = message.runId;
+      break;
+    case "compaction_summary":
+      base.summaryPreview = (message.summary ?? "").slice(0, 160);
+      base.stats = sanitizeValue(message.stats);
+      base.runId = message.runId;
+      break;
     case "init":
       base.agentId = message.agentId;
       base.sessionId = message.sessionId;
@@ -222,6 +232,12 @@ function expectTerminalResult(messages: SDKMessage[]): SDKResultMessage {
 
 function hasRenderableContent(messages: SDKMessage[]): boolean {
   return messages.some((m) => m.type === "assistant" || m.type === "reasoning" || m.type === "stream_event");
+}
+
+function isCompactionMessage(
+  message: SDKMessage,
+): message is Extract<SDKMessage, { type: "compaction_start" }> | Extract<SDKMessage, { type: "compaction_summary" }> {
+  return message.type === "compaction_start" || message.type === "compaction_summary";
 }
 
 function pickAnyMessageId(page: ListMessagesResult): string | null {
@@ -545,6 +561,81 @@ describeLive("live integration: letta-code-sdk", () => {
           prompt: a.prompt,
           messages: a.messages.map(summarizeMessage),
         })),
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "compaction events from previous runIds do not leak into next turn (best-effort)",
+    async () => {
+      await ensureAgentReady();
+
+      const session = createSession(agentId, {
+        permissionMode: "bypassPermissions",
+        includePartialMessages: true,
+      });
+      openedSessions.push(session);
+
+      const init = await session.initialize();
+
+      const firstPrompt =
+        "Reply with exactly TURN_ONE_READY and one short sentence about conversation memory.";
+      const firstMessages = await collectTurn(session, firstPrompt);
+      const firstResult = expectTerminalResult(firstMessages);
+      expect(firstResult.success).toBe(true);
+
+      const run1Ids = new Set(
+        (firstResult.runIds ?? []).filter((id): id is string => typeof id === "string" && id.length > 0),
+      );
+
+      const secondPrompt =
+        "Reply with exactly TURN_TWO_READY and one short sentence. Keep it concise.";
+      const secondMessages = await collectTurn(session, secondPrompt);
+      const secondResult = expectTerminalResult(secondMessages);
+      expect(secondResult.success).toBe(true);
+
+      const compactionMessages = secondMessages.filter(isCompactionMessage);
+      const staleCompaction = compactionMessages.filter(
+        (msg) => !!msg.runId && run1Ids.has(msg.runId),
+      );
+
+      // Core stale-run assertion: turn-2 must not contain compaction messages
+      // that still reference run IDs completed in turn-1.
+      expect(staleCompaction).toHaveLength(0);
+
+      if (compactionMessages.length === 0) {
+        log("no compaction events observed on turn-2; stale-run check still executed", {
+          selectedAgentName,
+          agentId,
+          conversationId: init.conversationId,
+          turn1RunIds: Array.from(run1Ids),
+        });
+      } else {
+        const run2Ids = new Set(
+          (secondResult.runIds ?? []).filter((id): id is string => typeof id === "string" && id.length > 0),
+        );
+        if (run2Ids.size > 0) {
+          for (const msg of compactionMessages) {
+            if (msg.runId) {
+              expect(run2Ids.has(msg.runId)).toBe(true);
+            }
+          }
+        }
+      }
+
+      await writeFixture("compaction_stale_runid_guard", {
+        init,
+        prompts: {
+          first: firstPrompt,
+          second: secondPrompt,
+        },
+        turn1RunIds: Array.from(run1Ids),
+        turn2RunIds: secondResult.runIds ?? [],
+        turn2CompactionCount: compactionMessages.length,
+        staleCompactionCount: staleCompaction.length,
+        turn1Messages: firstMessages.map(summarizeMessage),
+        turn2Messages: secondMessages.map(summarizeMessage),
       });
     },
     TEST_TIMEOUT_MS,

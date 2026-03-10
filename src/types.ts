@@ -575,6 +575,54 @@ export interface SDKRetryMessage {
   runId?: string;
 }
 
+/**
+ * Compaction event — the server has begun compacting the conversation context.
+ * Emitted when the Letta API sends an `event_message` with `event_type: "compaction"`.
+ */
+export interface SDKCompactionStartMessage {
+  type: "compaction_start";
+  /** Event type from the server (typically "compaction") */
+  eventType: string;
+  /** Additional event data from the server, if any */
+  eventData?: Record<string, unknown>;
+  uuid: string;
+  /** Run ID from the Letta API for this event (used for stale-run detection). */
+  runId?: string;
+}
+
+/**
+ * Compaction stats for a completed compaction.
+ */
+export interface CompactionStats {
+  /** What triggered the compaction (e.g. "context_overflow") */
+  trigger?: string;
+  /** Context tokens before compaction */
+  contextTokensBefore?: number;
+  /** Context tokens after compaction */
+  contextTokensAfter?: number;
+  /** Max context window size */
+  contextWindow?: number;
+  /** Messages in context before compaction */
+  messagesCountBefore?: number;
+  /** Messages in context after compaction */
+  messagesCountAfter?: number;
+}
+
+/**
+ * Compaction summary — the server has finished compacting the conversation.
+ * Contains the summary text and before/after stats.
+ */
+export interface SDKCompactionSummaryMessage {
+  type: "compaction_summary";
+  /** Summary of the compacted conversation history */
+  summary?: string;
+  /** Before/after token and message counts */
+  stats?: CompactionStats;
+  uuid: string;
+  /** Run ID from the Letta API for this event (used for stale-run detection). */
+  runId?: string;
+}
+
 /** Union of all SDK message types */
 export type SDKMessage =
   | SDKInitMessage
@@ -585,7 +633,9 @@ export type SDKMessage =
   | SDKResultMessage
   | SDKStreamEventMessage
   | SDKErrorMessage
-  | SDKRetryMessage;
+  | SDKRetryMessage
+  | SDKCompactionStartMessage
+  | SDKCompactionSummaryMessage;
 
 // ═══════════════════════════════════════════════════════════════
 // LIST MESSAGES API

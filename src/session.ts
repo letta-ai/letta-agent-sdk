@@ -477,6 +477,8 @@ export class Session implements AsyncDisposable {
       case "reasoning":
       case "error":
       case "retry":
+      case "compaction_start":
+      case "compaction_summary":
         return msg.runId;
       default:
         return undefined;
@@ -1016,6 +1018,53 @@ export class Session implements AsyncDisposable {
         return {
           type: "reasoning",
           content: msg.reasoning,
+          uuid: msg.uuid,
+          runId,
+        };
+      }
+
+      // Compaction event (server started compacting)
+      if (msg.message_type === "event_message") {
+        const eventMsg = msg as typeof msg & {
+          event_type?: string;
+          event_data?: Record<string, unknown>;
+        };
+        return {
+          type: "compaction_start" as const,
+          eventType: eventMsg.event_type || "compaction",
+          eventData: eventMsg.event_data,
+          uuid: msg.uuid,
+          runId,
+        };
+      }
+
+      // Compaction summary (server finished compacting, with stats)
+      if (msg.message_type === "summary_message") {
+        const sumMsg = msg as typeof msg & {
+          summary?: string;
+          compaction_stats?: {
+            trigger?: string;
+            context_tokens_before?: number;
+            context_tokens_after?: number;
+            context_window?: number;
+            messages_count_before?: number;
+            messages_count_after?: number;
+          };
+        };
+        const raw = sumMsg.compaction_stats;
+        return {
+          type: "compaction_summary" as const,
+          summary: sumMsg.summary,
+          stats: raw
+            ? {
+                trigger: raw.trigger,
+                contextTokensBefore: raw.context_tokens_before,
+                contextTokensAfter: raw.context_tokens_after,
+                contextWindow: raw.context_window,
+                messagesCountBefore: raw.messages_count_before,
+                messagesCountAfter: raw.messages_count_after,
+              }
+            : undefined,
           uuid: msg.uuid,
           runId,
         };

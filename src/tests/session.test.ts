@@ -857,4 +857,242 @@ describe("Session", () => {
       expect((transformed as { runId?: string }).runId).toBeUndefined();
     });
   });
+
+  describe("transformMessage compaction events", () => {
+    test("maps event_message to compaction_start", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "event_message",
+        uuid: "ev-1",
+        event_type: "compaction",
+        event_data: { some_key: "some_value" },
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toEqual({
+        type: "compaction_start",
+        eventType: "compaction",
+        eventData: { some_key: "some_value" },
+        uuid: "ev-1",
+        runId: undefined,
+      });
+    });
+
+    test("maps event_message with missing event_type to default 'compaction'", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "event_message",
+        uuid: "ev-2",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({
+        type: "compaction_start",
+        eventType: "compaction",
+      });
+    });
+
+    test("passes through run_id on compaction_start", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "event_message",
+        uuid: "ev-3",
+        event_type: "compaction",
+        run_id: "run-abc",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({
+        type: "compaction_start",
+        runId: "run-abc",
+      });
+    });
+
+    test("maps summary_message to compaction_summary with stats", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "summary_message",
+        uuid: "sum-1",
+        summary: "The user discussed project architecture...",
+        compaction_stats: {
+          trigger: "context_overflow",
+          context_tokens_before: 197000,
+          context_tokens_after: 64000,
+          context_window: 200000,
+          messages_count_before: 150,
+          messages_count_after: 20,
+        },
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toEqual({
+        type: "compaction_summary",
+        summary: "The user discussed project architecture...",
+        stats: {
+          trigger: "context_overflow",
+          contextTokensBefore: 197000,
+          contextTokensAfter: 64000,
+          contextWindow: 200000,
+          messagesCountBefore: 150,
+          messagesCountAfter: 20,
+        },
+        uuid: "sum-1",
+        runId: undefined,
+      });
+    });
+
+    test("passes through run_id on compaction_summary", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "summary_message",
+        uuid: "sum-3",
+        summary: "Summary text",
+        run_id: "run-xyz",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({
+        type: "compaction_summary",
+        runId: "run-xyz",
+      });
+    });
+
+    test("maps summary_message without stats", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "summary_message",
+        uuid: "sum-2",
+        summary: "A summary without stats",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toEqual({
+        type: "compaction_summary",
+        summary: "A summary without stats",
+        stats: undefined,
+        uuid: "sum-2",
+        runId: undefined,
+      });
+    });
+
+    test("compaction messages flow through stream", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        transport.push({
+          type: "message",
+          message_type: "event_message",
+          uuid: "ev-stream-1",
+          event_type: "compaction",
+        } as WireMessage);
+        transport.push({
+          type: "message",
+          message_type: "summary_message",
+          uuid: "sum-stream-1",
+          summary: "Compacted summary",
+          compaction_stats: {
+            trigger: "context_overflow",
+            context_tokens_before: 180000,
+            context_tokens_after: 60000,
+            context_window: 200000,
+            messages_count_before: 100,
+            messages_count_after: 15,
+          },
+        } as WireMessage);
+        transport.push(createAssistantMessage(1));
+        transport.push(createResultMessage());
+
+        const streamed: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          streamed.push(msg);
+        }
+
+        expect(streamed.some((msg) => msg.type === "compaction_start")).toBe(true);
+        expect(streamed.some((msg) => msg.type === "compaction_summary")).toBe(true);
+        expect(streamed[streamed.length - 1]?.type).toBe("result");
+      } finally {
+        session.close();
+      }
+    });
+
+    test("stale compaction events from previous runs are filtered", async () => {
+      const session = new Session();
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        // Complete run-1
+        transport.push(createAssistantMessage(1, { run_id: "run-1" }));
+        transport.push(createResultMessage({ run_ids: ["run-1"] }));
+        await session.send("first message");
+
+        const firstMessages: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          firstMessages.push(msg);
+        }
+        expect(firstMessages).toHaveLength(2);
+
+        // Start run-2 but inject a stale compaction event from run-1
+        await session.send("second message");
+        transport.push({
+          type: "message",
+          message_type: "event_message",
+          uuid: "ev-stale",
+          event_type: "compaction",
+          run_id: "run-1",
+        } as WireMessage);
+        // Fresh compaction summary from run-2
+        transport.push({
+          type: "message",
+          message_type: "summary_message",
+          uuid: "sum-fresh",
+          summary: "Fresh compaction",
+          run_id: "run-2",
+        } as WireMessage);
+        transport.push(createAssistantMessage(2, { run_id: "run-2" }));
+        transport.push(createResultMessage({ run_ids: ["run-2"] }));
+
+        const secondMessages: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          secondMessages.push(msg);
+        }
+
+        // The stale event_message (run-1) should be filtered
+        const compactionStarts = secondMessages.filter((m) => m.type === "compaction_start");
+        expect(compactionStarts).toHaveLength(0);
+
+        // The fresh summary_message (run-2) should pass through
+        const compactionSummaries = secondMessages.filter((m) => m.type === "compaction_summary");
+        expect(compactionSummaries).toHaveLength(1);
+
+        // Assistant and result from run-2 should be present
+        expect(secondMessages.some((m) => m.type === "assistant")).toBe(true);
+        expect(secondMessages[secondMessages.length - 1]?.type).toBe("result");
+      } finally {
+        session.close();
+      }
+    });
+  });
 });
