@@ -10,8 +10,8 @@ import type {
   InternalSessionOptions,
   SDKMessage,
   SDKInitMessage,
-  SDKAssistantMessage,
   SDKResultMessage,
+  SDKErrorCode,
   MessageWire,
   WireMessage,
   ControlRequest,
@@ -27,6 +27,9 @@ import type {
   BootstrapStateOptions,
   BootstrapStateResult,
   SDKStreamEventPayload,
+  RunTurnOptions,
+  RecoverPendingApprovalsOptions,
+  RecoverPendingApprovalsResult,
 } from "./types.js";
 import {
   isHeadlessAutoAllowTool,
@@ -40,6 +43,23 @@ function sessionLog(tag: string, ...args: unknown[]) {
 }
 
 const MAX_BUFFERED_STREAM_MESSAGES = 100;
+const DEFAULT_MAX_APPROVAL_RECOVERY_ATTEMPTS = 1;
+const DEFAULT_APPROVAL_RECOVERY_TIMEOUT_MS = 5_000;
+
+function toSdkErrorCode(value: string | undefined): SDKErrorCode | undefined {
+  if (!value || value.length === 0) return undefined;
+  return value as SDKErrorCode;
+}
+
+function isUnknownControlSubtypeError(
+  errorMessage: string | undefined,
+  subtype: string,
+): boolean {
+  if (!errorMessage) return false;
+  return errorMessage
+    .toLowerCase()
+    .includes(`unknown control request subtype: ${subtype}`.toLowerCase());
+}
 
 function extractApiErrorDetail(apiError: Record<string, unknown> | undefined): string | undefined {
   const detail = apiError?.detail;
@@ -256,6 +276,201 @@ export class Session implements AsyncDisposable {
   }
 
   /**
+   * Run a full turn (send + stream terminal result), with optional bounded
+   * SDK-owned approval-conflict recovery.
+   */
+  async runTurn(
+    message: SendMessage,
+    options: RunTurnOptions = {},
+  ): Promise<SDKResultMessage> {
+    const maxApprovalRecoveryAttempts =
+      this.resolveMaxApprovalRecoveryAttempts(options);
+    const recoveryTimeoutMs = this.resolveApprovalRecoveryTimeoutMs(options);
+
+    let recoveryAttempts = 0;
+    let result = await this.runSingleTurn(message);
+
+    while (
+      !result.success &&
+      result.approvalConflict === true &&
+      recoveryAttempts < maxApprovalRecoveryAttempts
+    ) {
+      recoveryAttempts += 1;
+      const recovery = await this.recoverPendingApprovals({
+        timeoutMs: recoveryTimeoutMs,
+      });
+
+      if (!recovery.recovered) {
+        return this.toTerminalApprovalConflictResult(result, {
+          recoveryAttempts,
+          detail: recovery.detail,
+        });
+      }
+
+      result = await this.runSingleTurn(message);
+    }
+
+    if (!result.success && result.approvalConflict === true) {
+      return this.toTerminalApprovalConflictResult(result, { recoveryAttempts });
+    }
+
+    if (recoveryAttempts > 0) {
+      result.recoveryAttempts = recoveryAttempts;
+    }
+
+    return result;
+  }
+
+  /**
+   * Ask the CLI to recover pending approvals for the current
+   * agent/conversation context.
+   */
+  async recoverPendingApprovals(
+    options: RecoverPendingApprovalsOptions = {},
+  ): Promise<RecoverPendingApprovalsResult> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    const timeoutMs =
+      options.timeoutMs ??
+      this.options.approvalRecoveryTimeoutMs ??
+      DEFAULT_APPROVAL_RECOVERY_TIMEOUT_MS;
+
+    if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+      throw new Error(
+        "Invalid approval recovery timeout. Expected a positive integer.",
+      );
+    }
+
+    const requestId = `recover-approvals-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    let resp: { subtype: string; response?: unknown; error?: string };
+    try {
+      resp = await this.requestControlResponse(
+        requestId,
+        {
+          subtype: "recover_pending_approvals",
+          ...(this._agentId ? { agent_id: this._agentId } : {}),
+          ...(this._conversationId ? { conversation_id: this._conversationId } : {}),
+        },
+        { timeoutMs },
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return {
+        recovered: false,
+        pendingApproval: true,
+        unsupported: false,
+        detail,
+      };
+    }
+
+    if (resp.subtype === "error") {
+      const detail = resp.error ?? "recover_pending_approvals failed";
+      return {
+        recovered: false,
+        pendingApproval: true,
+        unsupported: isUnknownControlSubtypeError(
+          detail,
+          "recover_pending_approvals",
+        ),
+        detail,
+      };
+    }
+
+    return {
+      recovered: true,
+      pendingApproval: false,
+      unsupported: false,
+    };
+  }
+
+  private resolveMaxApprovalRecoveryAttempts(options: RunTurnOptions): number {
+    const value =
+      options.maxApprovalRecoveryAttempts ??
+      this.options.maxApprovalRecoveryAttempts ??
+      DEFAULT_MAX_APPROVAL_RECOVERY_ATTEMPTS;
+
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(
+        "Invalid maxApprovalRecoveryAttempts. Expected a non-negative integer.",
+      );
+    }
+
+    return value;
+  }
+
+  private resolveApprovalRecoveryTimeoutMs(options: RunTurnOptions): number {
+    const value =
+      options.recoveryTimeoutMs ??
+      this.options.approvalRecoveryTimeoutMs ??
+      DEFAULT_APPROVAL_RECOVERY_TIMEOUT_MS;
+
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new Error(
+        "Invalid approval recovery timeout. Expected a positive integer.",
+      );
+    }
+
+    return value;
+  }
+
+  private toTerminalApprovalConflictResult(
+    result: SDKResultMessage,
+    options: { recoveryAttempts: number; detail?: string },
+  ): SDKResultMessage {
+    return {
+      ...result,
+      success: false,
+      error: "approval_conflict_terminal",
+      errorCode: "approval_conflict_terminal",
+      approvalConflict: true,
+      recoverable: false,
+      recoveryAttempts: options.recoveryAttempts,
+      errorDetail:
+        options.detail ||
+        result.errorDetail ||
+        "Approval conflict remained unresolved after bounded SDK recovery.",
+    };
+  }
+
+  private async runSingleTurn(message: SendMessage): Promise<SDKResultMessage> {
+    await this.send(message);
+
+    let latestApprovalConflictDetail: string | undefined;
+
+    for await (const msg of this.stream()) {
+      if (msg.type === "error" && msg.approvalConflict) {
+        latestApprovalConflictDetail = msg.errorDetail || msg.message;
+        continue;
+      }
+
+      if (msg.type === "result") {
+        if (
+          msg.approvalConflict &&
+          !msg.errorDetail &&
+          latestApprovalConflictDetail
+        ) {
+          msg.errorDetail = latestApprovalConflictDetail;
+        }
+        return msg;
+      }
+    }
+
+    return {
+      type: "result",
+      success: false,
+      error: "stream_closed",
+      errorCode: "stream_closed",
+      recoverable: false,
+      errorDetail: "Stream ended before terminal result",
+      durationMs: 0,
+      conversationId: this._conversationId,
+    };
+  }
+
+  /**
    * Stream messages from the agent
    */
   async *stream(): AsyncGenerator<SDKMessage> {
@@ -330,18 +545,23 @@ export class Session implements AsyncDisposable {
           sdkMsg.approvalConflict === true
           || isApprovalConflictSignal({
             detail,
-            message: sdkMsg.error,
+            message: sdkMsg.errorCode || sdkMsg.error,
             stopReason: sdkMsg.stopReason,
           });
 
         if (approvalConflict) {
           sdkMsg.approvalConflict = true;
+          sdkMsg.recoverable = sdkMsg.recoverable ?? true;
           if (detail) sdkMsg.errorDetail = detail;
-          if (sdkMsg.error === "error") {
-            // Preserve backward compatibility (string field remains) while
-            // making approval deadlocks machine-detectable.
-            sdkMsg.error = "approval_conflict";
+          if (!sdkMsg.errorCode || sdkMsg.errorCode === "error") {
+            sdkMsg.errorCode = "approval_conflict";
           }
+          // Preserve legacy string field for compatibility.
+          if (!sdkMsg.error || sdkMsg.error === "error") {
+            sdkMsg.error = sdkMsg.errorCode;
+          }
+        } else if (!sdkMsg.errorCode && sdkMsg.error) {
+          sdkMsg.errorCode = toSdkErrorCode(sdkMsg.error);
         }
       }
 
@@ -782,6 +1002,56 @@ export class Session implements AsyncDisposable {
     });
   }
 
+  private async requestControlResponse(
+    requestId: string,
+    request: Record<string, unknown>,
+    options: { timeoutMs?: number } = {},
+  ): Promise<{ subtype: string; response?: unknown; error?: string }> {
+    const responsePromise = new Promise<{
+      subtype: string;
+      response?: unknown;
+      error?: string;
+    }>((resolve) => {
+      this.controlResponseWaiters.set(requestId, resolve);
+    });
+
+    try {
+      await this.transport.write({
+        type: "control_request",
+        request_id: requestId,
+        request: request as unknown as ControlRequest["request"],
+      });
+    } catch (error) {
+      this.controlResponseWaiters.delete(requestId);
+      throw error;
+    }
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    try {
+      if (typeof options.timeoutMs === "number") {
+        return await Promise.race([
+          responsePromise,
+          new Promise<never>((_, reject) => {
+            timeoutHandle = setTimeout(() => {
+              this.controlResponseWaiters.delete(requestId);
+              reject(
+                new Error(
+                  `Timed out waiting for control_response (${requestId})`,
+                ),
+              );
+            }, options.timeoutMs);
+          }),
+        ]);
+      }
+
+      return await responsePromise;
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    }
+  }
+
   /**
    * Fetch a page of conversation messages via the CLI control protocol.
    *
@@ -797,29 +1067,14 @@ export class Session implements AsyncDisposable {
 
     const requestId = `list-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-    const responsePromise = new Promise<{
-      subtype: string;
-      response?: unknown;
-      error?: string;
-    }>((resolve) => {
-      this.controlResponseWaiters.set(requestId, resolve);
+    const resp = await this.requestControlResponse(requestId, {
+      subtype: "list_messages",
+      ...(options.conversationId ? { conversation_id: options.conversationId } : {}),
+      ...(options.before ? { before: options.before } : {}),
+      ...(options.after ? { after: options.after } : {}),
+      ...(options.order ? { order: options.order } : {}),
+      ...(options.limit !== undefined ? { limit: options.limit } : {}),
     });
-
-    await this.transport.write({
-      type: "control_request",
-      request_id: requestId,
-      request: {
-        subtype: "list_messages",
-        ...(options.conversationId ? { conversation_id: options.conversationId } : {}),
-        ...(options.before ? { before: options.before } : {}),
-        ...(options.after ? { after: options.after } : {}),
-        ...(options.order ? { order: options.order } : {}),
-        ...(options.limit !== undefined ? { limit: options.limit } : {}),
-      },
-    });
-
-    // Race against session close (pump sets pumpClosed and resolves all waiters with null)
-    const resp = await responsePromise;
 
     if (!resp) {
       throw new Error("Session closed before listMessages response arrived");
@@ -861,25 +1116,11 @@ export class Session implements AsyncDisposable {
 
     const requestId = `bootstrap-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-    const responsePromise = new Promise<{
-      subtype: string;
-      response?: unknown;
-      error?: string;
-    }>((resolve) => {
-      this.controlResponseWaiters.set(requestId, resolve);
+    const resp = await this.requestControlResponse(requestId, {
+      subtype: "bootstrap_session_state",
+      ...(options.limit !== undefined ? { limit: options.limit } : {}),
+      ...(options.order ? { order: options.order } : {}),
     });
-
-    await this.transport.write({
-      type: "control_request",
-      request_id: requestId,
-      request: {
-        subtype: "bootstrap_session_state",
-        ...(options.limit !== undefined ? { limit: options.limit } : {}),
-        ...(options.order ? { order: options.order } : {}),
-      },
-    });
-
-    const resp = await responsePromise;
 
     if (!resp) {
       throw new Error("Session closed before bootstrapState response arrived");
@@ -1046,6 +1287,7 @@ export class Session implements AsyncDisposable {
             return {
               type: "error",
               message: detail,
+              errorCode: "protocol_error",
               stopReason: "protocol_error",
               runId,
               apiError: {
@@ -1053,6 +1295,7 @@ export class Session implements AsyncDisposable {
                 detail,
                 message_type: msg.message_type,
               },
+              recoverable: false,
               errorDetail: detail,
             };
           }
@@ -1138,15 +1381,22 @@ export class Session implements AsyncDisposable {
       const approvalConflict = isApprovalConflictSignal({
         stopReason: msg.stop_reason,
       });
-      const errorCode = msg.subtype !== "success"
+      const legacyError = msg.subtype !== "success"
         ? (approvalConflict && msg.subtype === "error" ? "approval_conflict" : msg.subtype)
         : undefined;
+      const errorCode = toSdkErrorCode(legacyError);
       return {
         type: "result",
         success: msg.subtype === "success",
         result: msg.result,
-        error: errorCode,
-        ...(approvalConflict ? { approvalConflict: true as const } : {}),
+        error: legacyError,
+        errorCode,
+        ...(approvalConflict
+          ? {
+              approvalConflict: true as const,
+              recoverable: true as const,
+            }
+          : {}),
         stopReason: msg.stop_reason,
         durationMs: msg.duration_ms,
         totalCostUsd: msg.total_cost_usd,
@@ -1171,10 +1421,19 @@ export class Session implements AsyncDisposable {
         message: msg.message,
         stopReason: msg.stop_reason,
       });
+      const errorCode = approvalConflict
+        ? "approval_conflict"
+        : toSdkErrorCode(msg.stop_reason);
       return {
         type: "error" as const,
         message: msg.message,
-        ...(approvalConflict ? { approvalConflict: true as const } : {}),
+        ...(errorCode ? { errorCode } : {}),
+        ...(approvalConflict
+          ? {
+              approvalConflict: true as const,
+              recoverable: true as const,
+            }
+          : {}),
         ...(errorDetail ? { errorDetail } : {}),
         stopReason: msg.stop_reason,
         runId: msg.run_id,

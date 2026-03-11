@@ -222,6 +222,52 @@ function findControlResponseByRequestId(
   }) as Record<string, unknown> | undefined;
 }
 
+function findControlRequestBySubtype(
+  writes: unknown[],
+  subtype: string,
+): { request_id?: string; request?: { subtype?: string } } | undefined {
+  return writes.find((msg) => {
+    const payload = msg as {
+      type?: string;
+      request_id?: string;
+      request?: { subtype?: string };
+    };
+    return (
+      payload.type === "control_request" && payload.request?.subtype === subtype
+    );
+  }) as
+    | { request_id?: string; request?: { subtype?: string } }
+    | undefined;
+}
+
+function createControlResponseSuccess(
+  requestId: string,
+  response: Record<string, unknown> = {},
+): WireMessage {
+  return {
+    type: "control_response",
+    response: {
+      subtype: "success",
+      request_id: requestId,
+      response,
+    },
+  } as WireMessage;
+}
+
+function createControlResponseError(
+  requestId: string,
+  error: string,
+): WireMessage {
+  return {
+    type: "control_response",
+    response: {
+      subtype: "error",
+      request_id: requestId,
+      error,
+    },
+  } as WireMessage;
+}
+
 async function waitFor(
   predicate: () => boolean,
   timeoutMs = 1000,
@@ -493,8 +539,10 @@ describe("Session", () => {
         type: "error",
         message:
           "Missing tool_call_id in approval_request_message (uuid=approval-missing-id)",
+        errorCode: "protocol_error",
         errorDetail:
           "Missing tool_call_id in approval_request_message (uuid=approval-missing-id)",
+        recoverable: false,
         stopReason: "protocol_error",
         runId: "run-missing-id",
         apiError: {
@@ -522,6 +570,7 @@ describe("Session", () => {
         success: true,
         result: "done",
         error: undefined,
+        errorCode: undefined,
         stopReason: "end_turn",
         durationMs: 1,
         totalCostUsd: undefined,
@@ -560,7 +609,9 @@ describe("Session", () => {
         success: false,
         result: "done",
         error: "approval_conflict",
+        errorCode: "approval_conflict",
         approvalConflict: true,
+        recoverable: true,
         stopReason: "requires_approval",
         durationMs: 1,
         totalCostUsd: undefined,
@@ -581,6 +632,7 @@ describe("Session", () => {
       expect(transformed).toEqual({
         type: "error",
         message: "Rate limit exceeded",
+        errorCode: "llm_api_error",
         stopReason: "llm_api_error",
         runId: "run-1",
         apiError: {
@@ -602,7 +654,9 @@ describe("Session", () => {
       expect(transformed).toEqual({
         type: "error",
         message: "An unknown error occurred with the LLM streaming request.",
+        errorCode: "approval_conflict",
         approvalConflict: true,
+        recoverable: true,
         errorDetail:
           "CONFLICT: Cannot send a new message: The agent is waiting for approval on a tool call.",
         stopReason: "error",
@@ -632,6 +686,178 @@ describe("Session", () => {
         delayMs: 1500,
         runId: "run-1",
       });
+    });
+  });
+
+  describe("approval recovery flow", () => {
+    test("recoverPendingApprovals reports unsupported when CLI rejects subtype", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        const responder = (async () => {
+          await waitFor(
+            () =>
+              !!findControlRequestBySubtype(
+                transport.writes,
+                "recover_pending_approvals",
+              )?.request_id,
+            500,
+          );
+          const req = findControlRequestBySubtype(
+            transport.writes,
+            "recover_pending_approvals",
+          );
+          expect(req?.request_id).toBeTruthy();
+          transport.push(
+            createControlResponseError(
+              req?.request_id as string,
+              "Unknown control request subtype: recover_pending_approvals",
+            ),
+          );
+        })();
+
+        const recovery = await session.recoverPendingApprovals({ timeoutMs: 500 });
+        await responder;
+
+        expect(recovery.recovered).toBe(false);
+        expect(recovery.pendingApproval).toBe(true);
+        expect(recovery.unsupported).toBe(true);
+        expect(recovery.detail).toContain("Unknown control request subtype");
+      } finally {
+        session.close();
+      }
+    });
+
+    test("runTurn terminalizes approval conflict when recovery is unsupported", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        transport.push(createApprovalConflictErrorWireMessage("run-conflict-turn-1"));
+        transport.push(
+          createResultMessage({
+            subtype: "error",
+            stop_reason: "error",
+            run_ids: ["run-conflict-turn-1"],
+          }),
+        );
+
+        const responder = (async () => {
+          await waitFor(
+            () =>
+              !!findControlRequestBySubtype(
+                transport.writes,
+                "recover_pending_approvals",
+              )?.request_id,
+            500,
+          );
+          const req = findControlRequestBySubtype(
+            transport.writes,
+            "recover_pending_approvals",
+          );
+          expect(req?.request_id).toBeTruthy();
+          transport.push(
+            createControlResponseError(
+              req?.request_id as string,
+              "Unknown control request subtype: recover_pending_approvals",
+            ),
+          );
+        })();
+
+        const result = await session.runTurn("hello");
+        await responder;
+
+        expect(result.success).toBe(false);
+        expect(result.approvalConflict).toBe(true);
+        expect(result.error).toBe("approval_conflict_terminal");
+        expect(result.errorCode).toBe("approval_conflict_terminal");
+        expect(result.recoverable).toBe(false);
+        expect(result.recoveryAttempts).toBe(1);
+      } finally {
+        session.close();
+      }
+    });
+
+    test("runTurn retries once after successful recovery", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        transport.push(createApprovalConflictErrorWireMessage("run-conflict-turn-2"));
+        transport.push(
+          createResultMessage({
+            subtype: "error",
+            stop_reason: "error",
+            run_ids: ["run-conflict-turn-2"],
+          }),
+        );
+
+        const responder = (async () => {
+          await waitFor(
+            () =>
+              !!findControlRequestBySubtype(
+                transport.writes,
+                "recover_pending_approvals",
+              )?.request_id,
+            500,
+          );
+          const recoveryReq = findControlRequestBySubtype(
+            transport.writes,
+            "recover_pending_approvals",
+          );
+          expect(recoveryReq?.request_id).toBeTruthy();
+          transport.push(
+            createControlResponseSuccess(recoveryReq?.request_id as string),
+          );
+
+          await waitFor(
+            () =>
+              transport.writes.filter((msg) => {
+                const payload = msg as { type?: string };
+                return payload.type === "user";
+              }).length >= 2,
+            500,
+          );
+
+          transport.push(createAssistantMessage(2, { run_id: "run-recovered-2" }));
+          transport.push(
+            createResultMessage({
+              subtype: "success",
+              result: "recovered",
+              stop_reason: "end_turn",
+              run_ids: ["run-recovered-2"],
+            }),
+          );
+        })();
+
+        const result = await session.runTurn("hello");
+        await responder;
+
+        expect(result.success).toBe(true);
+        expect(result.result).toBe("recovered");
+        expect(result.recoveryAttempts).toBe(1);
+      } finally {
+        session.close();
+      }
     });
   });
 

@@ -43,6 +43,7 @@ export type {
   SDKToolResultMessage,
   SDKReasoningMessage,
   SDKResultMessage,
+  SDKErrorCode,
   SDKStreamEventMessage,
   SDKStreamEventPayload,
   SDKStreamEventDeltaPayload,
@@ -50,6 +51,9 @@ export type {
   SDKUnknownStreamEventPayload,
   SDKErrorMessage,
   SDKRetryMessage,
+  RunTurnOptions,
+  RecoverPendingApprovalsOptions,
+  RecoverPendingApprovalsResult,
   SkillSource,
   SleeptimeOptions,
   SleeptimeTrigger,
@@ -196,27 +200,7 @@ export async function prompt(
     : createSession();
 
   try {
-    await session.send(message);
-
-    let result: SDKResultMessage | null = null;
-    for await (const msg of session.stream()) {
-      if (msg.type === "result") {
-        result = msg;
-        break;
-      }
-    }
-
-    if (!result) {
-      return {
-        type: "result",
-        success: false,
-        error: "No result received",
-        durationMs: 0,
-        conversationId: session.conversationId,
-      };
-    }
-
-    return result;
+    return await session.runTurn(message);
   } finally {
     session.close();
   }
