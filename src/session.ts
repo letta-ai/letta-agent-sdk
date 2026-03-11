@@ -46,9 +46,24 @@ const MAX_BUFFERED_STREAM_MESSAGES = 100;
 const DEFAULT_MAX_APPROVAL_RECOVERY_ATTEMPTS = 1;
 const DEFAULT_APPROVAL_RECOVERY_TIMEOUT_MS = 5_000;
 
+const KNOWN_SDK_ERROR_CODES = new Set<SDKErrorCode>([
+  "approval_conflict",
+  "approval_conflict_terminal",
+  "protocol_error",
+  "error",
+  "llm_api_error",
+  "max_steps",
+  "interrupted",
+  "stream_closed",
+]);
+
+function isKnownSdkErrorCode(value: string): value is SDKErrorCode {
+  return KNOWN_SDK_ERROR_CODES.has(value as SDKErrorCode);
+}
+
 function toSdkErrorCode(value: string | undefined): SDKErrorCode | undefined {
   if (!value || value.length === 0) return undefined;
-  return value as SDKErrorCode;
+  return isKnownSdkErrorCode(value) ? value : undefined;
 }
 
 function isUnknownControlSubtypeError(
@@ -74,6 +89,8 @@ function isApprovalConflictSignal(params: {
   stopReason?: string;
 }): boolean {
   if (params.stopReason === "requires_approval") return true;
+  // Stopgap heuristic until the server emits a first-class structured
+  // approval-conflict code in wire payloads.
   const haystack = [params.detail, params.message]
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .join("\n")
@@ -360,7 +377,6 @@ export class Session implements AsyncDisposable {
       const detail = error instanceof Error ? error.message : String(error);
       return {
         recovered: false,
-        pendingApproval: true,
         unsupported: false,
         detail,
       };
@@ -439,21 +455,36 @@ export class Session implements AsyncDisposable {
     await this.send(message);
 
     let latestApprovalConflictDetail: string | undefined;
+    let latestNonConflictErrorDetail: string | undefined;
 
     for await (const msg of this.stream()) {
-      if (msg.type === "error" && msg.approvalConflict) {
-        latestApprovalConflictDetail = msg.errorDetail || msg.message;
+      if (msg.type === "error") {
+        const detail = msg.errorDetail || msg.message;
+        if (msg.approvalConflict) {
+          latestApprovalConflictDetail = detail;
+        } else {
+          latestNonConflictErrorDetail = detail;
+        }
         continue;
       }
 
       if (msg.type === "result") {
-        if (
-          msg.approvalConflict &&
-          !msg.errorDetail &&
-          latestApprovalConflictDetail
-        ) {
-          msg.errorDetail = latestApprovalConflictDetail;
+        if (!msg.success && !msg.errorDetail) {
+          if (msg.approvalConflict && latestApprovalConflictDetail) {
+            return {
+              ...msg,
+              errorDetail: latestApprovalConflictDetail,
+            };
+          }
+
+          if (!msg.approvalConflict && latestNonConflictErrorDetail) {
+            return {
+              ...msg,
+              errorDetail: latestNonConflictErrorDetail,
+            };
+          }
         }
+
         return msg;
       }
     }
@@ -526,6 +557,8 @@ export class Session implements AsyncDisposable {
         }
       }
 
+      let normalizedMsg: SDKMessage = sdkMsg;
+
       if (sdkMsg.type === "result" && !sdkMsg.success) {
         let detail = sdkMsg.errorDetail;
         if (!detail && Array.isArray(sdkMsg.runIds)) {
@@ -550,29 +583,42 @@ export class Session implements AsyncDisposable {
           });
 
         if (approvalConflict) {
-          sdkMsg.approvalConflict = true;
-          sdkMsg.recoverable = sdkMsg.recoverable ?? true;
-          if (detail) sdkMsg.errorDetail = detail;
-          if (!sdkMsg.errorCode || sdkMsg.errorCode === "error") {
-            sdkMsg.errorCode = "approval_conflict";
-          }
-          // Preserve legacy string field for compatibility.
-          if (!sdkMsg.error || sdkMsg.error === "error") {
-            sdkMsg.error = sdkMsg.errorCode;
-          }
+          const normalizedErrorCode =
+            !sdkMsg.errorCode || sdkMsg.errorCode === "error"
+              ? "approval_conflict"
+              : sdkMsg.errorCode;
+          const normalizedError =
+            !sdkMsg.error || sdkMsg.error === "error"
+              ? normalizedErrorCode
+              : sdkMsg.error;
+
+          normalizedMsg = {
+            ...sdkMsg,
+            approvalConflict: true,
+            recoverable: sdkMsg.recoverable ?? true,
+            ...(detail ? { errorDetail: detail } : {}),
+            errorCode: normalizedErrorCode,
+            error: normalizedError,
+          };
         } else if (!sdkMsg.errorCode && sdkMsg.error) {
-          sdkMsg.errorCode = toSdkErrorCode(sdkMsg.error);
+          const errorCode = toSdkErrorCode(sdkMsg.error);
+          if (errorCode) {
+            normalizedMsg = {
+              ...sdkMsg,
+              errorCode,
+            };
+          }
         }
       }
 
       yieldCount++;
-      sessionLog("stream", `yield #${yieldCount}: type=${sdkMsg.type}${sdkMsg.type === "result" ? ` success=${(sdkMsg as SDKResultMessage).success} error=${(sdkMsg as SDKResultMessage).error || "none"}` : ""}`);
-      yield sdkMsg;
+      sessionLog("stream", `yield #${yieldCount}: type=${normalizedMsg.type}${normalizedMsg.type === "result" ? ` success=${(normalizedMsg as SDKResultMessage).success} error=${(normalizedMsg as SDKResultMessage).error || "none"}` : ""}`);
+      yield normalizedMsg;
 
       // Stop on result message
-      if (sdkMsg.type === "result") {
+      if (normalizedMsg.type === "result") {
         gotResult = true;
-        this.updateCompletedRunIds((sdkMsg as SDKResultMessage).runIds, currentStreamRunIds);
+        this.updateCompletedRunIds((normalizedMsg as SDKResultMessage).runIds, currentStreamRunIds);
         break;
       }
     }

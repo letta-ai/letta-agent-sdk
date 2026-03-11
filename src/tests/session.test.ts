@@ -619,9 +619,45 @@ describe("Session", () => {
         runIds: undefined,
       });
     });
+
+    test("keeps unknown result error string but leaves typed errorCode undefined", () => {
+      const session = new Session();
+      const wireMsg = createResultMessage({
+        subtype: "provider_custom_failure",
+        stop_reason: "provider_custom_failure",
+      });
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toMatchObject({
+        type: "result",
+        success: false,
+        error: "provider_custom_failure",
+        errorCode: undefined,
+      });
+    });
   });
 
   describe("transformMessage error/retry mapping", () => {
+    test("leaves errorCode undefined for unknown stop_reason", () => {
+      const session = new Session();
+      const wireMsg = {
+        ...createErrorWireMessage(),
+        stop_reason: "provider_custom_failure",
+      } as unknown as WireMessage;
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toMatchObject({
+        type: "error",
+        message: "Rate limit exceeded",
+        stopReason: "provider_custom_failure",
+      });
+      expect((transformed as { errorCode?: string }).errorCode).toBeUndefined();
+    });
+
     test("maps error wire message to SDK error message", () => {
       const session = new Session();
       const wireMsg = createErrorWireMessage();
@@ -690,6 +726,28 @@ describe("Session", () => {
   });
 
   describe("approval recovery flow", () => {
+    test("recoverPendingApprovals returns unknown pending state on timeout", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        const recovery = await session.recoverPendingApprovals({ timeoutMs: 10 });
+
+        expect(recovery.recovered).toBe(false);
+        expect(recovery.pendingApproval).toBeUndefined();
+        expect(recovery.unsupported).toBe(false);
+        expect(recovery.detail).toContain("Timed out waiting for control_response");
+      } finally {
+        session.close();
+      }
+    });
+
     test("recoverPendingApprovals reports unsupported when CLI rejects subtype", async () => {
       const session = new Session({
         permissionMode: "default",
@@ -855,6 +913,37 @@ describe("Session", () => {
         expect(result.success).toBe(true);
         expect(result.result).toBe("recovered");
         expect(result.recoveryAttempts).toBe(1);
+      } finally {
+        session.close();
+      }
+    });
+
+    test("runTurn preserves non-conflict error detail on terminal result", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        transport.push(createErrorWireMessage());
+        transport.push(
+          createResultMessage({
+            subtype: "error",
+            stop_reason: "llm_api_error",
+            run_ids: ["run-1"],
+          }),
+        );
+
+        const result = await session.runTurn("hello");
+
+        expect(result.success).toBe(false);
+        expect(result.errorCode).toBe("error");
+        expect(result.stopReason).toBe("llm_api_error");
+        expect(result.errorDetail).toBe("Rate limit exceeded");
       } finally {
         session.close();
       }

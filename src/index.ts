@@ -183,6 +183,8 @@ export function resumeSession(
  *
  * - Without agentId: uses default agent (like `letta -p`), new conversation
  * - With agentId: uses specific agent, new conversation
+ * - Uses `session.runTurn()` under the hood, including bounded SDK-managed
+ *   approval-conflict recovery (default 1 attempt)
  *
  * @example
  * ```typescript

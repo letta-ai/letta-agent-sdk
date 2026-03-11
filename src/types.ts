@@ -62,7 +62,11 @@ export interface RecoverPendingApprovalsOptions {
 
 export interface RecoverPendingApprovalsResult {
   recovered: boolean;
-  pendingApproval: boolean;
+  /**
+   * Whether a pending approval is known to remain after recovery.
+   * Undefined means the SDK could not determine the state (for example, timeout).
+   */
+  pendingApproval?: boolean;
   unsupported: boolean;
   detail?: string;
 }
@@ -537,9 +541,7 @@ export interface SDKReasoningMessage {
   runId?: string;
 }
 
-/**
- * Canonical SDK error codes. Unknown upstream values may still appear.
- */
+/** Canonical SDK error codes recognized by the SDK. */
 export type SDKErrorCode =
   | "approval_conflict"
   | "approval_conflict_terminal"
@@ -548,8 +550,7 @@ export type SDKErrorCode =
   | "llm_api_error"
   | "max_steps"
   | "interrupted"
-  | "stream_closed"
-  | string;
+  | "stream_closed";
 
 export interface SDKResultMessage {
   type: "result";
