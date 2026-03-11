@@ -41,6 +41,31 @@ function sessionLog(tag: string, ...args: unknown[]) {
 
 const MAX_BUFFERED_STREAM_MESSAGES = 100;
 
+function extractApiErrorDetail(apiError: Record<string, unknown> | undefined): string | undefined {
+  const detail = apiError?.detail;
+  if (typeof detail !== "string") return undefined;
+  const trimmed = detail.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function isApprovalConflictSignal(params: {
+  detail?: string;
+  message?: string;
+  stopReason?: string;
+}): boolean {
+  if (params.stopReason === "requires_approval") return true;
+  const haystack = [params.detail, params.message]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .join("\n")
+    .toLowerCase();
+  if (!haystack) return false;
+  return (
+    haystack.includes("waiting for approval on a tool call") ||
+    haystack.includes("cannot send a new message") ||
+    haystack.includes("requires_approval")
+  );
+}
+
 type BufferedStreamMessage = {
   message: SDKMessage;
   generation: number;
@@ -242,6 +267,8 @@ export class Session implements AsyncDisposable {
     let gotResult = false;
     const currentStreamRunIds = new Set<string>();
     const staleRunIds = new Set(this.lastCompletedRunIds);
+    const approvalConflictDetailsByRunId = new Map<string, string>();
+    let latestApprovalConflictDetail: string | undefined;
 
     this.startBackgroundPump();
     sessionLog("stream", `starting stream (agent=${this._agentId}, conversation=${this._conversationId}, generation=${minGeneration})`);
@@ -273,6 +300,51 @@ export class Session implements AsyncDisposable {
       }
 
       const sdkMsg = bufferedMsg.message;
+
+      if (sdkMsg.type === "error" && sdkMsg.approvalConflict) {
+        const detail = sdkMsg.errorDetail || sdkMsg.message;
+        if (detail) {
+          latestApprovalConflictDetail = detail;
+          if (sdkMsg.runId) {
+            approvalConflictDetailsByRunId.set(sdkMsg.runId, detail);
+          }
+        }
+      }
+
+      if (sdkMsg.type === "result" && !sdkMsg.success) {
+        let detail = sdkMsg.errorDetail;
+        if (!detail && Array.isArray(sdkMsg.runIds)) {
+          for (const runId of sdkMsg.runIds) {
+            const fromRun = approvalConflictDetailsByRunId.get(runId);
+            if (fromRun) {
+              detail = fromRun;
+              break;
+            }
+          }
+        }
+        if (!detail) {
+          detail = latestApprovalConflictDetail;
+        }
+
+        const approvalConflict =
+          sdkMsg.approvalConflict === true
+          || isApprovalConflictSignal({
+            detail,
+            message: sdkMsg.error,
+            stopReason: sdkMsg.stopReason,
+          });
+
+        if (approvalConflict) {
+          sdkMsg.approvalConflict = true;
+          if (detail) sdkMsg.errorDetail = detail;
+          if (sdkMsg.error === "error") {
+            // Preserve backward compatibility (string field remains) while
+            // making approval deadlocks machine-detectable.
+            sdkMsg.error = "approval_conflict";
+          }
+        }
+      }
+
       yieldCount++;
       sessionLog("stream", `yield #${yieldCount}: type=${sdkMsg.type}${sdkMsg.type === "result" ? ` success=${(sdkMsg as SDKResultMessage).success} error=${(sdkMsg as SDKResultMessage).error || "none"}` : ""}`);
       yield sdkMsg;
@@ -969,7 +1041,20 @@ export class Session implements AsyncDisposable {
             (toolCallRaw.tool_call_id as string | undefined) ??
             (toolCallRaw.id as string | undefined);
           if (!toolCallId) {
-            return null;
+            const detail = `Missing tool_call_id in ${msg.message_type} (uuid=${msg.uuid || "unknown"})`;
+            sessionLog("transform", detail);
+            return {
+              type: "error",
+              message: detail,
+              stopReason: "protocol_error",
+              runId,
+              apiError: {
+                error_type: "protocol_error",
+                detail,
+                message_type: msg.message_type,
+              },
+              errorDetail: detail,
+            };
           }
 
           const toolName =
@@ -1050,11 +1135,18 @@ export class Session implements AsyncDisposable {
       const runIds = Array.isArray(msg.run_ids)
         ? msg.run_ids.filter((id): id is string => typeof id === "string")
         : undefined;
+      const approvalConflict = isApprovalConflictSignal({
+        stopReason: msg.stop_reason,
+      });
+      const errorCode = msg.subtype !== "success"
+        ? (approvalConflict && msg.subtype === "error" ? "approval_conflict" : msg.subtype)
+        : undefined;
       return {
         type: "result",
         success: msg.subtype === "success",
         result: msg.result,
-        error: msg.subtype !== "success" ? msg.subtype : undefined,
+        error: errorCode,
+        ...(approvalConflict ? { approvalConflict: true as const } : {}),
         stopReason: msg.stop_reason,
         durationMs: msg.duration_ms,
         totalCostUsd: msg.total_cost_usd,
@@ -1073,9 +1165,17 @@ export class Session implements AsyncDisposable {
         run_id?: string;
         api_error?: Record<string, unknown>;
       };
+      const errorDetail = extractApiErrorDetail(msg.api_error);
+      const approvalConflict = isApprovalConflictSignal({
+        detail: errorDetail,
+        message: msg.message,
+        stopReason: msg.stop_reason,
+      });
       return {
         type: "error" as const,
         message: msg.message,
+        ...(approvalConflict ? { approvalConflict: true as const } : {}),
+        ...(errorDetail ? { errorDetail } : {}),
         stopReason: msg.stop_reason,
         runId: msg.run_id,
         apiError: msg.api_error,

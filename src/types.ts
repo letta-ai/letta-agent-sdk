@@ -492,6 +492,10 @@ export interface SDKResultMessage {
   success: boolean;
   result?: string;
   error?: string;
+  /** True when the failure corresponds to an approval conflict/deadlock. */
+  approvalConflict?: boolean;
+  /** Best-effort human-readable approval-conflict detail (if available). */
+  errorDetail?: string;
   stopReason?: string;
   durationMs: number;
   totalCostUsd?: number;
@@ -549,6 +553,10 @@ export interface SDKErrorMessage {
   type: "error";
   /** Human-readable error description from the CLI */
   message: string;
+  /** True when the error detail indicates an approval conflict/deadlock. */
+  approvalConflict?: boolean;
+  /** Parsed API error detail string when present. */
+  errorDetail?: string;
   /** Why the run stopped (e.g. "error", "llm_api_error", "max_steps") */
   stopReason: string;
   /** Run that produced the error, if available */

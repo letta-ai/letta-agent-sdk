@@ -87,6 +87,24 @@ function createInitMessage(
   } as WireMessage;
 }
 
+function createApprovalConflictErrorWireMessage(runId = "run-stuck"): WireMessage {
+  return {
+    type: "error",
+    session_id: "session-1",
+    uuid: "error-approval-1",
+    message: "An unknown error occurred with the LLM streaming request.",
+    stop_reason: "error",
+    run_id: runId,
+    api_error: {
+      error_type: "terminal_error",
+      message_type: "error_message",
+      run_id: runId,
+      detail:
+        "CONFLICT: Cannot send a new message: The agent is waiting for approval on a tool call.",
+    },
+  } as WireMessage;
+}
+
 function createAssistantMessage(
   index: number,
   overrides: Partial<{
@@ -450,6 +468,43 @@ describe("Session", () => {
         uuid: "approval-2",
       });
     });
+
+    test("emits protocol error when approval_request_message is missing tool_call_id", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        session_id: "session-1",
+        message_type: "approval_request_message",
+        id: "message-approval-missing-id",
+        date: "2026-01-01T00:00:00.000000+00:00",
+        uuid: "approval-missing-id",
+        run_id: "run-missing-id",
+        tool_call: {
+          name: "Bash",
+          arguments: JSON.stringify({ command: "pwd" }),
+          // intentionally missing tool_call_id
+        },
+      } as unknown as MessageWire;
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toEqual({
+        type: "error",
+        message:
+          "Missing tool_call_id in approval_request_message (uuid=approval-missing-id)",
+        errorDetail:
+          "Missing tool_call_id in approval_request_message (uuid=approval-missing-id)",
+        stopReason: "protocol_error",
+        runId: "run-missing-id",
+        apiError: {
+          error_type: "protocol_error",
+          detail:
+            "Missing tool_call_id in approval_request_message (uuid=approval-missing-id)",
+          message_type: "approval_request_message",
+        },
+      });
+    });
   });
 
   describe("transformMessage result mapping", () => {
@@ -489,6 +544,30 @@ describe("Session", () => {
         runIds: ["run-1", "run-2"],
       });
     });
+
+    test("marks requires_approval result as approval_conflict", () => {
+      const session = new Session();
+      const wireMsg = createResultMessage({
+        subtype: "error",
+        stop_reason: "requires_approval",
+      });
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toEqual({
+        type: "result",
+        success: false,
+        result: "done",
+        error: "approval_conflict",
+        approvalConflict: true,
+        stopReason: "requires_approval",
+        durationMs: 1,
+        totalCostUsd: undefined,
+        conversationId: "conversation-1",
+        runIds: undefined,
+      });
+    });
   });
 
   describe("transformMessage error/retry mapping", () => {
@@ -513,6 +592,31 @@ describe("Session", () => {
       });
     });
 
+    test("marks conflict errors as approvalConflict and captures detail", () => {
+      const session = new Session();
+      const wireMsg = createApprovalConflictErrorWireMessage("run-conflict-1");
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toEqual({
+        type: "error",
+        message: "An unknown error occurred with the LLM streaming request.",
+        approvalConflict: true,
+        errorDetail:
+          "CONFLICT: Cannot send a new message: The agent is waiting for approval on a tool call.",
+        stopReason: "error",
+        runId: "run-conflict-1",
+        apiError: {
+          error_type: "terminal_error",
+          message_type: "error_message",
+          run_id: "run-conflict-1",
+          detail:
+            "CONFLICT: Cannot send a new message: The agent is waiting for approval on a tool call.",
+        },
+      });
+    });
+
     test("maps retry wire message to SDK retry message", () => {
       const session = new Session();
       const wireMsg = createRetryWireMessage();
@@ -532,6 +636,44 @@ describe("Session", () => {
   });
 
   describe("background pump parity", () => {
+    test("propagates approval conflict detail from error message to terminal result", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        transport.push(createApprovalConflictErrorWireMessage("run-conflict-2"));
+        transport.push(
+          createResultMessage({
+            subtype: "error",
+            stop_reason: "error",
+            run_ids: ["run-conflict-2"],
+          }),
+        );
+
+        const streamed: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          streamed.push(msg);
+        }
+
+        const result = streamed.find(
+          (msg): msg is Extract<SDKMessage, { type: "result" }> =>
+            msg.type === "result",
+        );
+        expect(result).toBeTruthy();
+        expect(result?.approvalConflict).toBe(true);
+        expect(result?.error).toBe("approval_conflict");
+        expect(result?.errorDetail).toContain("waiting for approval on a tool call");
+      } finally {
+        session.close();
+      }
+    });
+
     test("handles can_use_tool control requests before stream iteration starts", async () => {
       let callbackInvocations = 0;
       const session = new Session({
