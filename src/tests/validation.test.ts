@@ -12,6 +12,8 @@ describe("validation", () => {
           behavior: "reminder",
           stepCount: 6,
         },
+        maxApprovalRecoveryAttempts: 2,
+        approvalRecoveryTimeoutMs: 3000,
       }),
     ).not.toThrow();
   });
@@ -51,6 +53,20 @@ describe("validation", () => {
         },
       }),
     ).toThrow("Invalid sleeptime.stepCount");
+  });
+
+  test("rejects invalid approval recovery options", () => {
+    expect(() =>
+      validateCreateSessionOptions({
+        maxApprovalRecoveryAttempts: -1,
+      }),
+    ).toThrow("Invalid maxApprovalRecoveryAttempts");
+
+    expect(() =>
+      validateCreateSessionOptions({
+        approvalRecoveryTimeoutMs: 0,
+      }),
+    ).toThrow("Invalid approvalRecoveryTimeoutMs");
   });
 
   test("rejects invalid agent skill source", () => {

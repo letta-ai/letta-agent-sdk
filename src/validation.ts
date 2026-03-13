@@ -34,6 +34,28 @@ function getBlockLabels(memory: MemoryItem[]): string[] {
     .filter((label): label is string => label !== null);
 }
 
+function validateApprovalRecoveryOptions(options: CreateSessionOptions): void {
+  if (
+    options.maxApprovalRecoveryAttempts !== undefined &&
+    (!Number.isInteger(options.maxApprovalRecoveryAttempts) ||
+      options.maxApprovalRecoveryAttempts < 0)
+  ) {
+    throw new Error(
+      "Invalid maxApprovalRecoveryAttempts. Expected a non-negative integer."
+    );
+  }
+
+  if (
+    options.approvalRecoveryTimeoutMs !== undefined &&
+    (!Number.isInteger(options.approvalRecoveryTimeoutMs) ||
+      options.approvalRecoveryTimeoutMs <= 0)
+  ) {
+    throw new Error(
+      "Invalid approvalRecoveryTimeoutMs. Expected a positive integer."
+    );
+  }
+}
+
 /**
  * Validate systemPrompt preset value.
  */
@@ -113,6 +135,7 @@ export function validateCreateSessionOptions(options: CreateSessionOptions): voi
 
   validateSkillSources(options.skillSources);
   validateSleeptimeOptions(options.sleeptime);
+  validateApprovalRecoveryOptions(options);
 }
 
 /**

@@ -39,6 +39,38 @@ export interface TextContent {
   text: string;
 }
 
+export interface RunTurnOptions {
+  /**
+   * Max automatic approval-conflict recovery attempts for this turn.
+   * Overrides session-level maxApprovalRecoveryAttempts when provided.
+   */
+  maxApprovalRecoveryAttempts?: number;
+
+  /**
+   * Timeout in milliseconds for each recover_pending_approvals request.
+   * Overrides session-level approvalRecoveryTimeoutMs when provided.
+   */
+  recoveryTimeoutMs?: number;
+}
+
+export interface RecoverPendingApprovalsOptions {
+  /**
+   * Timeout in milliseconds for the recovery control request.
+   */
+  timeoutMs?: number;
+}
+
+export interface RecoverPendingApprovalsResult {
+  recovered: boolean;
+  /**
+   * Whether a pending approval is known to remain after recovery.
+   * Undefined means the SDK could not determine the state (for example, timeout).
+   */
+  pendingApproval?: boolean;
+  unsupported: boolean;
+  detail?: string;
+}
+
 /**
  * Image content in a message (base64 encoded)
  */
@@ -264,6 +296,17 @@ export interface InternalSessionOptions {
   includePartialMessages?: boolean;
 
   /**
+   * Max automatic approval-conflict recovery attempts per runTurn() call.
+   * Set to 0 to disable automatic recovery.
+   */
+  maxApprovalRecoveryAttempts?: number;
+
+  /**
+   * Timeout in milliseconds for a single recover_pending_approvals control request.
+   */
+  approvalRecoveryTimeoutMs?: number;
+
+  /**
    * Controls how the git-backed memory pull runs at session startup.
    * Maps to --memfs-startup <blocking|background|skip> CLI flag.
    */
@@ -336,6 +379,17 @@ export interface CreateSessionOptions {
    * stream_event chunks for incremental assistant/reasoning rendering.
    */
   includePartialMessages?: boolean;
+
+  /**
+   * Max automatic approval-conflict recovery attempts per runTurn() call.
+   * Set to 0 to disable automatic recovery.
+   */
+  maxApprovalRecoveryAttempts?: number;
+
+  /**
+   * Timeout in milliseconds for a single recover_pending_approvals control request.
+   */
+  approvalRecoveryTimeoutMs?: number;
 
   /**
    * Controls how the git-backed memory pull runs at session startup.
@@ -487,11 +541,33 @@ export interface SDKReasoningMessage {
   runId?: string;
 }
 
+/** Canonical SDK error codes recognized by the SDK. */
+export type SDKErrorCode =
+  | "approval_conflict"
+  | "approval_conflict_terminal"
+  | "protocol_error"
+  | "error"
+  | "llm_api_error"
+  | "max_steps"
+  | "interrupted"
+  | "stream_closed";
+
 export interface SDKResultMessage {
   type: "result";
   success: boolean;
   result?: string;
+  /** Legacy error string (kept for compatibility). Prefer errorCode. */
   error?: string;
+  /** Canonical typed error code for machine handling. */
+  errorCode?: SDKErrorCode;
+  /** True when the failure corresponds to an approval conflict/deadlock. */
+  approvalConflict?: boolean;
+  /** Whether another recovery attempt could still succeed. */
+  recoverable?: boolean;
+  /** Number of SDK-managed recovery attempts executed for this turn. */
+  recoveryAttempts?: number;
+  /** Best-effort human-readable approval-conflict detail (if available). */
+  errorDetail?: string;
   stopReason?: string;
   durationMs: number;
   totalCostUsd?: number;
@@ -549,6 +625,14 @@ export interface SDKErrorMessage {
   type: "error";
   /** Human-readable error description from the CLI */
   message: string;
+  /** Canonical typed error code for machine handling. */
+  errorCode?: SDKErrorCode;
+  /** True when the error detail indicates an approval conflict/deadlock. */
+  approvalConflict?: boolean;
+  /** Whether another recovery attempt could still succeed. */
+  recoverable?: boolean;
+  /** Parsed API error detail string when present. */
+  errorDetail?: string;
   /** Why the run stopped (e.g. "error", "llm_api_error", "max_steps") */
   stopReason: string;
   /** Run that produced the error, if available */
