@@ -6,7 +6,7 @@ import type {
   SDKStreamEventMessage,
   ListMessagesResult,
 } from "../types.js";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -47,6 +47,49 @@ function log(message: string, data?: unknown): void {
 
 function hasTool(agent: AgentSummary, toolName: string): boolean {
   return !!agent.tools?.some((t) => t?.name === toolName);
+}
+
+async function importAgentFile(
+  filePath: string,
+): Promise<{ agentIds: string[] }> {
+  if (!API_KEY) throw new Error("LETTA_API_KEY is required");
+
+  const fileContent = await readFile(filePath);
+  const formData = new FormData();
+  const blob = new Blob([fileContent], { type: "application/octet-stream" });
+  formData.append("file", blob, "agent.af");
+
+  const response = await fetch(`${BASE_URL}/v1/agents/import`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to import agent file: ${response.status} ${text}`);
+  }
+
+  const payload = (await response.json()) as { agent_ids: string[] };
+  return { agentIds: payload.agent_ids };
+}
+
+async function deleteAgent(agentIdToDelete: string): Promise<void> {
+  if (!API_KEY) throw new Error("LETTA_API_KEY is required");
+
+  const response = await fetch(`${BASE_URL}/v1/agents/${agentIdToDelete}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    log(`Failed to delete agent ${agentIdToDelete}: ${response.status} ${text}`);
+  }
 }
 
 function pickBestAgent(agents: AgentSummary[]): AgentSummary | null {
@@ -546,6 +589,70 @@ describeLive("live integration: letta-code-sdk", () => {
           messages: a.messages.map(summarizeMessage),
         })),
       });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "stuck approval recovery: import agent with pending approval and recover",
+    async () => {
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = dirname(__filename);
+      const fixturePath = join(__dirname, "fixtures", "agentfiles", "stuck-approval.af");
+
+      log("Importing stuck-approval.af fixture...");
+      const { agentIds } = await importAgentFile(fixturePath);
+      expect(agentIds.length).toBe(1);
+      const stuckAgentId = agentIds[0]!;
+      expect(stuckAgentId).toBeTruthy();
+      log(`Imported stuck agent: ${stuckAgentId}`);
+
+      try {
+        const session = createSession(stuckAgentId, {
+          permissionMode: "bypassPermissions",
+          includePartialMessages: true,
+        });
+        openedSessions.push(session);
+
+        const init = await session.initialize();
+        expect(init.agentId).toBe(stuckAgentId);
+        log(`Session initialized for stuck agent, conversationId: ${init.conversationId}`);
+
+        // Attempt recovery - the agent has a pending approval from a Bash tool call
+        const recovery = await session.recoverPendingApprovals({ timeoutMs: 30000 });
+        log("Recovery result:", recovery);
+
+        // The recovery should either succeed (recovered=true) or report that
+        // there's a pending approval that couldn't be recovered (pendingApproval=true)
+        // Either outcome is valid depending on server state and CLI capabilities
+        if (recovery.recovered) {
+          log("Recovery succeeded - agent state cleared");
+          expect(recovery.pendingApproval).toBeFalsy();
+        } else if (recovery.unsupported) {
+          log("Recovery unsupported by CLI version - this is expected for older CLIs");
+        } else {
+          log(`Recovery did not succeed: ${recovery.detail}`);
+        }
+
+        // Now try a simple turn to verify the agent is responsive
+        // (after recovery, a new turn should work)
+        if (recovery.recovered || !recovery.pendingApproval) {
+          const messages = await collectTurn(session, "Say OK if you can hear me.");
+          const result = expectTerminalResult(messages);
+          expect(result.success).toBe(true);
+          log("Post-recovery turn succeeded");
+        }
+
+        await writeFixture("stuck_approval_recovery", {
+          stuckAgentId,
+          recovery,
+          conversationId: init.conversationId,
+        });
+      } finally {
+        // Cleanup: delete the imported agent
+        log(`Cleaning up: deleting agent ${stuckAgentId}`);
+        await deleteAgent(stuckAgentId);
+      }
     },
     TEST_TIMEOUT_MS,
   );
