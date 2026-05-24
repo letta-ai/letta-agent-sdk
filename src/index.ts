@@ -85,6 +85,26 @@ export type {
 
 export { Session } from "./session.js";
 
+export {
+  RemoteAgent,
+  RemoteEnvironmentClient,
+  createRemoteAgent,
+} from "./remote.js";
+
+export type {
+  RemoteAgentOptions,
+  RemoteEnvironmentClientOptions,
+  RemoteEnvironmentConnection,
+  RemoteEnvironmentFallback,
+  RemoteEnvironmentListResult,
+  RemoteEnvironmentTarget,
+  RemoteMessageDispatchResult,
+  RemoteRuntimeLastEnvironment,
+  ResolvedRemoteEnvironment,
+  ResolveRemoteEnvironmentOptions,
+  SendRemoteMessageOptions,
+} from "./remote.js";
+
 export { extractStreamTextDelta } from "./stream-events.js";
 
 // Tool helpers
