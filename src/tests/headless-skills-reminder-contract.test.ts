@@ -7,8 +7,21 @@ function extractBidirectionalModeSegment(source: string): string {
   const start = source.indexOf("async function runBidirectionalMode(");
   expect(start).toBeGreaterThan(-1);
 
-  const end = source.indexOf("process.exit(0);", start);
-  expect(end).toBeGreaterThan(start);
+  const bodyStart = source.indexOf("{", start);
+  expect(bodyStart).toBeGreaterThan(start);
+
+  let depth = 0;
+  let end = -1;
+  for (let i = bodyStart; i < source.length; i += 1) {
+    const char = source[i];
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+    if (depth === 0) {
+      end = i + 1;
+      break;
+    }
+  }
+  expect(end).toBeGreaterThan(bodyStart);
 
   return source.slice(start, end);
 }
