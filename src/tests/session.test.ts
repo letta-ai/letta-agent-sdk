@@ -87,12 +87,38 @@ function createInitMessage(
   } as WireMessage;
 }
 
-function createAssistantMessage(index: number): WireMessage {
+function createApprovalConflictErrorWireMessage(runId = "run-stuck"): WireMessage {
+  return {
+    type: "error",
+    session_id: "session-1",
+    uuid: "error-approval-1",
+    message: "An unknown error occurred with the LLM streaming request.",
+    stop_reason: "error",
+    run_id: runId,
+    api_error: {
+      error_type: "terminal_error",
+      message_type: "error_message",
+      run_id: runId,
+      detail:
+        "CONFLICT: Cannot send a new message: The agent is waiting for approval on a tool call.",
+    },
+  } as WireMessage;
+}
+
+function createAssistantMessage(
+  index: number,
+  overrides: Partial<{
+    uuid: string;
+    content: string;
+    run_id: string;
+  }> = {},
+): WireMessage {
   return {
     type: "message",
     message_type: "assistant_message",
     uuid: `assistant-${index}`,
     content: `msg-${index}`,
+    ...overrides,
   } as WireMessage;
 }
 
@@ -116,7 +142,16 @@ function createApprovalRequestMessage(
   };
 }
 
-function createResultMessage(): WireMessage {
+function createResultMessage(
+  overrides: Partial<{
+    subtype: string;
+    result: string | null;
+    duration_ms: number;
+    conversation_id: string;
+    stop_reason: string;
+    run_ids: unknown[];
+  }> = {},
+): WireMessage {
   return {
     type: "result",
     subtype: "success",
@@ -124,6 +159,7 @@ function createResultMessage(): WireMessage {
     duration_ms: 1,
     conversation_id: "conversation-1",
     stop_reason: "end_turn",
+    ...overrides,
   } as WireMessage;
 }
 
@@ -184,6 +220,52 @@ function findControlResponseByRequestId(
     const payload = msg as { type?: string; response?: { request_id?: string } };
     return payload.type === "control_response" && payload.response?.request_id === requestId;
   }) as Record<string, unknown> | undefined;
+}
+
+function findControlRequestBySubtype(
+  writes: unknown[],
+  subtype: string,
+): { request_id?: string; request?: { subtype?: string } } | undefined {
+  return writes.find((msg) => {
+    const payload = msg as {
+      type?: string;
+      request_id?: string;
+      request?: { subtype?: string };
+    };
+    return (
+      payload.type === "control_request" && payload.request?.subtype === subtype
+    );
+  }) as
+    | { request_id?: string; request?: { subtype?: string } }
+    | undefined;
+}
+
+function createControlResponseSuccess(
+  requestId: string,
+  response: Record<string, unknown> = {},
+): WireMessage {
+  return {
+    type: "control_response",
+    response: {
+      subtype: "success",
+      request_id: requestId,
+      response,
+    },
+  } as WireMessage;
+}
+
+function createControlResponseError(
+  requestId: string,
+  error: string,
+): WireMessage {
+  return {
+    type: "control_response",
+    response: {
+      subtype: "error",
+      request_id: requestId,
+      error,
+    },
+  } as WireMessage;
 }
 
 async function waitFor(
@@ -432,9 +514,150 @@ describe("Session", () => {
         uuid: "approval-2",
       });
     });
+
+    test("emits protocol error when approval_request_message is missing tool_call_id", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        session_id: "session-1",
+        message_type: "approval_request_message",
+        id: "message-approval-missing-id",
+        date: "2026-01-01T00:00:00.000000+00:00",
+        uuid: "approval-missing-id",
+        run_id: "run-missing-id",
+        tool_call: {
+          name: "Bash",
+          arguments: JSON.stringify({ command: "pwd" }),
+          // intentionally missing tool_call_id
+        },
+      } as unknown as MessageWire;
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toEqual({
+        type: "error",
+        message:
+          "Missing tool_call_id in approval_request_message (uuid=approval-missing-id)",
+        errorCode: "protocol_error",
+        errorDetail:
+          "Missing tool_call_id in approval_request_message (uuid=approval-missing-id)",
+        recoverable: false,
+        stopReason: "protocol_error",
+        runId: "run-missing-id",
+        apiError: {
+          error_type: "protocol_error",
+          detail:
+            "Missing tool_call_id in approval_request_message (uuid=approval-missing-id)",
+          message_type: "approval_request_message",
+        },
+      });
+    });
+  });
+
+  describe("transformMessage result mapping", () => {
+    test("maps result wire message run_ids to SDK runIds", () => {
+      const session = new Session();
+      const wireMsg = createResultMessage({
+        run_ids: ["run-1", "run-2"],
+      });
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toEqual({
+        type: "result",
+        success: true,
+        result: "done",
+        error: undefined,
+        errorCode: undefined,
+        stopReason: "end_turn",
+        durationMs: 1,
+        totalCostUsd: undefined,
+        conversationId: "conversation-1",
+        runIds: ["run-1", "run-2"],
+      });
+    });
+
+    test("filters non-string run_ids and preserves valid values", () => {
+      const session = new Session();
+      const wireMsg = createResultMessage({
+        run_ids: ["run-1", 42, null, "run-2"],
+      });
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toMatchObject({
+        type: "result",
+        runIds: ["run-1", "run-2"],
+      });
+    });
+
+    test("marks requires_approval result as approval_conflict", () => {
+      const session = new Session();
+      const wireMsg = createResultMessage({
+        subtype: "error",
+        stop_reason: "requires_approval",
+      });
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toEqual({
+        type: "result",
+        success: false,
+        result: "done",
+        error: "approval_conflict",
+        errorCode: "approval_conflict",
+        approvalConflict: true,
+        recoverable: true,
+        stopReason: "requires_approval",
+        durationMs: 1,
+        totalCostUsd: undefined,
+        conversationId: "conversation-1",
+        runIds: undefined,
+      });
+    });
+
+    test("keeps unknown result error string but leaves typed errorCode undefined", () => {
+      const session = new Session();
+      const wireMsg = createResultMessage({
+        subtype: "provider_custom_failure",
+        stop_reason: "provider_custom_failure",
+      });
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toMatchObject({
+        type: "result",
+        success: false,
+        error: "provider_custom_failure",
+        errorCode: undefined,
+      });
+    });
   });
 
   describe("transformMessage error/retry mapping", () => {
+    test("leaves errorCode undefined for unknown stop_reason", () => {
+      const session = new Session();
+      const wireMsg = {
+        ...createErrorWireMessage(),
+        stop_reason: "provider_custom_failure",
+      } as unknown as WireMessage;
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toMatchObject({
+        type: "error",
+        message: "Rate limit exceeded",
+        stopReason: "provider_custom_failure",
+      });
+      expect((transformed as { errorCode?: string }).errorCode).toBeUndefined();
+    });
+
     test("maps error wire message to SDK error message", () => {
       const session = new Session();
       const wireMsg = createErrorWireMessage();
@@ -445,6 +668,7 @@ describe("Session", () => {
       expect(transformed).toEqual({
         type: "error",
         message: "Rate limit exceeded",
+        errorCode: "llm_api_error",
         stopReason: "llm_api_error",
         runId: "run-1",
         apiError: {
@@ -452,6 +676,33 @@ describe("Session", () => {
           message: "429 from upstream provider",
           message_type: "error_message",
           run_id: "run-1",
+        },
+      });
+    });
+
+    test("marks conflict errors as approvalConflict and captures detail", () => {
+      const session = new Session();
+      const wireMsg = createApprovalConflictErrorWireMessage("run-conflict-1");
+
+      // @ts-expect-error - accessing private method for regression coverage
+      const transformed = session.transformMessage(wireMsg) as SDKMessage | null;
+
+      expect(transformed).toEqual({
+        type: "error",
+        message: "An unknown error occurred with the LLM streaming request.",
+        errorCode: "approval_conflict",
+        approvalConflict: true,
+        recoverable: true,
+        errorDetail:
+          "CONFLICT: Cannot send a new message: The agent is waiting for approval on a tool call.",
+        stopReason: "error",
+        runId: "run-conflict-1",
+        apiError: {
+          error_type: "terminal_error",
+          message_type: "error_message",
+          run_id: "run-conflict-1",
+          detail:
+            "CONFLICT: Cannot send a new message: The agent is waiting for approval on a tool call.",
         },
       });
     });
@@ -474,7 +725,270 @@ describe("Session", () => {
     });
   });
 
+  describe("approval recovery flow", () => {
+    test("recoverPendingApprovals returns unknown pending state on timeout", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        const recovery = await session.recoverPendingApprovals({ timeoutMs: 10 });
+
+        expect(recovery.recovered).toBe(false);
+        expect(recovery.pendingApproval).toBeUndefined();
+        expect(recovery.unsupported).toBe(false);
+        expect(recovery.detail).toContain("Timed out waiting for control_response");
+      } finally {
+        session.close();
+      }
+    });
+
+    test("recoverPendingApprovals reports unsupported when CLI rejects subtype", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        const responder = (async () => {
+          await waitFor(
+            () =>
+              !!findControlRequestBySubtype(
+                transport.writes,
+                "recover_pending_approvals",
+              )?.request_id,
+            500,
+          );
+          const req = findControlRequestBySubtype(
+            transport.writes,
+            "recover_pending_approvals",
+          );
+          expect(req?.request_id).toBeTruthy();
+          transport.push(
+            createControlResponseError(
+              req?.request_id as string,
+              "Unknown control request subtype: recover_pending_approvals",
+            ),
+          );
+        })();
+
+        const recovery = await session.recoverPendingApprovals({ timeoutMs: 500 });
+        await responder;
+
+        expect(recovery.recovered).toBe(false);
+        expect(recovery.pendingApproval).toBe(true);
+        expect(recovery.unsupported).toBe(true);
+        expect(recovery.detail).toContain("Unknown control request subtype");
+      } finally {
+        session.close();
+      }
+    });
+
+    test("runTurn terminalizes approval conflict when recovery is unsupported", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        transport.push(createApprovalConflictErrorWireMessage("run-conflict-turn-1"));
+        transport.push(
+          createResultMessage({
+            subtype: "error",
+            stop_reason: "error",
+            run_ids: ["run-conflict-turn-1"],
+          }),
+        );
+
+        const responder = (async () => {
+          await waitFor(
+            () =>
+              !!findControlRequestBySubtype(
+                transport.writes,
+                "recover_pending_approvals",
+              )?.request_id,
+            500,
+          );
+          const req = findControlRequestBySubtype(
+            transport.writes,
+            "recover_pending_approvals",
+          );
+          expect(req?.request_id).toBeTruthy();
+          transport.push(
+            createControlResponseError(
+              req?.request_id as string,
+              "Unknown control request subtype: recover_pending_approvals",
+            ),
+          );
+        })();
+
+        const result = await session.runTurn("hello");
+        await responder;
+
+        expect(result.success).toBe(false);
+        expect(result.approvalConflict).toBe(true);
+        expect(result.error).toBe("approval_conflict_terminal");
+        expect(result.errorCode).toBe("approval_conflict_terminal");
+        expect(result.recoverable).toBe(false);
+        expect(result.recoveryAttempts).toBe(1);
+      } finally {
+        session.close();
+      }
+    });
+
+    test("runTurn retries once after successful recovery", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        transport.push(createApprovalConflictErrorWireMessage("run-conflict-turn-2"));
+        transport.push(
+          createResultMessage({
+            subtype: "error",
+            stop_reason: "error",
+            run_ids: ["run-conflict-turn-2"],
+          }),
+        );
+
+        const responder = (async () => {
+          await waitFor(
+            () =>
+              !!findControlRequestBySubtype(
+                transport.writes,
+                "recover_pending_approvals",
+              )?.request_id,
+            500,
+          );
+          const recoveryReq = findControlRequestBySubtype(
+            transport.writes,
+            "recover_pending_approvals",
+          );
+          expect(recoveryReq?.request_id).toBeTruthy();
+          transport.push(
+            createControlResponseSuccess(recoveryReq?.request_id as string),
+          );
+
+          await waitFor(
+            () =>
+              transport.writes.filter((msg) => {
+                const payload = msg as { type?: string };
+                return payload.type === "user";
+              }).length >= 2,
+            500,
+          );
+
+          transport.push(createAssistantMessage(2, { run_id: "run-recovered-2" }));
+          transport.push(
+            createResultMessage({
+              subtype: "success",
+              result: "recovered",
+              stop_reason: "end_turn",
+              run_ids: ["run-recovered-2"],
+            }),
+          );
+        })();
+
+        const result = await session.runTurn("hello");
+        await responder;
+
+        expect(result.success).toBe(true);
+        expect(result.result).toBe("recovered");
+        expect(result.recoveryAttempts).toBe(1);
+      } finally {
+        session.close();
+      }
+    });
+
+    test("runTurn preserves non-conflict error detail on terminal result", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        transport.push(createErrorWireMessage());
+        transport.push(
+          createResultMessage({
+            subtype: "error",
+            stop_reason: "llm_api_error",
+            run_ids: ["run-1"],
+          }),
+        );
+
+        const result = await session.runTurn("hello");
+
+        expect(result.success).toBe(false);
+        expect(result.errorCode).toBe("error");
+        expect(result.stopReason).toBe("llm_api_error");
+        expect(result.errorDetail).toBe("Rate limit exceeded");
+      } finally {
+        session.close();
+      }
+    });
+  });
+
   describe("background pump parity", () => {
+    test("propagates approval conflict detail from error message to terminal result", async () => {
+      const session = new Session({
+        permissionMode: "default",
+      });
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        transport.push(createApprovalConflictErrorWireMessage("run-conflict-2"));
+        transport.push(
+          createResultMessage({
+            subtype: "error",
+            stop_reason: "error",
+            run_ids: ["run-conflict-2"],
+          }),
+        );
+
+        const streamed: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          streamed.push(msg);
+        }
+
+        const result = streamed.find(
+          (msg): msg is Extract<SDKMessage, { type: "result" }> =>
+            msg.type === "result",
+        );
+        expect(result).toBeTruthy();
+        expect(result?.approvalConflict).toBe(true);
+        expect(result?.error).toBe("approval_conflict");
+        expect(result?.errorDetail).toContain("waiting for approval on a tool call");
+      } finally {
+        session.close();
+      }
+    });
+
     test("handles can_use_tool control requests before stream iteration starts", async () => {
       let callbackInvocations = 0;
       const session = new Session({
@@ -606,6 +1120,198 @@ describe("Session", () => {
       } finally {
         session.close();
       }
+    });
+  });
+
+  describe("generation-based stale message filtering", () => {
+    test("filters stale messages that arrive late from the previous run_id", async () => {
+      const session = new Session();
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        // First send + stream establishes run-1 as completed.
+        transport.push(createAssistantMessage(1, { run_id: "run-1" }));
+        transport.push(
+          createResultMessage({
+            result: "first",
+            run_ids: ["run-1"],
+          }),
+        );
+        await session.send("first message");
+
+        const firstMessages: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          firstMessages.push(msg);
+        }
+        expect(firstMessages).toHaveLength(2);
+
+        // Second send starts a new run, but an old run-1 message arrives late.
+        await session.send("second message");
+        transport.push(
+          createAssistantMessage(999, {
+            uuid: "assistant-stale-old-run",
+            content: "stale-old-run",
+            run_id: "run-1",
+          }),
+        );
+        transport.push(createAssistantMessage(2, { run_id: "run-2" }));
+        transport.push(
+          createResultMessage({
+            result: "second",
+            run_ids: ["run-2"],
+          }),
+        );
+
+        const secondMessages: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          secondMessages.push(msg);
+        }
+
+        // The stale run-1 message should be filtered; only fresh run-2 messages remain.
+        expect(secondMessages).toHaveLength(2);
+        expect((secondMessages[0] as { content: string }).content).toBe("msg-2");
+        expect(secondMessages[1]?.type).toBe("result");
+      } finally {
+        session.close();
+      }
+    });
+
+    test("does not leak internal generation metadata on emitted SDK messages", async () => {
+      const session = new Session();
+      const transport = new MockTransport();
+      attachMockTransport(session, transport);
+
+      try {
+        transport.push(createInitMessage());
+        await session.initialize();
+
+        transport.push(createAssistantMessage(1, { run_id: "run-1" }));
+        transport.push(createResultMessage({ run_ids: ["run-1"] }));
+        await session.send("hello");
+
+        const streamed: SDKMessage[] = [];
+        for await (const msg of session.stream()) {
+          streamed.push(msg);
+        }
+
+        const assistant = streamed.find(
+          (msg): msg is Extract<SDKMessage, { type: "assistant" }> =>
+            msg.type === "assistant",
+        );
+        expect(assistant).toBeDefined();
+        if (assistant) {
+          expect(
+            "_generation" in (assistant as unknown as Record<string, unknown>),
+          ).toBe(
+            false,
+          );
+          expect(Object.keys(assistant)).not.toContain("_generation");
+        }
+      } finally {
+        session.close();
+      }
+    });
+  });
+
+  describe("transformMessage run_id pass-through", () => {
+    test("includes runId on assistant messages", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "assistant_message",
+        uuid: "a-1",
+        content: "hello",
+        run_id: "run-abc",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({
+        type: "assistant",
+        content: "hello",
+        runId: "run-abc",
+      });
+    });
+
+    test("includes runId on tool_call messages", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "tool_call_message",
+        uuid: "tc-1",
+        run_id: "run-abc",
+        tool_calls: [{
+          tool_call_id: "call-1",
+          name: "Edit",
+          arguments: "{}",
+        }],
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({
+        type: "tool_call",
+        toolName: "Edit",
+        runId: "run-abc",
+      });
+    });
+
+    test("includes runId on reasoning messages", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "reasoning_message",
+        uuid: "r-1",
+        reasoning: "thinking...",
+        run_id: "run-abc",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({
+        type: "reasoning",
+        content: "thinking...",
+        runId: "run-abc",
+      });
+    });
+
+    test("includes runId on tool_result messages", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "tool_return_message",
+        uuid: "tr-1",
+        tool_call_id: "call-1",
+        tool_return: "success",
+        status: "success",
+        run_id: "run-abc",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({
+        type: "tool_result",
+        runId: "run-abc",
+      });
+    });
+
+    test("runId is undefined when wire message lacks run_id", () => {
+      const session = new Session();
+      const wireMsg = {
+        type: "message",
+        message_type: "assistant_message",
+        uuid: "a-2",
+        content: "no run id",
+      } as WireMessage;
+
+      // @ts-expect-error - accessing private method
+      const transformed = session.transformMessage(wireMsg);
+      expect(transformed).toMatchObject({ type: "assistant" });
+      expect((transformed as { runId?: string }).runId).toBeUndefined();
     });
   });
 });

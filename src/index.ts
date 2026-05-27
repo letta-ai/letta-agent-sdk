@@ -43,6 +43,7 @@ export type {
   SDKToolResultMessage,
   SDKReasoningMessage,
   SDKResultMessage,
+  SDKErrorCode,
   SDKStreamEventMessage,
   SDKStreamEventPayload,
   SDKStreamEventDeltaPayload,
@@ -50,6 +51,9 @@ export type {
   SDKUnknownStreamEventPayload,
   SDKErrorMessage,
   SDKRetryMessage,
+  RunTurnOptions,
+  RecoverPendingApprovalsOptions,
+  RecoverPendingApprovalsResult,
   SkillSource,
   SleeptimeOptions,
   SleeptimeTrigger,
@@ -80,6 +84,26 @@ export type {
 } from "./types.js";
 
 export { Session } from "./session.js";
+
+export {
+  RemoteAgent,
+  RemoteEnvironmentClient,
+  createRemoteAgent,
+} from "./remote.js";
+
+export type {
+  RemoteAgentOptions,
+  RemoteEnvironmentClientOptions,
+  RemoteEnvironmentConnection,
+  RemoteEnvironmentFallback,
+  RemoteEnvironmentListResult,
+  RemoteEnvironmentTarget,
+  RemoteMessageDispatchResult,
+  RemoteRuntimeLastEnvironment,
+  ResolvedRemoteEnvironment,
+  ResolveRemoteEnvironmentOptions,
+  SendRemoteMessageOptions,
+} from "./remote.js";
 
 export { extractStreamTextDelta } from "./stream-events.js";
 
@@ -179,6 +203,8 @@ export function resumeSession(
  *
  * - Without agentId: uses default agent (like `letta -p`), new conversation
  * - With agentId: uses specific agent, new conversation
+ * - Uses `session.runTurn()` under the hood, including bounded SDK-managed
+ *   approval-conflict recovery (default 1 attempt)
  *
  * @example
  * ```typescript
@@ -196,27 +222,7 @@ export async function prompt(
     : createSession();
 
   try {
-    await session.send(message);
-
-    let result: SDKResultMessage | null = null;
-    for await (const msg of session.stream()) {
-      if (msg.type === "result") {
-        result = msg;
-        break;
-      }
-    }
-
-    if (!result) {
-      return {
-        type: "result",
-        success: false,
-        error: "No result received",
-        durationMs: 0,
-        conversationId: session.conversationId,
-      };
-    }
-
-    return result;
+    return await session.runTurn(message);
   } finally {
     session.close();
   }

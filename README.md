@@ -50,6 +50,34 @@ for await (const msg of session.stream()) {
 
 By default, `resumeSession(agentId)` continues the agent’s default conversation. To start a fresh thread, use `createSession(agentId)` (see docs).
 
+
+### Remote environments (ACK-only dispatch)
+
+The SDK can also address a Letta Code remote environment through the Cloud
+remote-environment API. Treat the agent and conversation as the stable actor;
+treat the remote as an execution target that may be online or offline.
+
+```ts
+import { createRemoteAgent } from "@letta-ai/letta-code-sdk";
+
+const agent = createRemoteAgent({
+  apiKey: process.env.LETTA_API_KEY,
+  agentId: "agent-123",
+  conversationId: "conv-456",
+  target: { deviceId: "work-laptop" },
+  fallback: "fail_if_unavailable",
+});
+
+const dispatch = await agent.tell("Pull main, run tests, and summarize failures.");
+console.log(dispatch.connectionId, dispatch.clientMessageId);
+```
+
+Remote dispatch currently acknowledges that the message reached the selected
+Letta Code environment. It does **not** yet stream the final answer through this
+SDK surface. The API is intentionally shaped around stable targets (`deviceId`,
+`environmentId`, `lastUsed`) instead of making application code depend on the
+current ephemeral `connectionId`.
+
 ## Session configuration
 
 The SDK surfaces the same runtime controls as Letta Code CLI for skills, reminders, and sleeptime:

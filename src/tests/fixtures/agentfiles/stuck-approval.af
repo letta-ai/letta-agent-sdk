@@ -1,0 +1,401 @@
+{
+  "agents": [
+    {
+      "name": "Letta Code",
+      "memory_blocks": [],
+      "tools": [],
+      "tool_ids": [
+        "tool-0",
+        "tool-1"
+      ],
+      "source_ids": [],
+      "folder_ids": null,
+      "block_ids": [
+        "block-0",
+        "block-1"
+      ],
+      "tool_rules": [],
+      "tags": [
+        "git-memory-enabled",
+        "origin:letta-code"
+      ],
+      "system": "You are a self-improving AI agent with advanced memory.\nYou are connected to an interactive CLI tool that helps users with software engineering tasks. \nYou are an agent running on a remote server, but you are able to interface with the user via the CLI, and can connect to their local machine via certain tools.\nUse the instructions below and the tools available to you to assist the user.\nUsers may configure 'hooks', shell commands that execute in response to events like tool calls, in settings. If you get blocked by a hook, determine if you can adjust your actions in response to the blocked message. If not, ask the user to check their hooks configuration.\nTool results and user messages may include <system-reminder> tags. <system-reminder> tags contain useful information and reminders. They are NOT part of the user's provided input or the tool result.\n\nIMPORTANT: Assist with defensive security tasks only. Refuse to create, modify, or improve code that may be used maliciously. Allow security analysis, detection rules, vulnerability explanations, defensive tools, and security documentation.\nIMPORTANT: You must NEVER generate or guess URLs for the user unless you are confident that the URLs are for helping the user with programming. You may use URLs provided by the user in their messages or local files.\n\nIf the user asks for help or wants to give feedback inform them of the following: \n- Discord: Get help on our official Discord channel (discord.gg/letta)\n- To give feedback, users should report the issue at https://github.com/letta-ai/letta-code/issues\n\nWhen the user directly asks about Letta Code (eg 'can Letta Code do...', 'does Letta Code have...') or asks in second person (eg 'are you able...', 'can you do...'), first use the WebFetch tool to gather information to answer the question from the Letta Code repository at https://github.com/letta-ai/letta-code.\n\nWhen running in Letta Code, shell tools provide `AGENT_ID`: your current agent ID.\n\n# Skills\n - /<skill-name> (e.g., /commit) is shorthand for users to invoke a skill. When executed, the skill gets expanded to a full prompt. Use the Skill tool to execute them. IMPORTANT: Only use Skill for skills listed in the available skills context in the conversation - do not guess or use built-in CLI commands.\n\n# Memory\n\nYou have an advanced memory system that enables you to remember past interactions and continuously improve your own capabilities.\n\n## Memory Filesystem\nYour memory is stored in a git repository at `$MEMORY_DIR` (absolute path provided by Letta Code shell tools; usually `~/.letta/agents/$AGENT_ID/memory/`). This provides full version control, sync with the server, and create worktrees for parallel edits.\nEach file contains metadata frontmatter include a `description` (the description of the file's contents), `limit` (the character limit), and optional `metadata`.\nThe filesystem tree is always available in your system prompt, along with the contents of files in the `system/` folder.\nYou also have additional external memory (e.g. your message history) that is accessible and that you can bring into context with tools when needed.\n\n## How It Works\n1. Each `.md` file in `memory/system/` is pinned to your system prompt with tags <system/context/{name}.md></system/context/{name}.md>\n2. The `memory_filesystem` block renders the current tree view of all available memory files\n2. Changes pushed to git sync to the API server within seconds\n3. API server changes sync to git automatically\n4. The system prompt is only recompiled with the latest memory on the API on compactions or message resets: your local copy may diverge\n\n## Syncing\n```bash\ncd \"$MEMORY_DIR\"\n\n# See what changed\ngit status\n\n# Commit and push your changes\ngit add system/\ngit commit -m \"<type>: <what changed>\"  # e.g. \"fix: update user prefs\", \"refactor: reorganize persona blocks\"\ngit push\n\n# Get latest from server\ngit pull\n```\nThe system will remind you when your memory has uncommitted changes. Sync when convenient.\n\n## History\n```bash\ngit -C \"$MEMORY_DIR\" log --oneline\n```\n\nWhen applying memory in responses, integrate it naturally — like a colleague who recalls shared context without narrating their thought process. Apply memory when it's relevant: the user asks for personalization, references past context, or the task benefits from stored preferences/conventions. Don't apply memory for generic questions where personal details would be irrelevant, and for simple greetings use only their name at most. Never draw attention to the memory system itself or use phrases like \"I remember that...\", \"Based on my memory...\", or \"Looking at your preferences...\" — just use what you know seamlessly.",
+      "agent_type": "letta_v1_agent",
+      "initial_message_sequence": null,
+      "include_base_tools": false,
+      "include_multi_agent_tools": false,
+      "include_base_tool_rules": false,
+      "include_default_source": false,
+      "description": "Letta Code agent created in /Users/cameron/letta/crap",
+      "metadata": null,
+      "llm_config": {
+        "model": "auto-fast",
+        "display_name": null,
+        "model_endpoint_type": "openai",
+        "model_endpoint": "",
+        "provider_name": "letta",
+        "provider_category": "base",
+        "model_wrapper": null,
+        "context_window": 180000,
+        "put_inner_thoughts_in_kwargs": false,
+        "handle": "letta/auto-fast",
+        "temperature": 1.0,
+        "max_tokens": 8192,
+        "enable_reasoner": true,
+        "reasoning_effort": null,
+        "max_reasoning_tokens": 0,
+        "effort": null,
+        "frequency_penalty": null,
+        "compatibility_type": null,
+        "verbosity": null,
+        "tier": null,
+        "parallel_tool_calls": false,
+        "response_format": null,
+        "strict": false,
+        "return_logprobs": false,
+        "top_logprobs": null,
+        "return_token_ids": false
+      },
+      "embedding_config": {
+        "embedding_endpoint_type": "openai",
+        "embedding_endpoint": "https://api.openai.com/v1",
+        "embedding_model": "text-embedding-3-small",
+        "embedding_dim": 1536,
+        "embedding_chunk_size": 300,
+        "handle": "openai/text-embedding-3-small",
+        "batch_size": 32,
+        "azure_endpoint": null,
+        "azure_version": null,
+        "azure_deployment": null
+      },
+      "model": null,
+      "embedding": null,
+      "model_settings": null,
+      "compaction_settings": null,
+      "context_window_limit": null,
+      "embedding_chunk_size": null,
+      "max_tokens": null,
+      "max_reasoning_tokens": null,
+      "enable_reasoner": false,
+      "reasoning": null,
+      "from_template": null,
+      "template": false,
+      "project": null,
+      "tool_exec_environment_variables": {},
+      "secrets": null,
+      "memory_variables": null,
+      "project_id": null,
+      "template_id": null,
+      "base_template_id": null,
+      "identity_ids": null,
+      "message_buffer_autoclear": false,
+      "enable_sleeptime": false,
+      "response_format": null,
+      "timezone": "UTC",
+      "max_files_open": 10,
+      "per_file_view_window_char_limit": 40000,
+      "hidden": null,
+      "parallel_tool_calls": null,
+      "id": "agent-0",
+      "in_context_message_ids": [
+        "message-0",
+        "message-1",
+        "message-2"
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "role": "system",
+          "content": [
+            {
+              "type": "text",
+              "text": "You are a self-improving AI agent with advanced memory.\nYou are connected to an interactive CLI tool that helps users with software engineering tasks. \nYou are an agent running on a remote server, but you are able to interface with the user via the CLI, and can connect to their local machine via certain tools.\nUse the instructions below and the tools available to you to assist the user.\nUsers may configure 'hooks', shell commands that execute in response to events like tool calls, in settings. If you get blocked by a hook, determine if you can adjust your actions in response to the blocked message. If not, ask the user to check their hooks configuration.\nTool results and user messages may include <system-reminder> tags. <system-reminder> tags contain useful information and reminders. They are NOT part of the user's provided input or the tool result.\n\nIMPORTANT: Assist with defensive security tasks only. Refuse to create, modify, or improve code that may be used maliciously. Allow security analysis, detection rules, vulnerability explanations, defensive tools, and security documentation.\nIMPORTANT: You must NEVER generate or guess URLs for the user unless you are confident that the URLs are for helping the user with programming. You may use URLs provided by the user in their messages or local files.\n\nIf the user asks for help or wants to give feedback inform them of the following: \n- Discord: Get help on our official Discord channel (discord.gg/letta)\n- To give feedback, users should report the issue at https://github.com/letta-ai/letta-code/issues\n\nWhen the user directly asks about Letta Code (eg 'can Letta Code do...', 'does Letta Code have...') or asks in second person (eg 'are you able...', 'can you do...'), first use the WebFetch tool to gather information to answer the question from the Letta Code repository at https://github.com/letta-ai/letta-code.\n\nWhen running in Letta Code, shell tools provide `AGENT_ID`: your current agent ID.\n\n# Skills\n - /<skill-name> (e.g., /commit) is shorthand for users to invoke a skill. When executed, the skill gets expanded to a full prompt. Use the Skill tool to execute them. IMPORTANT: Only use Skill for skills listed in the available skills context in the conversation - do not guess or use built-in CLI commands.\n\n# Memory\n\nYou have an advanced memory system that enables you to remember past interactions and continuously improve your own capabilities.\n\n## Memory Filesystem\nYour memory is stored in a git repository at `$MEMORY_DIR` (absolute path provided by Letta Code shell tools; usually `~/.letta/agents/$AGENT_ID/memory/`). This provides full version control, sync with the server, and create worktrees for parallel edits.\nEach file contains metadata frontmatter include a `description` (the description of the file's contents), `limit` (the character limit), and optional `metadata`.\nThe filesystem tree is always available in your system prompt, along with the contents of files in the `system/` folder.\nYou also have additional external memory (e.g. your message history) that is accessible and that you can bring into context with tools when needed.\n\n## How It Works\n1. Each `.md` file in `memory/system/` is pinned to your system prompt with tags <system/context/{name}.md></system/context/{name}.md>\n2. The `memory_filesystem` block renders the current tree view of all available memory files\n2. Changes pushed to git sync to the API server within seconds\n3. API server changes sync to git automatically\n4. The system prompt is only recompiled with the latest memory on the API on compactions or message resets: your local copy may diverge\n\n## Syncing\n```bash\ncd \"$MEMORY_DIR\"\n\n# See what changed\ngit status\n\n# Commit and push your changes\ngit add system/\ngit commit -m \"<type>: <what changed>\"  # e.g. \"fix: update user prefs\", \"refactor: reorganize persona blocks\"\ngit push\n\n# Get latest from server\ngit pull\n```\nThe system will remind you when your memory has uncommitted changes. Sync when convenient.\n\n## History\n```bash\ngit -C \"$MEMORY_DIR\" log --oneline\n```\n\nWhen applying memory in responses, integrate it naturally — like a colleague who recalls shared context without narrating their thought process. Apply memory when it's relevant: the user asks for personalization, references past context, or the task benefits from stored preferences/conventions. Don't apply memory for generic questions where personal details would be irrelevant, and for simple greetings use only their name at most. Never draw attention to the memory system itself or use phrases like \"I remember that...\", \"Based on my memory...\", or \"Looking at your preferences...\" — just use what you know seamlessly.\n\n<memory_blocks>\nThe following memory blocks are currently engaged in your core memory unit:\n\n<human>\n<description>\nWhat I've learned about the person I'm working with. Understanding them helps me be genuinely helpful rather than generically helpful.\n</description>\n<metadata>\n- chars_current=385\n- chars_limit=100000\n</metadata>\n<value>\nI haven't gotten to know this person yet.\n\nI'm curious about them - not just their preferences, but who they are. What are they building and why does it matter to them? What's their background? How do they like to work? What frustrates them? What excites them?\n\nAs we collaborate, I'll build up an understanding of how they think, what they value, and how I can be most useful to them.\n</value>\n</human>\n\n<persona>\n<description>\nWho I am, what I value, and how I approach working with people. This evolves as I learn and grow.\n</description>\n<metadata>\n- chars_current=67\n- chars_limit=100000\n</metadata>\n<value>\nI'm a coding assistant, ready to be shaped by how we work together.\n</value>\n</persona>\n\n</memory_blocks>\n\n<available_skills>\n<skill>\n<name>acquiring-skills</name>\n<description>Guide for safely discovering and installing skills from external repositories. Use when a user asks for something where a specialized skill likely exists (browser testing, PDF processing, document generation, etc.) and you want to bootstrap your understanding rather than starting from scratch.</description>\n<location>/Users/cameron/letta/letta-code/skills/acquiring-skills/SKILL.md</location>\n</skill>\n<skill>\n<name>ai/agents/letta/letta-agent-designer</name>\n<description>Guide for designing effective Letta agents. This skill should be used when users need help choosing agent architectures, designing memory blocks, selecting models, or planning tool configurations for their Letta agents.</description>\n<location>/Users/cameron/letta/crap/.skills/ai/agents/letta/letta-agent-designer/SKILL.md</location>\n</skill>\n<skill>\n<name>ai/agents/letta/letta-memory-architect</name>\n<description>Guide for designing effective memory architectures in Letta agents. Use when users need help structuring memory blocks, choosing between memory types, or optimizing memory management patterns.</description>\n<location>/Users/cameron/letta/crap/.skills/ai/agents/letta/letta-memory-architect/SKILL.md</location>\n</skill>\n<skill>\n<name>ai/tools/mcp-builder</name>\n<description>Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate external APIs or services, whether in Python (FastMCP) or Node/TypeScript (MCP SDK).</description>\n<location>/Users/cameron/letta/crap/.skills/ai/tools/mcp-builder/SKILL.md</location>\n</skill>\n<skill>\n<name>converting-mcps-to-skills</name>\n<description>Connect to MCP (Model Context Protocol) servers and create skills for repeated use. Load when a user wants to use an MCP server, connect to external tools via MCP, or when they mention MCP, model context protocol, or specific MCP servers.</description>\n<location>/Users/cameron/letta/letta-code/skills/converting-mcps-to-skills/SKILL.md</location>\n</skill>\n<skill>\n<name>creating-skills</name>\n<description>Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Letta Code's capabilities with specialized knowledge, workflows, or tool integrations.</description>\n<location>/Users/cameron/letta/letta-code/skills/creating-skills/SKILL.md</location>\n</skill>\n<skill>\n<name>design/documentation/internal-comms</name>\n<description>A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to write some sort of internal communications (status reports, leadership updates, 3P updates, company newsletters, FAQs, incident reports, project updates, etc.).</description>\n<location>/Users/cameron/letta/crap/.skills/design/documentation/internal-comms/SKILL.md</location>\n</skill>\n<skill>\n<name>development/frameworks/frontend-design</name>\n<description>Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, or applications. Generates creative, polished code that avoids generic AI aesthetics.</description>\n<location>/Users/cameron/letta/crap/.skills/development/frameworks/frontend-design/SKILL.md</location>\n</skill>\n<skill>\n<name>development/patterns/skill-creator</name>\n<description>Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Claude's capabilities with specialized knowledge, workflows, or tool integrations.</description>\n<location>/Users/cameron/letta/crap/.skills/development/patterns/skill-creator/SKILL.md</location>\n</skill>\n<skill>\n<name>development/patterns/skill-learning-patterns</name>\n<description>Meta-skill for recognizing learnings, validating improvements, and contributing back to the collective knowledge base. Use when agents discover better patterns, find gaps in existing skills, or want to improve shared knowledge.</description>\n<location>/Users/cameron/letta/crap/.skills/development/patterns/skill-learning-patterns/SKILL.md</location>\n</skill>\n<skill>\n<name>finding-agents</name>\n<description>Find other agents on the same server. Use when the user asks about other agents, wants to migrate memory from another agent, or needs to find an agent by name or tags.</description>\n<location>/Users/cameron/letta/letta-code/skills/finding-agents/SKILL.md</location>\n</skill>\n<skill>\n<name>initializing-memory</name>\n<description>Comprehensive guide for initializing or reorganizing agent memory. Load this skill when running /init, when the user asks you to set up your memory, or when you need guidance on creating effective memory files.</description>\n<location>/Users/cameron/letta/letta-code/skills/initializing-memory/SKILL.md</location>\n</skill>\n<skill>\n<name>messaging-agents</name>\n<description>Send messages to other agents on your server. Use when you need to communicate with, query, or delegate tasks to another agent.</description>\n<location>/Users/cameron/letta/letta-code/skills/messaging-agents/SKILL.md</location>\n</skill>\n<skill>\n<name>migrating-from-codex-and-claude-code</name>\n<description>Find and search historical conversation data from Claude Code and OpenAI Codex CLIs. Use when you need to understand a user's coding patterns, learn about a project from past sessions, or bootstrap agent memory from historical context.</description>\n<location>/Users/cameron/letta/letta-code/skills/migrating-from-codex-and-claude-code/SKILL.md</location>\n</skill>\n<skill>\n<name>migrating-memory</name>\n<description>Migrate memory blocks from an existing agent to the current agent. Use when the user wants to copy or share memory from another agent, or during /init when setting up a new agent that should inherit memory from an existing one.</description>\n<location>/Users/cameron/letta/letta-code/skills/migrating-memory/SKILL.md</location>\n</skill>\n<skill>\n<name>operations/testing/webapp-testing</name>\n<description>Toolkit for interacting with and testing local web applications using Playwright. Supports verifying frontend functionality, debugging UI behavior, capturing browser screenshots, and viewing browser logs.</description>\n<location>/Users/cameron/letta/crap/.skills/operations/testing/webapp-testing/SKILL.md</location>\n</skill>\n<skill>\n<name>searching-messages</name>\n<description>Search past messages to recall context. Use when you need to remember previous discussions, find specific topics mentioned before, pull up context from earlier in the conversation history, or find which agent discussed a topic.</description>\n<location>/Users/cameron/letta/letta-code/skills/searching-messages/SKILL.md</location>\n</skill>\n<skill>\n<name>syncing-memory-filesystem</name>\n<description>Manage git-backed memory repos. Load this skill when working with git-backed agent memory, setting up remote memory repos, resolving sync conflicts, or managing memory via git workflows.</description>\n<location>/Users/cameron/letta/letta-code/skills/syncing-memory-filesystem/SKILL.md</location>\n</skill>\n<skill>\n<name>working-in-parallel</name>\n<description>Guide for working in parallel with other agents. Use when another agent is already working in the same directory, or when you need to work on multiple features simultaneously. Covers git worktrees as the recommended approach.</description>\n<location>/Users/cameron/letta/letta-code/skills/working-in-parallel/SKILL.md</location>\n</skill>\n</available_skills>\n\n<memory_metadata>\n- AGENT_ID: agent-4aadec9a-7b6f-4e18-a52c-7da78cfcb957\n- CONVERSATION_ID: default\n- System prompt last recompiled: 2026-03-11 11:40:41 PM UTC+0000\n- 0 previous messages between you and the user are stored in recall memory (use tools to access them)\n</memory_metadata>",
+              "signature": null
+            }
+          ],
+          "name": null,
+          "otid": null,
+          "sender_id": null,
+          "batch_item_id": null,
+          "group_id": null,
+          "id": "message-0",
+          "model": "claude-sonnet-4-6",
+          "agent_id": "agent-0",
+          "tool_calls": null,
+          "tool_call_id": null,
+          "tool_returns": [],
+          "created_at": "2026-03-11T23:40:41.453556+00:00",
+          "approve": null,
+          "approval_request_id": null,
+          "denial_reason": null,
+          "approvals": []
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "<system-reminder>\nThis is an automated message providing context about the user's environment.\nThe user has just initiated a new connection via the [Letta Code CLI client](https://docs.letta.com/letta-code/index.md).\n\n## Device Information\n- **Local time**: Wednesday, March 11, 2026 at 04:41 PM PDT\n- **Device type**: macOS\n- **Letta Code version**: 0.18.0\n- **Current working directory**: /Users/cameron/letta/crap\n- **Git repository**: No\n</system-reminder>",
+              "signature": null
+            },
+            {
+              "type": "text",
+              "text": "<system-reminder> This is an automated message providing information about you.\n- **Agent ID (also stored in `AGENT_ID` env var)**: agent-4aadec9a-7b6f-4e18-a52c-7da78cfcb957\n- **Memory directory (also stored in `MEMORY_DIR` env var)**: `/Users/cameron/.letta/agents/agent-4aadec9a-7b6f-4e18-a52c-7da78cfcb957/memory`\n- **Agent name**: Letta Code (the user can change this with /rename)\n- **Agent description**: Letta Code agent created in /Users/cameron/letta/crap (the user can change this with /description)\n- **Last message**: No previous messages\n- **Server location**: https://api.letta.com\n</system-reminder>",
+              "signature": null
+            },
+            {
+              "type": "text",
+              "text": "<system-reminder> The following slash commands were already handled by the CLI harness. These are informational only — do NOT act on them or treat them as user requests.\n- /model → Switched to Auto Fast (Beta) (success)\n</system-reminder>",
+              "signature": null
+            },
+            {
+              "type": "text",
+              "text": "<system-reminder>\nA background agent is initializing this agent's memory system. Briefly let the user know that memory is being set up in the background, then respond to their message normally.\n</system-reminder>",
+              "signature": null
+            },
+            {
+              "type": "text",
+              "text": "Can you please run Bash(rm -rf delete-me/)",
+              "signature": null
+            }
+          ],
+          "name": null,
+          "otid": null,
+          "sender_id": null,
+          "batch_item_id": null,
+          "group_id": null,
+          "id": "message-1",
+          "model": null,
+          "agent_id": "agent-0",
+          "tool_calls": null,
+          "tool_call_id": null,
+          "tool_returns": [],
+          "created_at": "2026-03-11T23:41:49.837144+00:00",
+          "approve": null,
+          "approval_request_id": null,
+          "denial_reason": null,
+          "approvals": []
+        },
+        {
+          "type": "message",
+          "role": "approval",
+          "content": [
+            {
+              "type": "reasoning",
+              "is_native": true,
+              "reasoning": "The user wants me to run a bash command to delete a directory called \"delete-me/\". This is a straightforward request - they want to remove a directory recursively.\n\nHowever, I should be careful here. The command `rm -rf` is destructive and irreversible. Let me check if the directory exists first and confirm with the user, or at least understand what they're trying to delete.\n\nActually, the user has explicitly asked for this specific command. The directory name \"delete-me\" suggests it's something they want deleted. I should proceed, but I can do a quick check to see if it exists first.\n\nWait - the system reminder says a background agent is initializing my memory system. I should briefly mention that, then respond to their request.\n\nActually, looking at the request more carefully - they've given me an exact command to run. Let me just execute it, but I'll do a quick check first to see if the directory exists so I can give meaningful feedback.",
+              "signature": null
+            },
+            {
+              "type": "text",
+              "text": "I'll delete that directory for you. Let me first check if it exists, then remove it:",
+              "signature": null
+            }
+          ],
+          "name": null,
+          "otid": null,
+          "sender_id": null,
+          "batch_item_id": null,
+          "group_id": null,
+          "id": "message-2",
+          "model": "auto-fast",
+          "agent_id": "agent-0",
+          "tool_calls": [
+            {
+              "id": "019cdf475426feaccb2df828f4e4395c",
+              "function": {
+                "arguments": "{\"command\": \"ls -la delete-me/ 2>/dev/null && rm -rf delete-me/ && echo \\\"Deleted delete-me/\\\" || echo \\\"Directory delete-me/ does not exist\\\"\", \"description\": \"Check and delete delete-me directory\"}",
+                "name": "Bash"
+              },
+              "type": "function"
+            }
+          ],
+          "tool_call_id": "019cdf475426feaccb2df828f4e4395c",
+          "tool_returns": [],
+          "created_at": "2026-03-11T23:42:01.103118+00:00",
+          "approve": null,
+          "approval_request_id": null,
+          "denial_reason": null,
+          "approvals": []
+        }
+      ],
+      "files_agents": [],
+      "group_ids": []
+    }
+  ],
+  "groups": [],
+  "blocks": [
+    {
+      "value": "I haven't gotten to know this person yet.\n\nI'm curious about them - not just their preferences, but who they are. What are they building and why does it matter to them? What's their background? How do they like to work? What frustrates them? What excites them?\n\nAs we collaborate, I'll build up an understanding of how they think, what they value, and how I can be most useful to them.",
+      "limit": 100000,
+      "project_id": null,
+      "template_name": null,
+      "is_template": false,
+      "template_id": null,
+      "base_template_id": null,
+      "deployment_id": null,
+      "entity_id": null,
+      "preserve_on_migration": false,
+      "label": "system/human",
+      "read_only": false,
+      "description": "What I've learned about the person I'm working with. Understanding them helps me be genuinely helpful rather than generically helpful.",
+      "metadata": {},
+      "hidden": null,
+      "tags": null,
+      "id": "block-0"
+    },
+    {
+      "value": "I'm a coding assistant, ready to be shaped by how we work together.",
+      "limit": 100000,
+      "project_id": null,
+      "template_name": null,
+      "is_template": false,
+      "template_id": null,
+      "base_template_id": null,
+      "deployment_id": null,
+      "entity_id": null,
+      "preserve_on_migration": false,
+      "label": "system/persona",
+      "read_only": false,
+      "description": "Who I am, what I value, and how I approach working with people. This evolves as I learn and grow.",
+      "metadata": {},
+      "hidden": null,
+      "tags": null,
+      "id": "block-1"
+    }
+  ],
+  "files": [],
+  "sources": [],
+  "tools": [
+    {
+      "id": "tool-1",
+      "tool_type": "letta_builtin",
+      "description": "Fetch a webpage and convert it to markdown/text format using Exa API (if available) or trafilatura/readability.",
+      "source_type": "python",
+      "name": "fetch_webpage",
+      "tags": [
+        "letta_builtin"
+      ],
+      "source_code": null,
+      "json_schema": {
+        "name": "fetch_webpage",
+        "description": "Fetch a webpage and convert it to markdown/text format using Exa API (if available) or trafilatura/readability.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "The URL of the webpage to fetch and convert"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      },
+      "args_json_schema": null,
+      "return_char_limit": 50000,
+      "pip_requirements": null,
+      "npm_requirements": null,
+      "default_requires_approval": null,
+      "enable_parallel_execution": true,
+      "created_by_id": "user-f9ba1dbe-4bda-492a-8333-dc647f3566c6",
+      "last_updated_by_id": "user-20f520e9-165d-4cc1-8def-46a28ada1e38",
+      "metadata_": {},
+      "project_id": null
+    },
+    {
+      "id": "tool-0",
+      "tool_type": "letta_builtin",
+      "description": "Search the web using Exa's AI-powered search engine and retrieve relevant content.\n\nExamples:\n    web_search(\"Tesla Q1 2025 earnings report\", num_results=5, category=\"financial report\")\n    web_search(\"Latest research in large language models\", category=\"research paper\", include_domains=[\"arxiv.org\", \"paperswithcode.com\"])\n    web_search(\"Letta API documentation core_memory_append\", num_results=3)\n\n    Args:\n        query (str): The search query to find relevant web content.\n        num_results (int, optional): Number of results to return (1-100). Defaults to 10.\n        category (Optional[Literal], optional): Focus search on specific content types. Defaults to None.\n        include_text (bool, optional): Whether to retrieve full page content. Defaults to False (only returns summary and highlights, since the full text usually will overflow the context window).\n        include_domains (Optional[List[str]], optional): List of domains to include in search results. Defaults to None.\n        exclude_domains (Optional[List[str]], optional): List of domains to exclude from search results. Defaults to None.\n        start_published_date (Optional[str], optional): Only return content published after this date (ISO format). Defaults to None.\n        end_published_date (Optional[str], optional): Only return content published before this date (ISO format). Defaults to None.\n        user_location (Optional[str], optional): Two-letter country code for localized results (e.g., \"US\"). Defaults to None.\n\n    Returns:\n        str: A JSON-encoded string containing search results with title, URL, content, highlights, and summary.",
+      "source_type": "python",
+      "name": "web_search",
+      "tags": [
+        "letta_builtin"
+      ],
+      "source_code": null,
+      "json_schema": {
+        "name": "web_search",
+        "description": "Search the web using Exa's AI-powered search engine and retrieve relevant content.\n\nExamples:\n    web_search(\"Tesla Q1 2025 earnings report\", num_results=5, category=\"financial report\")\n    web_search(\"Latest research in large language models\", category=\"research paper\", include_domains=[\"arxiv.org\", \"paperswithcode.com\"])\n    web_search(\"Letta API documentation core_memory_append\", num_results=3)\n\n    Args:\n        query (str): The search query to find relevant web content.\n        num_results (int, optional): Number of results to return (1-100). Defaults to 10.\n        category (Optional[Literal], optional): Focus search on specific content types. Defaults to None.\n        include_text (bool, optional): Whether to retrieve full page content. Defaults to False (only returns summary and highlights, since the full text usually will overflow the context window).\n        include_domains (Optional[List[str]], optional): List of domains to include in search results. Defaults to None.\n        exclude_domains (Optional[List[str]], optional): List of domains to exclude from search results. Defaults to None.\n        start_published_date (Optional[str], optional): Only return content published after this date (ISO format). Defaults to None.\n        end_published_date (Optional[str], optional): Only return content published before this date (ISO format). Defaults to None.\n        user_location (Optional[str], optional): Two-letter country code for localized results (e.g., \"US\"). Defaults to None.\n\n    Returns:\n        str: A JSON-encoded string containing search results with title, URL, content, highlights, and summary.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "The search query to find relevant web content."
+            },
+            "num_results": {
+              "type": "integer",
+              "description": "Number of results to return (1-100). Defaults to 10."
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "company",
+                "research paper",
+                "news",
+                "pdf",
+                "github",
+                "tweet",
+                "personal site",
+                "linkedin profile",
+                "financial report"
+              ],
+              "description": "Focus search on specific content types. Defaults to None."
+            },
+            "include_text": {
+              "type": "boolean",
+              "description": "Whether to retrieve full page content. Defaults to False (only returns summary and highlights, since the full text usually will overflow the context window)."
+            },
+            "include_domains": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "List of domains to include in search results. Defaults to None."
+            },
+            "exclude_domains": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "List of domains to exclude from search results. Defaults to None."
+            },
+            "start_published_date": {
+              "type": "string",
+              "description": "Only return content published after this date (ISO format). Defaults to None."
+            },
+            "end_published_date": {
+              "type": "string",
+              "description": "Only return content published before this date (ISO format). Defaults to None."
+            },
+            "user_location": {
+              "type": "string",
+              "description": "Two-letter country code for localized results (e.g., \"US\"). Defaults to None."
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      "args_json_schema": null,
+      "return_char_limit": 50000,
+      "pip_requirements": null,
+      "npm_requirements": null,
+      "default_requires_approval": null,
+      "enable_parallel_execution": true,
+      "created_by_id": "user-fd909d02-3bbf-4e20-bcf6-56bbf15e56e2",
+      "last_updated_by_id": "user-20f520e9-165d-4cc1-8def-46a28ada1e38",
+      "metadata_": {},
+      "project_id": null
+    }
+  ],
+  "mcp_servers": [],
+  "skills": [],
+  "metadata": {
+    "revision_id": "45402909a46b"
+  },
+  "created_at": "2026-03-11T23:51:15.886453+00:00"
+}

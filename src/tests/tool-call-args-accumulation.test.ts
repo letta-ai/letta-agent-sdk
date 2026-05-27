@@ -112,8 +112,22 @@ function reasoningChunk(uuid: string, text = "done"): WireMessage {
 }
 
 function queuedMessages(session: Session) {
-  return ((session as unknown as { streamQueue: unknown[] }).streamQueue ??
-    []) as Array<Record<string, unknown>>;
+  const queue =
+    (session as unknown as { streamQueue?: unknown[] }).streamQueue ?? [];
+
+  return queue.map((entry) => {
+    if (
+      entry &&
+      typeof entry === "object" &&
+      "message" in entry &&
+      (entry as { message?: unknown }).message &&
+      typeof (entry as { message?: unknown }).message === "object"
+    ) {
+      return (entry as { message: Record<string, unknown> }).message;
+    }
+
+    return entry as Record<string, unknown>;
+  });
 }
 
 describe("tool call streaming passthrough", () => {
