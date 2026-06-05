@@ -13,6 +13,31 @@ function sdkLog(tag: string, ...args: unknown[]) {
   if (process.env.DEBUG_SDK) console.error(`[SDK-Transport] [${tag}]`, ...args);
 }
 
+const SDK_AGENT_ORIGIN_TAG = "origin:letta-code";
+
+function shouldApplyNewAgentDefaults(options: InternalSessionOptions): boolean {
+  return options.createOnly === true;
+}
+
+function includeSdkAgentOriginTag(tags: string[] | undefined): string[] {
+  const normalizedTags: string[] = [];
+  let hasOriginTag = false;
+
+  for (const tag of tags ?? []) {
+    if (tag === SDK_AGENT_ORIGIN_TAG) {
+      if (hasOriginTag) continue;
+      hasOriginTag = true;
+    }
+    normalizedTags.push(tag);
+  }
+
+  if (!hasOriginTag) {
+    normalizedTags.push(SDK_AGENT_ORIGIN_TAG);
+  }
+
+  return normalizedTags;
+}
+
 /**
  * Build the CLI argument array for a given set of session options.
  *
@@ -26,6 +51,7 @@ export function buildCliArgs(options: InternalSessionOptions): string[] {
     "--input-format",
     "stream-json",
   ];
+  const applyNewAgentDefaults = shouldApplyNewAgentDefaults(options);
 
   // Conversation and agent handling
   if (options.conversationId) {
@@ -144,12 +170,18 @@ export function buildCliArgs(options: InternalSessionOptions): string[] {
   }
 
   // Tags
-  if (options.tags && options.tags.length > 0) {
-    args.push("--tags", options.tags.join(","));
+  const tags = applyNewAgentDefaults
+    ? includeSdkAgentOriginTag(options.tags)
+    : options.tags;
+  if (tags && tags.length > 0) {
+    args.push("--tags", tags.join(","));
   }
 
   // Memory filesystem enable/disable
-  if (options.memfs === true) {
+  if (
+    options.memfs === true ||
+    (applyNewAgentDefaults && options.memfs === undefined)
+  ) {
     args.push("--memfs");
   } else if (options.memfs === false) {
     args.push("--no-memfs");

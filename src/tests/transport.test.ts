@@ -30,6 +30,8 @@ describe("transport args", () => {
     permissionMode?: "default" | "acceptEdits" | "plan" | "bypassPermissions";
     allowedTools?: string[];
     disallowedTools?: string[];
+    createOnly?: boolean;
+    tags?: string[];
     memfs?: boolean;
     skillSources?: Array<"bundled" | "global" | "agent" | "project">;
     systemInfoReminder?: boolean;
@@ -86,9 +88,36 @@ describe("transport args", () => {
     expect(args).not.toContain("--memfs");
   });
 
-  test("memfs undefined does not forward memfs flags", () => {
+  test("memfs undefined does not forward memfs flags when not creating", () => {
     expect(buildArgsFor({})).not.toContain("--memfs");
     expect(buildArgsFor({})).not.toContain("--no-memfs");
+  });
+
+  test("createOnly defaults memfs to enabled", () => {
+    const args = buildArgsFor({ createOnly: true });
+    expect(args).toContain("--memfs");
+    expect(args).not.toContain("--no-memfs");
+  });
+
+  test("createOnly preserves explicit memfs opt-out", () => {
+    const args = buildArgsFor({ createOnly: true, memfs: false });
+    expect(args).toContain("--no-memfs");
+    expect(args).not.toContain("--memfs");
+  });
+
+  test("createOnly adds origin tag without dropping user tags", () => {
+    const args = buildArgsFor({ createOnly: true, tags: ["production"] });
+    const idx = args.indexOf("--tags");
+    expect(args[idx + 1]).toBe("production,origin:letta-code");
+  });
+
+  test("createOnly does not duplicate origin tag", () => {
+    const args = buildArgsFor({
+      createOnly: true,
+      tags: ["origin:letta-code", "production", "origin:letta-code"],
+    });
+    const idx = args.indexOf("--tags");
+    expect(args[idx + 1]).toBe("origin:letta-code,production");
   });
 
   test("empty skillSources forwards --no-skills", () => {
