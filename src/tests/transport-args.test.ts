@@ -234,6 +234,34 @@ describe("buildCliArgs — tools and tags", () => {
     expect(args[idx + 1]).toBe("production,v2");
   });
 
+  test("createOnly adds SDK origin tag", () => {
+    const args = buildCliArgs({ createOnly: true });
+    const idx = args.indexOf("--tags");
+    expect(args[idx + 1]).toBe("origin:letta-code");
+  });
+
+  test("createOnly preserves user tags and adds SDK origin tag", () => {
+    const args = buildCliArgs({ createOnly: true, tags: ["production", "v2"] });
+    const idx = args.indexOf("--tags");
+    const tags = args[idx + 1]!.split(",");
+    expect(tags).toEqual([
+      "production",
+      "v2",
+      "origin:letta-code",
+    ]);
+  });
+
+  test("createOnly does not duplicate SDK origin tag", () => {
+    const args = buildCliArgs({
+      createOnly: true,
+      tags: ["origin:letta-code", "production", "origin:letta-code"],
+    });
+    const idx = args.indexOf("--tags");
+    const tags = args[idx + 1]!.split(",");
+    expect(tags).toEqual(["origin:letta-code", "production"]);
+    expect(tags.filter((tag) => tag === "origin:letta-code")).toHaveLength(1);
+  });
+
   test("empty tags array → no --tags flag", () => {
     const args = buildCliArgs({ tags: [] });
     expect(args).not.toContain("--tags");
@@ -257,9 +285,21 @@ describe("buildCliArgs — memfs", () => {
     expect(args).not.toContain("--memfs");
   });
 
-  test("memfs undefined → neither flag", () => {
+  test("memfs undefined → neither flag when not creating an agent", () => {
     const args = buildCliArgs({});
     expect(args).not.toContain("--memfs");
     expect(args).not.toContain("--no-memfs");
+  });
+
+  test("createOnly defaults memfs to enabled", () => {
+    const args = buildCliArgs({ createOnly: true });
+    expect(args).toContain("--memfs");
+    expect(args).not.toContain("--no-memfs");
+  });
+
+  test("createOnly preserves explicit memfs opt-out", () => {
+    const args = buildCliArgs({ createOnly: true, memfs: false });
+    expect(args).toContain("--no-memfs");
+    expect(args).not.toContain("--memfs");
   });
 });

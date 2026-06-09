@@ -32,9 +32,10 @@ import { createAgent, resumeSession } from "@letta-ai/letta-code-sdk";
 
 const agentId = await createAgent({
   persona: "You are a helpful coding assistant for TypeScript projects.",
-  memfs: true, // Enable git-backed memory filesystem for this new agent
 });
 
+// SDK-created agents have MemFS enabled by default and include the
+// origin:letta-code tag. Set memfs: false to explicitly opt out.
 await using session = resumeSession(agentId);
 
 await session.send("Find and fix the bug in auth.ts");

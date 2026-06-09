@@ -456,12 +456,15 @@ export interface CreateAgentOptions {
    */
   tools?: AnyAgentTool[];
 
-  /** Tags to organize and categorize the agent */
+  /**
+   * Tags to organize and categorize the agent.
+   * SDK-created agents are also tagged with `origin:letta-code` if missing.
+   */
   tags?: string[];
 
   /**
    * Enable git-backed memory filesystem for this newly created agent.
-   * Maps to Letta Code CLI `--memfs` during agent creation.
+   * Defaults to enabled; set false to explicitly opt out during creation.
    */
   memfs?: boolean;
 
