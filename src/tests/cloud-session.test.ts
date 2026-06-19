@@ -97,7 +97,7 @@ function createCloudFetchMock(requests: RecordedRequest[]): typeof fetch {
 
 class FakeCloudSocket {
   static instances: FakeCloudSocket[] = [];
-  static scenario: "normal" | "approval" = "normal";
+  static scenario: "normal" | "approval" | "terminal_error" | "stale_idle_then_error" = "normal";
   readyState = 0;
   sent: Array<Record<string, unknown>> = [];
   private listeners = new Map<string, Set<Listener>>();
@@ -180,6 +180,16 @@ class FakeCloudSocket {
       return;
     }
 
+    if (payload?.kind === "create_message" && FakeCloudSocket.scenario === "terminal_error") {
+      this.finishTurnWithTerminalError(runtime);
+      return;
+    }
+
+    if (payload?.kind === "create_message" && FakeCloudSocket.scenario === "stale_idle_then_error") {
+      this.finishTurnAfterStaleIdle(runtime);
+      return;
+    }
+
     if (payload?.kind === "approval_response") {
       this.finishTurn(runtime, "approved");
       return;
@@ -213,6 +223,80 @@ class FakeCloudSocket {
         active_run_ids: ["run-cloud"],
       },
     });
+  }
+
+  private finishTurnWithTerminalError(runtime: unknown): void {
+    this.serverMessage({
+      type: "update_loop_status",
+      seq: 201,
+      event_seq: 1,
+      runtime,
+      loop_status: {
+        status: "WAITING_ON_INPUT",
+        active_run_ids: [],
+      },
+    });
+    this.serverMessage({
+      type: "stream_delta",
+      seq: 202,
+      event_seq: 2,
+      runtime,
+      delta: {
+        id: "msg-error",
+        message_type: "loop_error",
+        message: "cloud turn failed",
+        stop_reason: "error",
+        is_terminal: true,
+      },
+    });
+  }
+
+  private finishTurnAfterStaleIdle(runtime: unknown): void {
+    this.serverMessage({
+      type: "update_loop_status",
+      seq: 301,
+      event_seq: 1,
+      runtime,
+      loop_status: {
+        status: "WAITING_ON_INPUT",
+        active_run_ids: [],
+      },
+    });
+    setTimeout(() => {
+      this.serverMessage({
+        type: "update_loop_status",
+        seq: 302,
+        event_seq: 2,
+        runtime,
+        loop_status: {
+          status: "SENDING_API_REQUEST",
+          active_run_ids: [],
+        },
+      });
+      this.serverMessage({
+        type: "update_loop_status",
+        seq: 303,
+        event_seq: 3,
+        runtime,
+        loop_status: {
+          status: "WAITING_ON_INPUT",
+          active_run_ids: [],
+        },
+      });
+      this.serverMessage({
+        type: "stream_delta",
+        seq: 304,
+        event_seq: 4,
+        runtime,
+        delta: {
+          id: "msg-delayed-error",
+          message_type: "loop_error",
+          message: "delayed cloud turn failed",
+          stop_reason: "error",
+          is_terminal: true,
+        },
+      });
+    }, 150);
   }
 
   private emit(type: string, event: unknown): void {
@@ -524,6 +608,72 @@ describe("CloudEnvironmentSession", () => {
         decision: { behavior: "allow", updatedInput: null, updatedPermissions: [] },
       },
     });
+
+    session.close();
+  });
+
+  test("reports terminal Cloud loop errors instead of idle success", async () => {
+    resetFakeCloud();
+    FakeCloudSocket.scenario = "terminal_error";
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+      sandbox: { lifecycle: "external" },
+    });
+
+    const session = client.resumeSession("agent-1");
+    const result = await session.runTurn("trigger failure");
+
+    expect(result).toMatchObject({
+      type: "result",
+      success: false,
+      error: "error",
+      errorCode: "error",
+      errorDetail: "cloud turn failed",
+      stopReason: "error",
+      conversationId: "default",
+    });
+    expect(FakeCloudSocket.instances[0]!.sent).toContainEqual({ type: "ack", seq: 201 });
+    expect(FakeCloudSocket.instances[0]!.sent).toContainEqual({ type: "ack", seq: 202 });
+
+    session.close();
+  });
+
+  test("ignores stale idle status before Cloud turn activity", async () => {
+    resetFakeCloud();
+    FakeCloudSocket.scenario = "stale_idle_then_error";
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+      sandbox: { lifecycle: "external" },
+    });
+
+    const session = client.resumeSession("agent-1");
+    const result = await session.runTurn("trigger delayed failure");
+
+    expect(result).toMatchObject({
+      type: "result",
+      success: false,
+      error: "error",
+      errorCode: "error",
+      errorDetail: "delayed cloud turn failed",
+      stopReason: "error",
+      conversationId: "default",
+    });
+    expect(FakeCloudSocket.instances[0]!.sent).toContainEqual({ type: "ack", seq: 301 });
+    expect(FakeCloudSocket.instances[0]!.sent).toContainEqual({ type: "ack", seq: 304 });
 
     session.close();
   });

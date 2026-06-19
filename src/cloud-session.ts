@@ -41,6 +41,7 @@ const DEFAULT_SANDBOX_TTL_MINUTES = 5;
 const DEFAULT_SANDBOX_READY_TIMEOUT_MS = 120_000;
 const DEFAULT_SANDBOX_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_PING_INTERVAL_MS = 30_000;
+const DEFAULT_IDLE_TERMINAL_GRACE_MS = 100;
 const SDK_AGENT_ORIGIN = "@letta-ai/letta-code-sdk";
 
 type FetchLike = typeof fetch;
@@ -88,6 +89,8 @@ type PendingTurn = {
   terminalPromise: Promise<TerminalTurn>;
   runIds: Set<string>;
   terminalResolved: boolean;
+  idleSuccessTimer: ReturnType<typeof setTimeout> | null;
+  sawTurnActivity: boolean;
 };
 
 type PendingResponse = {
@@ -442,6 +445,50 @@ function getStopReason(message: CloudStatusMessage): string | null {
       : null;
 }
 
+function getDeltaStopReason(delta: Record<string, unknown>): string | null {
+  return typeof delta.stopReason === "string"
+    ? delta.stopReason
+    : typeof delta.stop_reason === "string"
+      ? delta.stop_reason
+      : null;
+}
+
+function getDeltaRunId(delta: Record<string, unknown>): string | undefined {
+  return typeof delta.runId === "string"
+    ? delta.runId
+    : typeof delta.run_id === "string"
+      ? delta.run_id
+      : undefined;
+}
+
+function getDeltaDetail(delta: Record<string, unknown>): string | undefined {
+  return typeof delta.detail === "string"
+    ? delta.detail
+    : typeof delta.message === "string"
+      ? delta.message
+      : typeof delta.error === "string"
+        ? delta.error
+        : undefined;
+}
+
+function terminalFromStreamDelta(delta: Record<string, unknown>): TerminalTurn | null {
+  const messageType = typeof delta.message_type === "string" ? delta.message_type : undefined;
+  const isErrorMessage = messageType === "loop_error" || messageType === "error_message";
+  if (delta.is_terminal !== true && !isErrorMessage) return null;
+
+  const stopReason = getDeltaStopReason(delta) ?? (isErrorMessage ? "error" : null);
+  const success = typeof delta.success === "boolean"
+    ? delta.success
+    : !isErrorMessage && stopReason !== "error" && stopReason !== "llm_api_error";
+  return {
+    success,
+    stopReason: stopReason ?? (success ? "end_turn" : "error"),
+    detail: success ? undefined : getDeltaDetail(delta),
+    errorCode: success ? undefined : "error",
+    runId: getDeltaRunId(delta),
+  };
+}
+
 function isCloudConversation(value: unknown): value is CloudConversation & { id: string } {
   return Boolean(value && typeof value === "object" && typeof (value as CloudConversation).id === "string");
 }
@@ -705,6 +752,7 @@ class CloudStatusRuntimeController implements RemoteClientRuntimeController {
         runIds: Array.from(pendingTurn.runIds),
       };
     } finally {
+      this.clearIdleSuccessTimer(pendingTurn);
       this.pendingTurn = null;
     }
   }
@@ -779,6 +827,8 @@ class CloudStatusRuntimeController implements RemoteClientRuntimeController {
       terminalPromise,
       runIds: new Set<string>(),
       terminalResolved: false,
+      idleSuccessTimer: null,
+      sawTurnActivity: false,
     };
   }
 
@@ -832,10 +882,17 @@ class CloudStatusRuntimeController implements RemoteClientRuntimeController {
     if (type === "stream_delta") {
       const delta = message.delta;
       if (delta && typeof delta === "object") {
-        const runId = typeof (delta as Record<string, unknown>).run_id === "string"
-          ? ((delta as Record<string, unknown>).run_id as string)
-          : undefined;
+        const deltaRecord = delta as Record<string, unknown>;
+        const runId = getDeltaRunId(deltaRecord);
         if (runId && this.pendingTurn) this.pendingTurn.runIds.add(runId);
+        const messageType = typeof deltaRecord.message_type === "string" ? deltaRecord.message_type : undefined;
+        if (this.pendingTurn && messageType !== "user_message") {
+          this.pendingTurn.sawTurnActivity = true;
+        }
+        const terminal = terminalFromStreamDelta(deltaRecord);
+        this.emit(message);
+        if (terminal) this.resolvePendingTerminal(terminal);
+        return;
       }
       this.emit(message);
       return;
@@ -854,6 +911,7 @@ class CloudStatusRuntimeController implements RemoteClientRuntimeController {
     if (type === "run_started") {
       const runId = getRunId(message);
       if (runId && this.pendingTurn) this.pendingTurn.runIds.add(runId);
+      if (this.pendingTurn) this.pendingTurn.sawTurnActivity = true;
       return;
     }
 
@@ -919,8 +977,12 @@ class CloudStatusRuntimeController implements RemoteClientRuntimeController {
       }
     }
     const status = typeof record.status === "string" ? record.status : undefined;
+    const pending = this.pendingTurn;
+    if (pending && (status === "SENDING_API_REQUEST" || status === "WAITING_FOR_API_RESPONSE")) {
+      pending.sawTurnActivity = true;
+    }
     if (status === "WAITING_ON_INPUT") {
-      this.resolvePendingTerminal({ success: true, stopReason: "end_turn" });
+      this.scheduleIdleSuccessTerminal();
     }
   }
 
@@ -948,9 +1010,29 @@ class CloudStatusRuntimeController implements RemoteClientRuntimeController {
     });
   }
 
+  private scheduleIdleSuccessTerminal(): void {
+    const pending = this.pendingTurn;
+    if (!pending || pending.terminalResolved) return;
+    if (!pending.sawTurnActivity) return;
+    this.clearIdleSuccessTimer(pending);
+    pending.idleSuccessTimer = setTimeout(() => {
+      if (this.pendingTurn !== pending || pending.terminalResolved) return;
+      pending.idleSuccessTimer = null;
+      this.resolvePendingTerminal({ success: true, stopReason: "end_turn" });
+    }, DEFAULT_IDLE_TERMINAL_GRACE_MS);
+    (pending.idleSuccessTimer as { unref?: () => void }).unref?.();
+  }
+
+  private clearIdleSuccessTimer(pending: PendingTurn | null = this.pendingTurn): void {
+    if (!pending?.idleSuccessTimer) return;
+    clearTimeout(pending.idleSuccessTimer);
+    pending.idleSuccessTimer = null;
+  }
+
   private resolvePendingTerminal(terminal: TerminalTurn): void {
     const pending = this.pendingTurn;
     if (!pending || pending.terminalResolved) return;
+    this.clearIdleSuccessTimer(pending);
     if (terminal.runId) pending.runIds.add(terminal.runId);
     pending.terminalResolved = true;
     pending.resolveTerminal(terminal);
@@ -959,6 +1041,7 @@ class CloudStatusRuntimeController implements RemoteClientRuntimeController {
   private rejectActiveTurn(error: Error): void {
     const pending = this.pendingTurn;
     if (!pending || pending.terminalResolved) return;
+    this.clearIdleSuccessTimer(pending);
     pending.terminalResolved = true;
     pending.rejectTerminal(error);
   }
