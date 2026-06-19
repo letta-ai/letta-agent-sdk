@@ -27,6 +27,19 @@ export type {
 // Import types for use in this file
 import type { CreateBlock, CanUseToolResponse } from "@letta-ai/letta-code/protocol";
 
+export interface LettaCodeSocketLike {
+  readyState: number;
+  send(data: string): void;
+  close(): void;
+  addEventListener?(type: string, listener: (event: unknown) => void): void;
+  removeEventListener?(type: string, listener: (event: unknown) => void): void;
+  on?(type: string, listener: (event: unknown) => void): void;
+  off?(type: string, listener: (event: unknown) => void): void;
+  once?(type: string, listener: (event: unknown) => void): void;
+}
+
+export type LettaCodeSocketConstructor = new (url: string) => LettaCodeSocketLike;
+
 // ═══════════════════════════════════════════════════════════════
 // MESSAGE CONTENT TYPES (for multimodal support)
 // ═══════════════════════════════════════════════════════════════
@@ -242,7 +255,7 @@ export type AnyAgentTool = AgentTool<any, unknown>;
  * How the SDK reaches or runs the Letta Code harness.
  *
  * - local: spawn/manage a local Letta Code subprocess and speak stdio.
- * - remote: connect to a user-managed app-server. Placeholder for now.
+ * - remote: connect to a user-managed app-server over websockets.
  * - cloud: connect through Letta Cloud/Constellation. Placeholder for now.
  */
 export type LettaCodeBackend = "local" | "remote" | "cloud";
@@ -264,6 +277,10 @@ export interface LettaCodeRemoteClientOptions {
   backend: "remote";
   /** URL of the user-managed app-server / websocket endpoint. */
   url: string;
+  /** Optional WebSocket constructor for non-browser runtimes and tests. */
+  WebSocket?: LettaCodeSocketConstructor;
+  /** Timeout for app-server request/turn correlation. Defaults to app-server client default. */
+  requestTimeoutMs?: number;
   /** Optional default execution target, overridable at session creation. */
   environment?: LettaCodeEnvironment;
 }
@@ -460,6 +477,22 @@ export interface CreateSessionOptions {
  */
 export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
   environment?: LettaCodeEnvironment;
+}
+
+export interface LettaCodeSession extends AsyncDisposable {
+  initialize(): Promise<SDKInitMessage>;
+  send(message: SendMessage): Promise<void>;
+  runTurn(message: SendMessage, options?: RunTurnOptions): Promise<SDKResultMessage>;
+  stream(): AsyncGenerator<SDKMessage>;
+  recoverPendingApprovals(
+    options?: RecoverPendingApprovalsOptions,
+  ): Promise<RecoverPendingApprovalsResult>;
+  listMessages(options?: ListMessagesOptions): Promise<ListMessagesResult>;
+  bootstrapState(options?: BootstrapStateOptions): Promise<BootstrapStateResult>;
+  close(): void;
+  readonly agentId: string | null;
+  readonly sessionId: string | null;
+  readonly conversationId: string | null;
 }
 
 /**

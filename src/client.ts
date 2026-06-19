@@ -1,4 +1,8 @@
 import { Session } from "./session.js";
+import {
+  AppServerSession,
+  assertRemoteSessionOptionsSupported,
+} from "./app-server-session.js";
 import type {
   CreateAgentOptions,
   CreateSessionOptions,
@@ -6,6 +10,8 @@ import type {
   LettaCodeClientOptions,
   LettaCodeClientSessionOptions,
   LettaCodeEnvironment,
+  LettaCodeRemoteClientOptions,
+  LettaCodeSession,
   SDKResultMessage,
   SendMessage,
 } from "./types.js";
@@ -45,18 +51,23 @@ function hasCreateAgentEnvironment(options: CreateAgentOptions): boolean {
   return "environment" in (options as Record<string, unknown>);
 }
 
+function looksLikeConversationId(id: string): boolean {
+  return id.startsWith("conv-") || id.startsWith("local-conv-");
+}
+
 /**
  * Top-level Letta Code SDK client.
  *
  * `backend` selects how the SDK reaches or runs the Letta Code harness.
- * The only implemented backend today is `local`, which spawns the bundled
- * Letta Code CLI subprocess and speaks the existing stdio JSON protocol.
- * `remote` and `cloud` are typed placeholders for the upcoming app-server /
- * constellation-backed transports.
+ * `local` spawns the bundled Letta Code CLI subprocess and speaks the existing
+ * stdio JSON protocol. `remote` connects to a user-managed Letta Code
+ * app-server websocket endpoint. `cloud` remains a typed placeholder for the
+ * upcoming Letta Cloud / Constellation transport.
  */
 export class LettaCodeClient {
   readonly backend: LettaCodeBackend;
   readonly environment: LettaCodeEnvironment | undefined;
+  private readonly options: LettaCodeClientOptions;
 
   constructor(options: LettaCodeClientOptions = {}) {
     const backend = options.backend ?? "local";
@@ -68,11 +79,24 @@ export class LettaCodeClient {
 
     this.backend = backend;
     this.environment = getOptionsEnvironment(options);
+    this.options = options;
 
     if (this.backend === "local" && this.environment !== undefined) {
       throw new Error(
         "LettaCodeClient environment is only valid for remote/cloud backends.",
       );
+    }
+
+    if (this.backend === "remote") {
+      if (!("url" in options) || typeof options.url !== "string" || options.url.length === 0) {
+        throw new Error("LettaCodeClient remote backend requires a non-empty url.");
+      }
+      if (
+        options.requestTimeoutMs !== undefined &&
+        (!Number.isInteger(options.requestTimeoutMs) || options.requestTimeoutMs <= 0)
+      ) {
+        throw new Error("Invalid requestTimeoutMs. Expected a positive integer.");
+      }
     }
   }
 
@@ -83,7 +107,6 @@ export class LettaCodeClient {
    * it belongs to the client/session execution context.
    */
   async createAgent(options: CreateAgentOptions = {}): Promise<string> {
-    this.assertLocalBackend("createAgent");
     if (hasCreateAgentEnvironment(options)) {
       throw new Error(
         "createAgent() does not accept environment. Set a client default or pass environment to resumeSession()/createSession().",
@@ -91,6 +114,17 @@ export class LettaCodeClient {
     }
 
     validateCreateAgentOptions(options);
+
+    if (this.backend === "remote") {
+      const session = new AppServerSession(this.remoteOptions(), {
+        kind: "create-agent",
+        options,
+      });
+      const initMsg = await session.initialize();
+      session.close();
+      return initMsg.agentId;
+    }
+    this.assertLocalBackend("createAgent");
     const session = new Session({ ...options, createOnly: true });
     const initMsg = await session.initialize();
     session.close();
@@ -106,7 +140,7 @@ export class LettaCodeClient {
   createSession(
     agentIdOrOptions?: string | LettaCodeClientSessionOptions,
     options: LettaCodeClientSessionOptions = {},
-  ): Session {
+  ): LettaCodeSession {
     const agentId =
       typeof agentIdOrOptions === "string" ? agentIdOrOptions : undefined;
     const resolvedOptions =
@@ -116,6 +150,19 @@ export class LettaCodeClient {
     const sessionOptions = stripEnvironment(resolvedOptions);
     validateCreateSessionOptions(sessionOptions);
 
+    if (this.backend === "remote") {
+      if (!agentId) {
+        throw new Error(
+          "Remote app-server createSession() requires an agent id. Call createAgent() first or pass an agent id.",
+        );
+      }
+      return new AppServerSession(this.remoteOptions(), {
+        kind: "session",
+        agentId,
+        newConversation: true,
+        options: resolvedOptions,
+      });
+    }
     if (agentId) {
       return new Session({ ...sessionOptions, agentId, newConversation: true });
     }
@@ -126,17 +173,32 @@ export class LettaCodeClient {
    * Resume an existing agent default conversation or a specific conversation.
    *
    * `options.environment` overrides the client's default execution target for
-   * remote/cloud backends once those transports are implemented.
+   * remote/cloud backends.
    */
   resumeSession(
     id: string,
     options: LettaCodeClientSessionOptions = {},
-  ): Session {
+  ): LettaCodeSession {
     this.assertSessionBackend("resumeSession", options);
     const sessionOptions = stripEnvironment(options);
     validateCreateSessionOptions(sessionOptions);
 
-    if (id.startsWith("conv-")) {
+    if (this.backend === "remote") {
+      if (looksLikeConversationId(id)) {
+        return new AppServerSession(this.remoteOptions(), {
+          kind: "session",
+          conversationId: id,
+          options,
+        });
+      }
+      return new AppServerSession(this.remoteOptions(), {
+        kind: "session",
+        agentId: id,
+        defaultConversation: true,
+        options,
+      });
+    }
+    if (looksLikeConversationId(id)) {
       return new Session({ ...sessionOptions, conversationId: id });
     }
     return new Session({
@@ -187,8 +249,19 @@ export class LettaCodeClient {
       return;
     }
 
+    if (this.backend === "remote") {
+      assertRemoteSessionOptionsSupported(action, options);
+      return;
+    }
     throw new Error(
       `LettaCodeClient backend '${this.backend}' is not implemented yet. ${action} currently supports backend 'local' only.`,
     );
+  }
+
+  private remoteOptions(): LettaCodeRemoteClientOptions {
+    if (this.backend !== "remote") {
+      throw new Error("Remote options requested for non-remote backend.");
+    }
+    return this.options as LettaCodeRemoteClientOptions;
   }
 }

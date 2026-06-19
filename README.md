@@ -25,13 +25,14 @@ import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
 // subprocess; it is not the same as `remote` + a localhost URL.
 const localClient = new LettaCodeClient({ backend: "local" });
 
-// Remote/cloud are typed placeholders in this release. Construction succeeds,
-// but using them will throw until the transports are implemented.
+// Remote: connect to a user-managed Letta Code app-server over websockets.
 const remoteClient = new LettaCodeClient({
   backend: "remote",
-  url: "wss://up698.railway.com/9123",
+  url: "http://127.0.0.1:4500",
 });
 
+// Cloud remains a typed placeholder in this release. Construction succeeds,
+// but using it will throw until the transport is implemented.
 const client = new LettaCodeClient({
   backend: "cloud",
   environment: { name: "Cameron's MacMini" }, // optional default
@@ -64,9 +65,9 @@ for await (const msg of session.stream()) {
 }
 ```
 
-By default, `resumeSession(agentId)` continues the agent’s default conversation. To start a fresh thread, use `createSession(agentId)` (see docs).
+By default, `resumeSession(agentId)` continues the agent’s default conversation. To start a fresh thread, use `createSession(agentId)` (see docs). For the remote app-server backend, pass an agent id to `createSession(agentId)`; default/LRU local-agent selection is only available through the local subprocess backend.
 
-For cloud/remote backends, `environment` is session-scoped and can override the
+For remote/cloud backends, `environment` is session-scoped and can override the
 client's default execution target once those backends are implemented:
 
 ```ts
@@ -77,6 +78,36 @@ await using session = client.resumeSession(agentId, {
 
 The legacy top-level helpers (`createAgent`, `createSession`, `resumeSession`,
 and `prompt`) remain available and use the local subprocess backend.
+
+### User-managed app-server backend
+
+Use `backend: "remote"` when you already have a Letta Code app-server running.
+The app-server URL selects the execution environment; the SDK uses the
+app-server websocket protocol for `runtime_start`, `input`, streaming deltas,
+and SDK-defined external tools.
+
+```ts
+const client = new LettaCodeClient({
+  backend: "remote",
+  url: "http://127.0.0.1:4500",
+  requestTimeoutMs: 120_000,
+});
+
+const agentId = await client.createAgent({
+  model: "anthropic/claude-sonnet-4",
+  persona: "You are a helpful coding assistant.",
+});
+
+await using session = client.createSession(agentId, { cwd: process.cwd() });
+const result = await session.runTurn("Summarize this repository.");
+console.log(result.result);
+```
+
+
+### Letta Cloud backend
+
+`backend: "cloud"` remains a typed placeholder until the Cloud / Constellation
+transport is implemented.
 
 
 ### Remote environments (ACK-only dispatch)
