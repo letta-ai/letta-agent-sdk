@@ -235,6 +235,55 @@ export interface AgentTool<TParams, TResult> {
 export type AnyAgentTool = AgentTool<any, unknown>;
 
 // ═══════════════════════════════════════════════════════════════
+// TOP-LEVEL CLIENT TYPES
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * How the SDK reaches or runs the Letta Code harness.
+ *
+ * - local: spawn/manage a local Letta Code subprocess and speak stdio.
+ * - remote: connect to a user-managed app-server. Placeholder for now.
+ * - cloud: connect through Letta Cloud/Constellation. Placeholder for now.
+ */
+export type LettaCodeBackend = "local" | "remote" | "cloud";
+
+/**
+ * Stable execution target for remote/cloud runtimes.
+ *
+ * Strings are treated as human-readable environment names. Object forms allow
+ * callers to avoid relying on names as unique identifiers once backend support
+ * is implemented.
+ */
+export type LettaCodeEnvironment = string | { name: string } | { id: string };
+
+export interface LettaCodeLocalClientOptions {
+  backend?: "local";
+}
+
+export interface LettaCodeRemoteClientOptions {
+  backend: "remote";
+  /** URL of the user-managed app-server / websocket endpoint. */
+  url: string;
+  /** Optional default execution target, overridable at session creation. */
+  environment?: LettaCodeEnvironment;
+}
+
+export interface LettaCodeCloudClientOptions {
+  backend: "cloud";
+  /** Optional API key override. Defaults to LETTA_API_KEY / existing auth. */
+  apiKey?: string;
+  /** Optional API base URL override. Defaults to Letta Cloud. */
+  apiBaseUrl?: string;
+  /** Optional default execution target, overridable at session creation. */
+  environment?: LettaCodeEnvironment;
+}
+
+export type LettaCodeClientOptions =
+  | LettaCodeLocalClientOptions
+  | LettaCodeRemoteClientOptions
+  | LettaCodeCloudClientOptions;
+
+// ═══════════════════════════════════════════════════════════════
 // SESSION OPTIONS
 // ═══════════════════════════════════════════════════════════════
 
@@ -401,6 +450,16 @@ export interface CreateSessionOptions {
    * Maps to the CLI --memfs-startup flag.
    */
   memfsStartup?: "blocking" | "background" | "skip";
+}
+
+/**
+ * Session options accepted by LettaCodeClient methods.
+ *
+ * `environment` is a remote/cloud execution-target override. It is deliberately
+ * session-scoped rather than part of createAgent() options.
+ */
+export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
+  environment?: LettaCodeEnvironment;
 }
 
 /**
