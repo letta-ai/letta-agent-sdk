@@ -35,6 +35,9 @@ const legacyLocalClient = new LettaCodeClient({
 const remoteClient = new LettaCodeClient({
   backend: "remote",
   url: "http://127.0.0.1:4500",
+  // Required when the app-server is bound to a non-loopback interface with
+  // --ws-auth capability-token.
+  authToken: process.env.LETTA_APP_SERVER_TOKEN,
 });
 
 // Cloud remains a typed placeholder in this release. Construction succeeds,
@@ -98,6 +101,7 @@ and SDK-defined external tools.
 const client = new LettaCodeClient({
   backend: "remote",
   url: "http://127.0.0.1:4500",
+  authToken: process.env.LETTA_APP_SERVER_TOKEN,
   requestTimeoutMs: 120_000,
 });
 
