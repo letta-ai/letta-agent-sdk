@@ -16,27 +16,42 @@ npm install @letta-ai/letta-code-sdk
 
 ## Quick start
 
-### One-shot prompt
+### Client creation
 
 ```ts
-import { prompt } from "@letta-ai/letta-code-sdk";
+import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
 
-const result = await prompt("What is 2 + 2?");
-console.log(result.result);
+// Local: embedded Letta Code harness, stdio wire. This spawns/manages a
+// subprocess; it is not the same as `remote` + a localhost URL.
+const localClient = new LettaCodeClient({ backend: "local" });
+
+// Remote/cloud are typed placeholders in this release. Construction succeeds,
+// but using them will throw until the transports are implemented.
+const remoteClient = new LettaCodeClient({
+  backend: "remote",
+  url: "wss://up698.railway.com/9123",
+});
+
+const client = new LettaCodeClient({
+  backend: "cloud",
+  environment: { name: "Cameron's MacMini" }, // optional default
+});
 ```
 
 ### Persistent agent with multi-turn conversations
 
 ```ts
-import { createAgent, resumeSession } from "@letta-ai/letta-code-sdk";
+import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
 
-const agentId = await createAgent({
+const client = new LettaCodeClient({ backend: "local" });
+
+const agentId = await client.createAgent({
   persona: "You are a helpful coding assistant for TypeScript projects.",
 });
 
 // SDK-created agents have MemFS enabled by default and include the
 // origin:letta-code tag. Set memfs: false to explicitly opt out.
-await using session = resumeSession(agentId);
+await using session = client.resumeSession(agentId);
 
 await session.send("Find and fix the bug in auth.ts");
 for await (const msg of session.stream()) {
@@ -50,6 +65,18 @@ for await (const msg of session.stream()) {
 ```
 
 By default, `resumeSession(agentId)` continues the agent’s default conversation. To start a fresh thread, use `createSession(agentId)` (see docs).
+
+For cloud/remote backends, `environment` is session-scoped and can override the
+client's default execution target once those backends are implemented:
+
+```ts
+await using session = client.resumeSession(agentId, {
+  environment: { name: "LettaDevelopers" },
+});
+```
+
+The legacy top-level helpers (`createAgent`, `createSession`, `resumeSession`,
+and `prompt`) remain available and use the local subprocess backend.
 
 
 ### Remote environments (ACK-only dispatch)

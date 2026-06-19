@@ -5,7 +5,11 @@
  *
  * @example
  * ```typescript
- * import { createAgent, createSession, resumeSession, prompt } from '@letta-ai/letta-code-sdk';
+ * import { LettaCodeClient, createAgent, createSession, resumeSession, prompt } from '@letta-ai/letta-code-sdk';
+ *
+ * const client = new LettaCodeClient({ backend: 'local' });
+ * const agentId = await client.createAgent();
+ * const clientSession = client.resumeSession(agentId);
  *
  * // Start session with default agent + new conversation (like `letta`)
  * const session = createSession();
@@ -36,6 +40,13 @@ import { validateCreateSessionOptions, validateCreateAgentOptions } from "./vali
 export type {
   CreateSessionOptions,
   CreateAgentOptions,
+  LettaCodeBackend,
+  LettaCodeEnvironment,
+  LettaCodeLocalClientOptions,
+  LettaCodeRemoteClientOptions,
+  LettaCodeCloudClientOptions,
+  LettaCodeClientOptions,
+  LettaCodeClientSessionOptions,
   SDKMessage,
   SDKInitMessage,
   SDKAssistantMessage,
@@ -84,6 +95,7 @@ export type {
 } from "./types.js";
 
 export { Session } from "./session.js";
+export { LettaCodeClient } from "./client.js";
 
 export {
   RemoteAgent,
