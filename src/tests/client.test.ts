@@ -435,15 +435,16 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("throws a clear placeholder error when non-local backends are used", () => {
+  test("constructs cloud backend sessions without using the local fallback", () => {
     const client = new LettaCodeClient({
       backend: "cloud",
       environment: "LettaDevelopers",
     });
 
-    expect(() => client.resumeSession("agent-123")).toThrow(
-      "backend 'cloud' is not implemented yet",
-    );
+    const session = client.resumeSession("agent-123");
+    expect(session.agentId).toBeNull();
+    expect(session.conversationId).toBeNull();
+    session.close();
   });
 
   test("starts remote app-server sessions and runs a turn", async () => {

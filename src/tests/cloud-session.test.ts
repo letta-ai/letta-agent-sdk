@@ -1,0 +1,448 @@
+import { describe, expect, test } from "bun:test";
+import { LettaCodeClient } from "../index.js";
+
+type Listener = (event: unknown) => void;
+type FetchInput = Parameters<typeof fetch>[0];
+
+type RecordedRequest = {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body?: unknown;
+};
+
+function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+    ...init,
+  });
+}
+
+function urlOf(input: FetchInput | URL): string {
+  return input instanceof URL ? input.toString() : String(input);
+}
+
+function headersOf(init?: RequestInit): Record<string, string> {
+  return Object.fromEntries(new Headers(init?.headers).entries());
+}
+
+function bodyOf(init?: RequestInit): unknown {
+  if (!init?.body) return undefined;
+  return JSON.parse(String(init.body));
+}
+
+function createCloudFetchMock(requests: RecordedRequest[]): typeof fetch {
+  return ((input: FetchInput | URL, init?: RequestInit) => {
+    const url = urlOf(input);
+    const parsed = new URL(url);
+    const method = init?.method ?? "GET";
+    requests.push({
+      url,
+      method,
+      headers: headersOf(init),
+      body: bodyOf(init),
+    });
+
+    if (parsed.pathname === "/v1/agents/" && method === "POST") {
+      return Promise.resolve(jsonResponse({ id: "agent-created" }));
+    }
+
+    if (parsed.pathname === "/v1/conversations/" && method === "POST") {
+      return Promise.resolve(jsonResponse({ id: "conv-created", agent_id: parsed.searchParams.get("agent_id") }));
+    }
+
+    if (parsed.pathname === "/v1/conversations/conv-1" && method === "GET") {
+      return Promise.resolve(jsonResponse({ id: "conv-1", agent_id: "agent-from-conv" }));
+    }
+
+    if (parsed.pathname === "/v1/conversations/default/messages" && method === "GET") {
+      return Promise.resolve(jsonResponse({ messages: [{ id: "msg-1" }], hasMore: false }));
+    }
+
+    if (parsed.pathname === "/v1/agents/agent-1/sandboxes" && method === "POST") {
+      return Promise.resolve(jsonResponse({
+        sandboxId: "sandbox-1",
+        deviceId: "device-sandbox",
+        connectionName: "sandbox-agent-1",
+      }));
+    }
+
+    if (parsed.pathname === "/v1/agents/agent-1/sandboxes/refresh" && method === "POST") {
+      return Promise.resolve(jsonResponse({ success: true }));
+    }
+
+    if (parsed.pathname === "/v1/agents/agent-1/sandboxes" && method === "DELETE") {
+      return Promise.resolve(jsonResponse({ success: true }));
+    }
+
+    if (parsed.pathname === "/v1/environments" && method === "GET") {
+      return Promise.resolve(jsonResponse({
+        connections: [
+          {
+            id: "env-sandbox",
+            connectionId: "conn-sandbox",
+            deviceId: "device-sandbox",
+            connectionName: "sandbox-agent-1",
+            connectedAt: 1,
+          },
+        ],
+        hasNextPage: false,
+      }));
+    }
+
+    return Promise.resolve(jsonResponse({ message: `unexpected ${method} ${parsed.pathname}` }, { status: 404 }));
+  }) as typeof fetch;
+}
+
+class FakeCloudSocket {
+  static instances: FakeCloudSocket[] = [];
+  static scenario: "normal" | "approval" = "normal";
+  readyState = 0;
+  sent: Array<Record<string, unknown>> = [];
+  private listeners = new Map<string, Set<Listener>>();
+
+  constructor(
+    readonly url: string,
+    readonly options?: { headers?: Record<string, string> },
+  ) {
+    FakeCloudSocket.instances.push(this);
+    queueMicrotask(() => {
+      this.readyState = 1;
+      this.emit("open", {});
+    });
+  }
+
+  send(data: string): void {
+    const command = JSON.parse(data) as Record<string, unknown>;
+    this.sent.push(command);
+    this.fakeDeviceHandle(command);
+  }
+
+  close(): void {
+    this.readyState = 3;
+    this.emit("close", {});
+  }
+
+  addEventListener(type: string, listener: Listener): void {
+    let listeners = this.listeners.get(type);
+    if (!listeners) {
+      listeners = new Set();
+      this.listeners.set(type, listeners);
+    }
+    listeners.add(listener);
+  }
+
+  removeEventListener(type: string, listener: Listener): void {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  serverMessage(message: unknown): void {
+    this.emit("message", { data: JSON.stringify(message) });
+  }
+
+  private fakeDeviceHandle(command: Record<string, unknown>): void {
+    if (command.type === "recover_pending_approvals") {
+      this.serverMessage({
+        type: "recover_pending_approvals_response",
+        request_id: command.request_id,
+        runtime: command.runtime,
+        success: true,
+      });
+      return;
+    }
+
+    if (command.type === "update_model") {
+      this.serverMessage({
+        type: "update_model_response",
+        request_id: command.request_id,
+        success: true,
+        model_handle: (command.payload as Record<string, unknown> | undefined)?.model_handle,
+      });
+      return;
+    }
+
+    if (command.type !== "input") return;
+    const runtime = command.runtime;
+    const payload = command.payload as Record<string, unknown> | undefined;
+
+    if (payload?.kind === "create_message" && FakeCloudSocket.scenario === "approval") {
+      this.serverMessage({
+        type: "control_request",
+        runtime,
+        request_id: "approval-1",
+        request: {
+          subtype: "can_use_tool",
+          tool_name: "Bash",
+          input: { command: "pwd" },
+        },
+      });
+      return;
+    }
+
+    if (payload?.kind === "approval_response") {
+      this.finishTurn(runtime, "approved");
+      return;
+    }
+
+    if (payload?.kind === "create_message") {
+      this.finishTurn(runtime, "hello from cloud");
+    }
+  }
+
+  private finishTurn(runtime: unknown, content: string): void {
+    this.serverMessage({
+      type: "stream_delta",
+      seq: 101,
+      event_seq: 1,
+      runtime,
+      delta: {
+        id: "msg-cloud",
+        message_type: "assistant_message",
+        content,
+        run_id: "run-cloud",
+      },
+    });
+    this.serverMessage({
+      type: "update_loop_status",
+      seq: 102,
+      event_seq: 2,
+      runtime,
+      loop_status: {
+        status: "WAITING_ON_INPUT",
+        active_run_ids: ["run-cloud"],
+      },
+    });
+  }
+
+  private emit(type: string, event: unknown): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(event);
+    }
+  }
+}
+
+function resetFakeCloud(): void {
+  FakeCloudSocket.instances = [];
+  FakeCloudSocket.scenario = "normal";
+}
+
+describe("CloudEnvironmentSession", () => {
+  test("creates and refreshes a Cloud agent sandbox before using the Remote Client websocket", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { ttlMinutes: 7, pollIntervalMs: 1, readyTimeoutMs: 50 },
+    });
+
+    const session = client.resumeSession("agent-1", {
+      model: "anthropic/claude-sonnet-4",
+      cwd: "/repo",
+      permissionMode: "bypassPermissions",
+    });
+    const init = await session.initialize();
+
+    expect(init).toMatchObject({
+      type: "init",
+      agentId: "agent-1",
+      conversationId: "default",
+    });
+    expect(requests.slice(0, 3).map((request) => `${request.method} ${new URL(request.url).pathname}`)).toEqual([
+      "POST /v1/agents/agent-1/sandboxes",
+      "POST /v1/agents/agent-1/sandboxes/refresh",
+      "GET /v1/environments",
+    ]);
+    expect(requests[1]!.body).toEqual({ ttlMinutes: 7 });
+    expect(requests[0]!.headers.authorization ?? requests[0]!.headers.Authorization).toBe("Bearer sk-test");
+
+    const socket = FakeCloudSocket.instances[0]!;
+    const wsUrl = new URL(socket.url);
+    expect(wsUrl.protocol).toBe("wss:");
+    expect(wsUrl.pathname).toBe("/v1/environments/conn-sandbox/status/ws");
+    expect(wsUrl.searchParams.get("agentId")).toBe("agent-1");
+    expect(wsUrl.searchParams.get("conversationId")).toBe("default");
+    expect(wsUrl.searchParams.get("channel")).toBe("stream");
+    expect(wsUrl.searchParams.has("token")).toBe(false);
+    expect(socket.options?.headers?.Authorization).toBe("Bearer sk-test");
+    expect(socket.sent[0]).toMatchObject({ type: "sync", recover_approvals: true });
+    expect(socket.sent).toContainEqual(expect.objectContaining({
+      type: "update_model",
+      payload: { model_handle: "anthropic/claude-sonnet-4" },
+    }));
+    expect(socket.sent).toContainEqual(expect.objectContaining({
+      type: "change_device_state",
+      payload: { cwd: "/repo", mode: "unrestricted" },
+    }));
+
+    await expect(session.recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
+      recovered: true,
+      pendingApproval: false,
+      unsupported: false,
+    });
+
+    const result = await session.runTurn("hello");
+    expect(result).toMatchObject({
+      type: "result",
+      success: true,
+      result: "hello from cloud",
+      conversationId: "default",
+      runIds: ["run-cloud"],
+    });
+    const inputCommand = socket.sent.find((command) => command.type === "input")!;
+    expect(inputCommand).toMatchObject({
+      runtime: { agent_id: "agent-1", conversation_id: "default" },
+      payload: {
+        kind: "create_message",
+        supports_control_response: true,
+        messages: [expect.objectContaining({ role: "user", content: "hello" })],
+      },
+    });
+    expect(socket.sent).toContainEqual({ type: "ack", seq: 101 });
+    expect(socket.sent).toContainEqual({ type: "ack", seq: 102 });
+    expect(requests.filter((request) => new URL(request.url).pathname.endsWith("/sandboxes/refresh"))).toHaveLength(2);
+
+    session.close();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(requests.at(-1)).toMatchObject({
+      method: "DELETE",
+      url: "https://api.test/v1/agents/agent-1/sandboxes",
+    });
+  });
+
+  test("attaches to an explicit environment without creating a sandbox", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      webSocketAuth: "query",
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("agent-1");
+    await session.initialize();
+
+    expect(requests.some((request) => new URL(request.url).pathname.includes("/sandboxes"))).toBe(false);
+    const socketUrl = new URL(FakeCloudSocket.instances[0]!.url);
+    expect(socketUrl.pathname).toBe("/v1/environments/conn-explicit/status/ws");
+    expect(socketUrl.searchParams.get("token")).toBe("sk-test");
+    expect(FakeCloudSocket.instances[0]!.options).toBeUndefined();
+    session.close();
+  });
+
+  test("uses bearer auth from headers for Cloud REST, environment polling, and websocket upgrades", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      headers: { Authorization: "Bearer sk-header", "x-project-id": "project-1" },
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { pollIntervalMs: 1, readyTimeoutMs: 50 },
+    });
+
+    const session = client.resumeSession("agent-1");
+    await session.initialize();
+
+    const sandboxRequest = requests.find((request) => new URL(request.url).pathname.endsWith("/sandboxes"));
+    const environmentRequest = requests.find((request) => new URL(request.url).pathname === "/v1/environments");
+    expect(sandboxRequest?.headers.authorization).toBe("Bearer sk-header");
+    expect(sandboxRequest?.headers["x-project-id"]).toBe("project-1");
+    expect(environmentRequest?.headers.authorization).toBe("Bearer sk-header");
+    expect(environmentRequest?.headers["x-project-id"]).toBe("project-1");
+    expect(FakeCloudSocket.instances[0]!.options?.headers).toEqual({
+      Authorization: "Bearer sk-header",
+      "x-project-id": "project-1",
+    });
+
+    session.close();
+  });
+
+  test("creates Cloud agents with Cloud-specific REST payloads and errors", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+    });
+
+    await expect(client.createAgent({
+      model: "anthropic/claude-sonnet-4",
+      systemPrompt: "You are a repo assistant.",
+      memory: [{ label: "project", value: "Use Bun." }],
+      tags: ["team:sdk"],
+    })).resolves.toBe("agent-created");
+
+    expect(requests[0]).toMatchObject({ method: "POST", url: "https://api.test/v1/agents/" });
+    expect(requests[0]!.body).toMatchObject({
+      model: "anthropic/claude-sonnet-4",
+      system: "You are a repo assistant.",
+      tags: ["team:sdk", "origin:letta-code"],
+      memory_blocks: [{ label: "project", value: "Use Bun." }],
+    });
+
+    await expect(client.createAgent({ systemPrompt: "default" })).rejects.toThrow(
+      "Cloud createAgent() cannot expand SDK system prompt presets",
+    );
+    await expect(client.createAgent({ cwd: "/repo" })).rejects.toThrow(
+      "Cloud createAgent() creates the agent record only",
+    );
+  });
+
+  test("responds to Remote Client approval requests through canUseTool", async () => {
+    resetFakeCloud();
+    FakeCloudSocket.scenario = "approval";
+    const requests: RecordedRequest[] = [];
+    const decisions: Array<{ toolName: string; input: Record<string, unknown> }> = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { pollIntervalMs: 1, readyTimeoutMs: 50 },
+    });
+
+    const session = client.resumeSession("agent-1", {
+      canUseTool: (toolName, input) => {
+        decisions.push({ toolName, input });
+        return { behavior: "allow" };
+      },
+    });
+
+    const result = await session.runTurn("run pwd");
+
+    expect(result).toMatchObject({ success: true, result: "approved" });
+    expect(decisions).toEqual([{ toolName: "Bash", input: { command: "pwd" } }]);
+    const approvalCommand = FakeCloudSocket.instances[0]!.sent.find((command) => {
+      const payload = command.payload as Record<string, unknown> | undefined;
+      return command.type === "input" && payload?.kind === "approval_response";
+    });
+    expect(approvalCommand).toMatchObject({
+      payload: {
+        kind: "approval_response",
+        request_id: "approval-1",
+        decision: { behavior: "allow", updatedInput: null, updatedPermissions: [] },
+      },
+    });
+
+    session.close();
+  });
+});

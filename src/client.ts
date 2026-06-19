@@ -3,6 +3,12 @@ import {
   AppServerSession,
   assertRemoteSessionOptionsSupported,
 } from "./app-server-session.js";
+import {
+  CloudEnvironmentSession,
+  assertCloudSessionOptionsSupported,
+  createCloudAgent,
+  validateCloudClientOptions,
+} from "./cloud-session.js";
 import type {
   CreateAgentOptions,
   CreateSessionOptions,
@@ -12,6 +18,7 @@ import type {
   LettaCodeEnvironment,
   LettaCodeRemoteClientOptions,
   LettaCodeLocalClientOptions,
+  LettaCodeCloudClientOptions,
   LettaCodeSession,
   SDKResultMessage,
   SendMessage,
@@ -63,8 +70,8 @@ function looksLikeConversationId(id: string): boolean {
  * `local` spawns an SDK-owned Letta Code app-server and speaks the websocket
  * protocol by default, with an explicit stdio fallback for legacy flows.
  * `remote` connects to a user-managed Letta Code app-server websocket endpoint.
- * `cloud` remains a typed placeholder for the upcoming Letta Cloud /
- * Constellation transport.
+ * `cloud` creates/refreshes Letta Cloud agent sandboxes and controls them over
+ * the Remote Client websocket protocol.
  */
 export class LettaCodeClient {
   readonly backend: LettaCodeBackend;
@@ -125,6 +132,10 @@ export class LettaCodeClient {
         throw new Error("Invalid requestTimeoutMs. Expected a positive integer.");
       }
     }
+
+    if (this.backend === "cloud") {
+      validateCloudClientOptions(options as LettaCodeCloudClientOptions);
+    }
   }
 
   /**
@@ -150,6 +161,9 @@ export class LettaCodeClient {
       const initMsg = await session.initialize();
       session.close();
       return initMsg.agentId;
+    }
+    if (this.backend === "cloud") {
+      return createCloudAgent(this.cloudOptions(), options);
     }
     this.assertLocalBackend("createAgent");
     if (!this.useLegacyLocalStdio()) {
@@ -199,6 +213,19 @@ export class LettaCodeClient {
         options: resolvedOptions,
       });
     }
+    if (this.backend === "cloud") {
+      if (!agentId) {
+        throw new Error(
+          "Cloud backend createSession() requires an agent id. Call createAgent() first or pass an agent id.",
+        );
+      }
+      return new CloudEnvironmentSession(this.cloudOptions(), {
+        kind: "session",
+        agentId,
+        newConversation: true,
+        options: resolvedOptions,
+      });
+    }
     if (!this.useLegacyLocalStdio() && agentId) {
       return new AppServerSession(this.localAppServerOptions(), {
         kind: "session",
@@ -236,6 +263,21 @@ export class LettaCodeClient {
         });
       }
       return new AppServerSession(this.remoteOptions(), {
+        kind: "session",
+        agentId: id,
+        defaultConversation: true,
+        options,
+      });
+    }
+    if (this.backend === "cloud") {
+      if (looksLikeConversationId(id)) {
+        return new CloudEnvironmentSession(this.cloudOptions(), {
+          kind: "session",
+          conversationId: id,
+          options,
+        });
+      }
+      return new CloudEnvironmentSession(this.cloudOptions(), {
         kind: "session",
         agentId: id,
         defaultConversation: true,
@@ -315,6 +357,10 @@ export class LettaCodeClient {
       assertRemoteSessionOptionsSupported(action, options);
       return;
     }
+    if (this.backend === "cloud") {
+      assertCloudSessionOptionsSupported(action, options);
+      return;
+    }
     throw new Error(
       `LettaCodeClient backend '${this.backend}' is not implemented yet. ${action} currently supports backend 'local' only.`,
     );
@@ -346,5 +392,12 @@ export class LettaCodeClient {
       throw new Error("Remote options requested for non-remote backend.");
     }
     return this.options as LettaCodeRemoteClientOptions;
+  }
+
+  private cloudOptions(): LettaCodeCloudClientOptions {
+    if (this.backend !== "cloud") {
+      throw new Error("Cloud options requested for non-cloud backend.");
+    }
+    return this.options as LettaCodeCloudClientOptions;
   }
 }

@@ -263,7 +263,7 @@ export type AnyAgentTool = AgentTool<any, unknown>;
  *
  * - local: spawn/manage a local Letta Code app-server over loopback websockets.
  * - remote: connect to a user-managed app-server over websockets.
- * - cloud: connect through Letta Cloud/Constellation. Placeholder for now.
+ * - cloud: manage Letta Cloud agent sandboxes and control them over the Remote Client websocket.
  */
 export type LettaCodeBackend = "local" | "remote" | "cloud";
 
@@ -271,10 +271,40 @@ export type LettaCodeBackend = "local" | "remote" | "cloud";
  * Stable execution target for remote/cloud runtimes.
  *
  * Strings are treated as human-readable environment names. Object forms allow
- * callers to avoid relying on names as unique identifiers once backend support
- * is implemented.
+ * callers to avoid relying on names as unique identifiers.
  */
-export type LettaCodeEnvironment = string | { name: string } | { id: string };
+export type LettaCodeEnvironment =
+  | string
+  | { name: string }
+  | { id: string }
+  | { connectionId: string }
+  | { deviceId: string }
+  | { lastUsed: true };
+
+export type LettaCodeCloudSandboxLifecycle = "ephemeral" | "keep-warm" | "external";
+
+export interface LettaCodeCloudSandboxOptions {
+  /**
+   * Sandbox ownership policy.
+   *
+   * - ephemeral: SDK creates a sandbox and terminates it on close.
+   * - keep-warm: SDK creates/refreshes a sandbox and leaves it warm on close.
+   * - external: SDK attaches to the configured environment without creating a sandbox.
+   *
+   * Defaults to ephemeral when no environment is supplied, otherwise external.
+   */
+  lifecycle?: LettaCodeCloudSandboxLifecycle;
+  /** Keepalive/autostop TTL in minutes for SDK-managed sandboxes. Cloud accepts 1-60. */
+  ttlMinutes?: number;
+  /** Timeout waiting for the created sandbox's environment connection to come online. */
+  readyTimeoutMs?: number;
+  /** Poll interval while waiting for the created sandbox's connectionId. */
+  pollIntervalMs?: number;
+  /** Refresh sandbox TTL before each turn. Defaults to true for SDK-managed sandboxes. */
+  refreshOnTurn?: boolean;
+  /** Override close cleanup behavior. Defaults true for ephemeral, false otherwise. */
+  terminateOnClose?: boolean;
+}
 
 export interface LettaCodeLocalAppServerOptions {
   /**
@@ -323,6 +353,23 @@ export interface LettaCodeCloudClientOptions {
   apiKey?: string;
   /** Optional API base URL override. Defaults to Letta Cloud. */
   apiBaseUrl?: string;
+  /** Optional extra HTTP headers for Cloud API requests. */
+  headers?: Record<string, string>;
+  /** Optional fetch implementation for tests/non-standard runtimes. */
+  fetch?: typeof fetch;
+  /** Optional WebSocket constructor for non-browser runtimes and tests. */
+  WebSocket?: LettaCodeSocketConstructor;
+  /** Timeout for cloud websocket request/turn correlation. */
+  requestTimeoutMs?: number;
+  /**
+   * WebSocket authentication style. Defaults to Authorization headers; set to
+   * query for browser-style clients that cannot send WebSocket headers.
+   */
+  webSocketAuth?: "header" | "query";
+  /** Heartbeat interval for the Cloud status websocket. Defaults to 30s. */
+  pingIntervalMs?: number;
+  /** Cloud agent sandbox lifecycle options. */
+  sandbox?: LettaCodeCloudSandboxOptions;
   /** Optional default execution target, overridable at session creation. */
   environment?: LettaCodeEnvironment;
 }
