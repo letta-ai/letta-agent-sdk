@@ -2,7 +2,7 @@
  * SDK Types
  *
  * These are the public-facing types for SDK consumers.
- * Protocol types are imported from @letta-ai/letta-code/protocol.
+ * Protocol types are defined locally to avoid relying on broken package subpath exports.
  */
 
 // Re-export protocol types for internal use
@@ -22,10 +22,10 @@ export type {
   // Configuration types
   SystemPromptPresetConfig,
   CreateBlock,
-} from "@letta-ai/letta-code/protocol";
+} from "./protocol.js";
 
 // Import types for use in this file
-import type { CreateBlock, CanUseToolResponse } from "@letta-ai/letta-code/protocol";
+import type { CreateBlock, CanUseToolResponse } from "./protocol.js";
 
 export interface LettaCodeSocketLike {
   readyState: number;
