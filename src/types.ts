@@ -27,6 +27,19 @@ export type {
 // Import types for use in this file
 import type { CreateBlock, CanUseToolResponse } from "./protocol.js";
 
+export interface LettaCodeSocketLike {
+  readyState: number;
+  send(data: string): void;
+  close(): void;
+  addEventListener?(type: string, listener: (event: unknown) => void): void;
+  removeEventListener?(type: string, listener: (event: unknown) => void): void;
+  on?(type: string, listener: (event: unknown) => void): void;
+  off?(type: string, listener: (event: unknown) => void): void;
+  once?(type: string, listener: (event: unknown) => void): void;
+}
+
+export type LettaCodeSocketConstructor = new (url: string) => LettaCodeSocketLike;
+
 // ═══════════════════════════════════════════════════════════════
 // MESSAGE CONTENT TYPES (for multimodal support)
 // ═══════════════════════════════════════════════════════════════
@@ -241,8 +254,8 @@ export type AnyAgentTool = AgentTool<any, unknown>;
 /**
  * How the SDK reaches or runs the Letta Code harness.
  *
- * - local: spawn/manage a local Letta Code subprocess and speak stdio.
- * - remote: connect to a user-managed app-server. Placeholder for now.
+ * - local: spawn/manage a local Letta Code app-server over loopback websockets.
+ * - remote: connect to a user-managed app-server over websockets.
  * - cloud: connect through Letta Cloud/Constellation. Placeholder for now.
  */
 export type LettaCodeBackend = "local" | "remote" | "cloud";
@@ -256,14 +269,41 @@ export type LettaCodeBackend = "local" | "remote" | "cloud";
  */
 export type LettaCodeEnvironment = string | { name: string } | { id: string };
 
+export interface LettaCodeLocalAppServerOptions {
+  /**
+   * Optional URL for tests or advanced users with a pre-started local app-server.
+   * Omit to let the SDK spawn and own a loopback app-server.
+   */
+  url?: string;
+  /** Optional WebSocket constructor for tests/non-standard runtimes. */
+  WebSocket?: LettaCodeSocketConstructor;
+  /** Timeout for app-server request/turn correlation. */
+  requestTimeoutMs?: number;
+  /** Local app-server listen URL when the SDK spawns it. Defaults to ws://127.0.0.1:0. */
+  listen?: string;
+  /** Timeout waiting for the spawned app-server to print its listening URL. */
+  startupTimeoutMs?: number;
+}
+
 export interface LettaCodeLocalClientOptions {
   backend?: "local";
+  /**
+   * Local transport. Defaults to app-server. Set to "stdio" for the legacy
+   * subprocess JSON transport fallback.
+   */
+  transport?: "app-server" | "stdio";
+  /** Advanced app-server overrides for local transport. */
+  appServer?: LettaCodeLocalAppServerOptions;
 }
 
 export interface LettaCodeRemoteClientOptions {
   backend: "remote";
   /** URL of the user-managed app-server / websocket endpoint. */
   url: string;
+  /** Optional WebSocket constructor for non-browser runtimes and tests. */
+  WebSocket?: LettaCodeSocketConstructor;
+  /** Timeout for app-server request/turn correlation. Defaults to app-server client default. */
+  requestTimeoutMs?: number;
   /** Optional default execution target, overridable at session creation. */
   environment?: LettaCodeEnvironment;
 }
@@ -460,6 +500,22 @@ export interface CreateSessionOptions {
  */
 export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
   environment?: LettaCodeEnvironment;
+}
+
+export interface LettaCodeSession extends AsyncDisposable {
+  initialize(): Promise<SDKInitMessage>;
+  send(message: SendMessage): Promise<void>;
+  runTurn(message: SendMessage, options?: RunTurnOptions): Promise<SDKResultMessage>;
+  stream(): AsyncGenerator<SDKMessage>;
+  recoverPendingApprovals(
+    options?: RecoverPendingApprovalsOptions,
+  ): Promise<RecoverPendingApprovalsResult>;
+  listMessages(options?: ListMessagesOptions): Promise<ListMessagesResult>;
+  bootstrapState(options?: BootstrapStateOptions): Promise<BootstrapStateResult>;
+  close(): void;
+  readonly agentId: string | null;
+  readonly sessionId: string | null;
+  readonly conversationId: string | null;
 }
 
 /**
