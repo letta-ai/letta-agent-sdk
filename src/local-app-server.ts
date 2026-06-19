@@ -10,6 +10,7 @@ export interface StartLocalAppServerOptions {
   listen?: string;
   startupTimeoutMs?: number;
   cliPath?: string;
+  env?: Record<string, string | undefined>;
 }
 
 const DEFAULT_LISTEN_URL = "ws://127.0.0.1:0";
@@ -48,7 +49,7 @@ export function startLocalAppServer(
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
+      env: { ...process.env, ...(options.env ?? {}) },
     });
 
     let settled = false;

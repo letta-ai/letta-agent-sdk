@@ -2,20 +2,28 @@ import {
   isHeadlessAutoAllowTool,
   requiresRuntimeUserInput,
 } from "./interactiveToolPolicy.js";
+import { AppServerSession, type AppServerSessionOptions } from "./app-server-session.js";
 import {
   RemoteEnvironmentClient,
   type RemoteEnvironmentConnection,
   type RemoteEnvironmentTarget,
 } from "./remote.js";
+import {
+  RemoteClientSessionCore,
+  normalizeSendMessage,
+  type ProtocolMessage,
+  type RemoteClientRuntimeController,
+  type RuntimeScope,
+  type RuntimeSessionInit,
+  type RuntimeSessionMode,
+  type RuntimeTurnResult,
+} from "./remote-client-session-core.js";
 import type {
-  BootstrapStateOptions,
-  BootstrapStateResult,
   CanUseToolResponse,
   CreateAgentOptions,
   LettaCodeClientSessionOptions,
   LettaCodeCloudClientOptions,
   LettaCodeEnvironment,
-  LettaCodeSession,
   LettaCodeSocketConstructor,
   LettaCodeSocketLike,
   ListMessagesOptions,
@@ -23,11 +31,7 @@ import type {
   MessageContentItem,
   RecoverPendingApprovalsOptions,
   RecoverPendingApprovalsResult,
-  RunTurnOptions,
   SDKErrorCode,
-  SDKInitMessage,
-  SDKMessage,
-  SDKResultMessage,
   SendMessage,
 } from "./types.js";
 
@@ -38,32 +42,14 @@ const DEFAULT_SANDBOX_READY_TIMEOUT_MS = 120_000;
 const DEFAULT_SANDBOX_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_PING_INTERVAL_MS = 30_000;
 const SDK_AGENT_ORIGIN = "@letta-ai/letta-code-sdk";
-const SDK_AGENT_ORIGIN_TAG = "origin:letta-code";
-const FAILURE_STOP_REASONS = new Set(["error", "llm_api_error", "max_steps", "interrupted"]);
-const KNOWN_SDK_ERROR_CODES = new Set<SDKErrorCode>([
-  "approval_conflict",
-  "approval_conflict_terminal",
-  "protocol_error",
-  "error",
-  "llm_api_error",
-  "max_steps",
-  "interrupted",
-  "stream_closed",
-]);
 
 type FetchLike = typeof fetch;
 
-type RuntimeScope = {
-  agent_id: string;
-  conversation_id: string;
-};
-
-type CloudStatusMessage = Record<string, unknown> & {
-  type?: unknown;
+type CloudStatusMessage = ProtocolMessage & {
+  type: string;
   seq?: unknown;
   event_seq?: unknown;
   idempotency_key?: unknown;
-  request_id?: unknown;
   runId?: unknown;
   run_id?: unknown;
   stopReason?: unknown;
@@ -72,7 +58,9 @@ type CloudStatusMessage = Record<string, unknown> & {
   conversationId?: unknown;
   agent_id?: unknown;
   agentId?: unknown;
-  runtime?: RuntimeScope;
+  request?: unknown;
+  loop_status?: unknown;
+  delta?: unknown;
 };
 
 type CloudConversation = Record<string, unknown> & {
@@ -109,16 +97,7 @@ type PendingResponse = {
   timer: ReturnType<typeof setTimeout>;
 };
 
-type CloudSessionMode =
-  | { kind: "create-agent"; options: CreateAgentOptions }
-  | {
-      kind: "session";
-      agentId?: string;
-      conversationId?: string;
-      newConversation?: boolean;
-      defaultConversation?: boolean;
-      options: LettaCodeClientSessionOptions;
-    };
+type CloudSessionMode = RuntimeSessionMode;
 
 type ResolvedSandboxPolicy = {
   lifecycle: "ephemeral" | "keep-warm" | "external";
@@ -135,6 +114,11 @@ type CloudUserMessage = {
   client_message_id: string;
   otid?: string;
 };
+
+type ResolveToolApproval = (
+  toolName: string,
+  toolInput: Record<string, unknown>,
+) => Promise<CanUseToolResponse>;
 
 function getDefaultApiKey(): string | undefined {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } })
@@ -202,103 +186,6 @@ function cloudWebSocketHeaders(options: LettaCodeCloudClientOptions): Record<str
   return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
-function includeSdkAgentOriginTag(tags: string[] | undefined): string[] {
-  const normalizedTags: string[] = [];
-  let hasOriginTag = false;
-
-  for (const tag of tags ?? []) {
-    if (tag === SDK_AGENT_ORIGIN_TAG) {
-      if (hasOriginTag) continue;
-      hasOriginTag = true;
-    }
-    normalizedTags.push(tag);
-  }
-
-  if (!hasOriginTag) normalizedTags.push(SDK_AGENT_ORIGIN_TAG);
-  return normalizedTags;
-}
-
-function isPresetSystemPrompt(value: string): boolean {
-  return [
-    "default",
-    "letta-claude",
-    "letta-codex",
-    "letta-gemini",
-    "claude",
-    "codex",
-    "gemini",
-  ].includes(value);
-}
-
-function normalizeMemoryBlock(block: Record<string, unknown>): Record<string, unknown> {
-  const normalized = { ...block };
-  if (normalized.value === undefined && typeof normalized.content === "string") {
-    normalized.value = normalized.content;
-  }
-  return normalized;
-}
-
-function createCloudAgentBody(options: CreateAgentOptions): Record<string, unknown> {
-  if (options.cwd !== undefined || options.permissionMode !== undefined || options.canUseTool !== undefined) {
-    throw new Error("Cloud createAgent() creates the agent record only. Pass cwd, permissionMode, and canUseTool to createSession()/resumeSession() so they can be sent to the Remote Client device.");
-  }
-  if (options.tools !== undefined && options.tools.length > 0) {
-    throw new Error("Cloud createAgent() creates the agent record only. Pass SDK-hosted tools to createSession()/resumeSession() once they are wired through Remote Client control responses.");
-  }
-  if (options.allowedTools !== undefined || options.disallowedTools !== undefined) {
-    throw new Error("Cloud createAgent() cannot persist allowedTools/disallowedTools in the Cloud agent REST payload yet. Configure tool filters on the execution session once the Remote Client toolset command is wired.");
-  }
-  if (options.skillSources !== undefined) {
-    throw new Error("Cloud createAgent() cannot persist skillSources in the Cloud agent REST payload yet. Configure skill sources on the execution session once the Remote Client skills command is wired.");
-  }
-  if (options.systemInfoReminder !== undefined) {
-    throw new Error("Cloud createAgent() cannot persist systemInfoReminder in the Cloud agent REST payload yet.");
-  }
-  if (options.sleeptime !== undefined) {
-    throw new Error("Cloud createAgent() cannot persist sleeptime settings in the Cloud agent REST payload yet.");
-  }
-  if (options.memfs !== undefined) {
-    throw new Error("Cloud createAgent() does not change device MemFS state. Pass memfs options to createSession()/resumeSession() so they can be sent to the Remote Client device.");
-  }
-
-  const body: Record<string, unknown> = {
-    tags: includeSdkAgentOriginTag(options.tags),
-  };
-
-  if (options.model !== undefined) body.model = options.model;
-  if (options.embedding !== undefined) body.embedding = options.embedding;
-
-  if (options.systemPrompt !== undefined) {
-    if (typeof options.systemPrompt === "string") {
-      if (isPresetSystemPrompt(options.systemPrompt)) {
-        throw new Error("Cloud createAgent() cannot expand SDK system prompt presets in the Cloud REST agent payload yet. Pass a custom system prompt string or omit systemPrompt.");
-      }
-      body.system = options.systemPrompt;
-    } else {
-      throw new Error("Cloud createAgent() cannot expand SDK system prompt preset objects in the Cloud REST agent payload yet. Pass a custom system prompt string or omit systemPrompt.");
-    }
-  }
-
-  const memoryBlocks: Array<Record<string, unknown>> = [];
-  const blockIds: string[] = [];
-  for (const item of options.memory ?? []) {
-    if (typeof item === "string") {
-      throw new Error("Cloud createAgent() cannot expand memory preset names in the Cloud REST agent payload yet. Pass explicit memory blocks or block ids.");
-    }
-    if ("blockId" in item) {
-      blockIds.push(item.blockId);
-    } else {
-      memoryBlocks.push(normalizeMemoryBlock(item as unknown as Record<string, unknown>));
-    }
-  }
-  if (options.persona !== undefined) memoryBlocks.push({ label: "persona", value: options.persona });
-  if (options.human !== undefined) memoryBlocks.push({ label: "human", value: options.human });
-  if (memoryBlocks.length > 0) body.memory_blocks = memoryBlocks;
-  if (blockIds.length > 0) body.block_ids = blockIds;
-
-  return body;
-}
-
 async function parseJsonResponse(response: Response): Promise<unknown> {
   const text = await response.text();
   if (!text) return null;
@@ -344,6 +231,8 @@ function validateTtlMinutes(value: number | undefined): void {
 
 export function validateCloudClientOptions(options: LettaCodeCloudClientOptions): void {
   validatePositiveInteger(options.requestTimeoutMs, "requestTimeoutMs");
+  validatePositiveInteger(options.appServer?.requestTimeoutMs, "appServer.requestTimeoutMs");
+  validatePositiveInteger(options.appServer?.startupTimeoutMs, "appServer.startupTimeoutMs");
   validateTtlMinutes(options.sandbox?.ttlMinutes);
   validatePositiveInteger(options.sandbox?.readyTimeoutMs, "sandbox.readyTimeoutMs");
   validatePositiveInteger(options.sandbox?.pollIntervalMs, "sandbox.pollIntervalMs");
@@ -463,6 +352,9 @@ function messageEventData(event: unknown): string | null {
     if (data instanceof ArrayBuffer) {
       return new TextDecoder().decode(data);
     }
+    if (data instanceof Uint8Array) {
+      return new TextDecoder().decode(data);
+    }
   }
   return null;
 }
@@ -491,21 +383,6 @@ function promiseWithTimeout<T>(
   });
 }
 
-function toSdkErrorCode(value: string | null | undefined): SDKErrorCode | undefined {
-  if (!value || value.length === 0) return undefined;
-  return KNOWN_SDK_ERROR_CODES.has(value as SDKErrorCode)
-    ? (value as SDKErrorCode)
-    : undefined;
-}
-
-function mapPermissionMode(mode: LettaCodeClientSessionOptions["permissionMode"]): string | undefined {
-  if (mode === undefined || mode === "default") return undefined;
-  if (mode === "acceptEdits") return "acceptEdits";
-  if (mode === "bypassPermissions") return "unrestricted";
-  if (mode === "plan") return "memory";
-  return undefined;
-}
-
 function generateClientMessageId(): string {
   if (globalThis.crypto?.randomUUID) {
     return globalThis.crypto.randomUUID();
@@ -514,86 +391,12 @@ function generateClientMessageId(): string {
 }
 
 function toCloudUserMessage(input: SendMessage, clientMessageId: string): CloudUserMessage {
-  if (typeof input === "string") {
-    return {
-      role: "user",
-      content: input,
-      client_message_id: clientMessageId,
-      otid: clientMessageId,
-    };
-  }
-
   return {
     role: "user",
-    content: input,
+    content: normalizeSendMessage(input),
     client_message_id: clientMessageId,
     otid: clientMessageId,
   };
-}
-
-function extractTextFromContent(content: unknown): string | null {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    const pieces: string[] = [];
-    for (const part of content) {
-      if (typeof part === "string") {
-        pieces.push(part);
-        continue;
-      }
-      if (part && typeof part === "object") {
-        const record = part as Record<string, unknown>;
-        if (typeof record.text === "string") {
-          pieces.push(record.text);
-        }
-      }
-    }
-    const joined = pieces.join("");
-    return joined.length > 0 ? joined : null;
-  }
-  if (content && typeof content === "object") {
-    const record = content as Record<string, unknown>;
-    if (typeof record.text === "string") return record.text;
-  }
-  return null;
-}
-
-function toolInputFromArguments(args: unknown): { input: Record<string, unknown>; raw?: string } {
-  if (args && typeof args === "object" && !Array.isArray(args)) {
-    return { input: args as Record<string, unknown> };
-  }
-  const raw = typeof args === "string" ? args : "";
-  if (!raw) return { input: {} };
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return { input: parsed as Record<string, unknown>, raw };
-    }
-  } catch {
-    // Fall through to raw wrapper.
-  }
-  return { input: { raw }, raw };
-}
-
-function firstToolCall(delta: Record<string, unknown>): Record<string, unknown> | undefined {
-  const toolCalls = delta.tool_calls;
-  if (Array.isArray(toolCalls)) {
-    const first = toolCalls[0];
-    return first && typeof first === "object" ? (first as Record<string, unknown>) : undefined;
-  }
-  if (toolCalls && typeof toolCalls === "object") {
-    return toolCalls as Record<string, unknown>;
-  }
-  const toolCall = delta.tool_call;
-  return toolCall && typeof toolCall === "object" ? (toolCall as Record<string, unknown>) : undefined;
-}
-
-function firstToolReturn(delta: Record<string, unknown>): Record<string, unknown> | undefined {
-  const toolReturns = delta.tool_returns;
-  if (Array.isArray(toolReturns)) {
-    const first = toolReturns[0];
-    return first && typeof first === "object" ? (first as Record<string, unknown>) : undefined;
-  }
-  return undefined;
 }
 
 function isRuntimeMatch(message: CloudStatusMessage, runtime: RuntimeScope): boolean {
@@ -653,27 +456,43 @@ function isCloudAgentSandbox(value: unknown): value is CloudAgentSandbox {
   );
 }
 
+function cloudHarnessAppServerOptions(
+  clientOptions: LettaCodeCloudClientOptions,
+): AppServerSessionOptions {
+  const appServer = clientOptions.appServer;
+  const apiKey = getCloudApiKey(clientOptions);
+  const localEnv: Record<string, string | undefined> = {
+    ...(apiKey ? { LETTA_API_KEY: apiKey } : {}),
+    ...(clientOptions.apiBaseUrl
+      ? { LETTA_BASE_URL: normalizeCloudApiBaseUrl(clientOptions.apiBaseUrl) }
+      : {}),
+  };
+  return {
+    local: appServer?.url === undefined,
+    ...(appServer?.url !== undefined ? { url: appServer.url } : {}),
+    ...(appServer?.WebSocket !== undefined ? { WebSocket: appServer.WebSocket } : {}),
+    ...(clientOptions.requestTimeoutMs !== undefined || appServer?.requestTimeoutMs !== undefined
+      ? { requestTimeoutMs: appServer?.requestTimeoutMs ?? clientOptions.requestTimeoutMs }
+      : {}),
+    ...(appServer?.listen !== undefined ? { localListen: appServer.listen } : {}),
+    ...(appServer?.startupTimeoutMs !== undefined
+      ? { localStartupTimeoutMs: appServer.startupTimeoutMs }
+      : {}),
+    ...(Object.keys(localEnv).length > 0 ? { localEnv } : {}),
+  };
+}
+
 export async function createCloudAgent(
   clientOptions: LettaCodeCloudClientOptions,
   agentOptions: CreateAgentOptions,
 ): Promise<string> {
-  const fetchImpl = getFetch(clientOptions.fetch);
-  const baseUrl = normalizeCloudApiBaseUrl(clientOptions.apiBaseUrl);
-  const response = await fetchImpl(`${baseUrl}/v1/agents/`, {
-    method: "POST",
-    headers: cloudHeaders(clientOptions),
-    body: JSON.stringify(createCloudAgentBody(agentOptions)),
+  const session = new AppServerSession(cloudHarnessAppServerOptions(clientOptions), {
+    kind: "create-agent",
+    options: agentOptions,
   });
-  const body = await parseJsonResponse(response);
-  assertOkResponse(response, body, "Cloud createAgent()");
-  const agentId =
-    body && typeof body === "object" && typeof (body as { id?: unknown }).id === "string"
-      ? (body as { id: string }).id
-      : undefined;
-  if (!agentId) {
-    throw new Error("Cloud createAgent() response did not include an agent id.");
-  }
-  return agentId;
+  const initMsg = await session.initialize();
+  session.close();
+  return initMsg.agentId;
 }
 
 export function assertCloudSessionOptionsSupported(
@@ -709,201 +528,203 @@ export function assertCloudSessionOptionsSupported(
   }
 }
 
-export class CloudEnvironmentSession implements LettaCodeSession {
-  private ws: LettaCodeSocketLike | null = null;
+async function listCloudMessages(
+  cloudOptions: LettaCodeCloudClientOptions,
+  conversationId: string,
+  options: ListMessagesOptions = {},
+): Promise<ListMessagesResult> {
+  const fetchImpl = getFetch(cloudOptions.fetch);
+  const baseUrl = normalizeCloudApiBaseUrl(cloudOptions.apiBaseUrl);
+  const url = new URL(`${baseUrl}/v1/conversations/${encodeURIComponent(conversationId)}/messages`);
+  if (options.before !== undefined) url.searchParams.set("before", options.before);
+  if (options.after !== undefined) url.searchParams.set("after", options.after);
+  if (options.order !== undefined) url.searchParams.set("order", options.order);
+  if (options.limit !== undefined) url.searchParams.set("limit", String(options.limit));
+
+  const response = await fetchImpl(url, { headers: cloudHeaders(cloudOptions) });
+  const body = await parseJsonResponse(response);
+  assertOkResponse(response, body, "Cloud listMessages()");
+
+  const messages = Array.isArray(body)
+    ? body
+    : body && typeof body === "object" && Array.isArray((body as { messages?: unknown }).messages)
+      ? ((body as { messages: unknown[] }).messages)
+      : body && typeof body === "object" && Array.isArray((body as { data?: unknown }).data)
+        ? ((body as { data: unknown[] }).data)
+        : [];
+  const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  return {
+    messages,
+    nextBefore:
+      typeof record.nextBefore === "string"
+        ? record.nextBefore
+        : typeof record.next_before === "string"
+          ? record.next_before
+          : null,
+    hasMore:
+      typeof record.hasMore === "boolean"
+        ? record.hasMore
+        : typeof record.has_more === "boolean"
+          ? record.has_more
+          : false,
+  };
+}
+
+class CloudStatusRuntimeController implements RemoteClientRuntimeController {
+  private ws: LettaCodeSocketLike;
   private removeSocketHandlers: Array<() => void> = [];
-  private runtime: RuntimeScope | null = null;
-  private connectionId: string | null = null;
-  private sandbox: CloudAgentSandbox | null = null;
-  private sandboxPolicy: ResolvedSandboxPolicy | null = null;
-  private initialized = false;
-  private closed = false;
-  private streamQueue: SDKMessage[] = [];
-  private streamResolvers: Array<(msg: SDKMessage | null) => void> = [];
+  private messageHandlers = new Set<(message: ProtocolMessage, channel?: string) => void>();
   private pendingTurn: PendingTurn | null = null;
   private pendingResponses = new Map<string, PendingResponse>();
-  private activeTurn: Promise<void> | null = null;
-  private activeTurnStartedAt = 0;
-  private activeTurnAssistantText = "";
-  private messageCounter = 0;
   private requestCounter = 0;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private lastEventSeq: number | null = null;
   private seenIdempotencyKeys = new Set<string>();
-  private _agentId: string | null = null;
-  private _sessionId: string | null = null;
-  private _conversationId: string | null = null;
-  private _model = "";
+  private closed = false;
 
-  constructor(
+  private constructor(
+    ws: LettaCodeSocketLike,
     private readonly cloudOptions: LettaCodeCloudClientOptions,
-    private readonly mode: CloudSessionMode,
-  ) {}
+    private readonly runtime: RuntimeScope,
+    private readonly resolveToolApproval: ResolveToolApproval,
+  ) {
+    this.ws = ws;
+  }
 
-  async initialize(): Promise<SDKInitMessage> {
-    if (this.initialized) {
-      throw new Error("Session already initialized");
-    }
-    if (this.closed) {
-      throw new Error("Session is closed");
-    }
-
-    const resolved = await this.resolveRuntime();
-    this.runtime = resolved.runtime;
-    this._agentId = resolved.runtime.agent_id;
-    this._conversationId = resolved.runtime.conversation_id;
-    this._sessionId = `${resolved.runtime.agent_id}:${resolved.runtime.conversation_id}`;
-
-    const connection = await this.resolveConnection(resolved.runtime);
-    this.connectionId = connection.connectionId;
-
-    const apiKey = getCloudApiKey(this.cloudOptions);
-    const authMode = this.cloudOptions.webSocketAuth ?? "header";
+  static async connect(params: {
+    cloudOptions: LettaCodeCloudClientOptions;
+    runtime: RuntimeScope;
+    connectionId: string;
+    resolveToolApproval: ResolveToolApproval;
+  }): Promise<CloudStatusRuntimeController> {
+    const apiKey = getCloudApiKey(params.cloudOptions);
+    const authMode = params.cloudOptions.webSocketAuth ?? "header";
     const url = buildCloudStatusWebSocketUrl({
-      apiBaseUrl: this.cloudOptions.apiBaseUrl,
-      connectionId: connection.connectionId,
-      agentId: resolved.runtime.agent_id,
-      conversationId: resolved.runtime.conversation_id,
+      apiBaseUrl: params.cloudOptions.apiBaseUrl,
+      connectionId: params.connectionId,
+      agentId: params.runtime.agent_id,
+      conversationId: params.runtime.conversation_id,
       apiKey,
       authMode,
     });
-
-    const WebSocketCtor = getWebSocketConstructor(this.cloudOptions.WebSocket);
-    const socketHeaders = authMode === "header" ? cloudWebSocketHeaders(this.cloudOptions) : undefined;
+    const WebSocketCtor = getWebSocketConstructor(params.cloudOptions.WebSocket);
+    const socketHeaders = authMode === "header" ? cloudWebSocketHeaders(params.cloudOptions) : undefined;
     const socketOptions = socketHeaders ? { headers: socketHeaders } : undefined;
-    this.ws = new WebSocketCtor(url, socketOptions);
-    this.removeSocketHandlers.push(
-      addSocketListener(this.ws, "message", this.handleStatusEvent),
-      addSocketListener(this.ws, "close", this.handleSocketClose),
-      addSocketListener(this.ws, "error", this.handleSocketError),
+    const ws = new WebSocketCtor(url, socketOptions);
+    const controller = new CloudStatusRuntimeController(
+      ws,
+      params.cloudOptions,
+      params.runtime,
+      params.resolveToolApproval,
+    );
+    controller.removeSocketHandlers.push(
+      addSocketListener(ws, "message", controller.handleStatusEvent),
+      addSocketListener(ws, "close", controller.handleSocketClose),
+      addSocketListener(ws, "error", controller.handleSocketError),
     );
     await promiseWithTimeout(
-      waitForOpen(this.ws),
-      this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
+      waitForOpen(ws),
+      params.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
       "Timed out waiting for Cloud status websocket to open.",
     );
-    this.initialized = true;
-    this.startPing();
-
-    this.sendSync(true);
-    await this.applyPostInitializeOptions();
-
-    return {
-      type: "init",
-      agentId: resolved.runtime.agent_id,
-      sessionId: this._sessionId,
-      conversationId: resolved.runtime.conversation_id,
-      model: this._model,
-      tools: [],
-    };
+    controller.startPing();
+    return controller;
   }
 
-  async send(message: SendMessage): Promise<void> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-    if (!this.runtime) {
-      throw new Error("Session is not initialized");
-    }
-    if (this.activeTurn) {
-      throw new Error("A turn is already in flight for this cloud session");
-    }
-
-    await this.refreshSandboxForTurn();
-
-    this.streamQueue.length = 0;
-    this.activeTurnAssistantText = "";
-    this.activeTurnStartedAt = Date.now();
-    this.pendingTurn = this.createPendingTurn();
-
-    const pendingTurn = this.pendingTurn;
-    this.activeTurn = this.dispatchAndWaitForTurn(message, pendingTurn)
-      .catch((error) => {
-        const detail = error instanceof Error ? error.message : String(error);
-        this.enqueue({
-          type: "error",
-          message: detail,
-          errorCode: "error",
-          stopReason: "error",
-          errorDetail: detail,
-          recoverable: false,
-        });
-        this.enqueue({
-          type: "result",
-          success: false,
-          error: "error",
-          errorCode: "error",
-          recoverable: false,
-          errorDetail: detail,
-          durationMs: Date.now() - this.activeTurnStartedAt,
-          conversationId: this._conversationId,
-          runIds: Array.from(pendingTurn.runIds),
-        });
-      })
-      .finally(() => {
-        this.pendingTurn = null;
-        this.activeTurn = null;
-      });
+  onMessage(handler: (message: ProtocolMessage, channel?: string) => void): () => void {
+    this.messageHandlers.add(handler);
+    return () => this.messageHandlers.delete(handler);
   }
 
-  async runTurn(
+  send(command: Record<string, unknown>): void {
+    if (!this.ws || this.ws.readyState !== 1) {
+      throw new Error("Cloud status websocket is not open.");
+    }
+    this.ws.send(JSON.stringify(command));
+  }
+
+  request(
+    type: string,
+    body: Record<string, unknown>,
+    options: { timeoutMs?: number; predicate?: (message: ProtocolMessage) => boolean } = {},
+  ): Promise<ProtocolMessage> {
+    const requestId = typeof body.request_id === "string"
+      ? body.request_id
+      : this.nextRequestId(type.replace(/_/g, "-"));
+    const predicate = options.predicate ?? ((message: ProtocolMessage) => message.request_id === requestId);
+    const promise = this.waitForResponse(
+      requestId,
+      (message) => predicate(message),
+      options.timeoutMs ?? this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
+    );
+    this.send({
+      type,
+      request_id: requestId,
+      ...body,
+    });
+    return promise;
+  }
+
+  async runTurnMessage(
+    runtime: RuntimeScope,
     message: SendMessage,
-    _options: RunTurnOptions = {},
-  ): Promise<SDKResultMessage> {
-    await this.send(message);
-    for await (const msg of this.stream()) {
-      if (msg.type === "result") {
-        return msg;
-      }
+    options: { timeoutMs?: number } = {},
+  ): Promise<RuntimeTurnResult> {
+    if (this.pendingTurn) {
+      throw new Error(`A turn is already in flight for ${runtime.agent_id}/${runtime.conversation_id}`);
     }
-    return {
-      type: "result",
-      success: false,
-      error: "stream_closed",
-      errorCode: "stream_closed",
-      recoverable: false,
-      errorDetail: "Stream ended before terminal result",
-      durationMs: Date.now() - this.activeTurnStartedAt,
-      conversationId: this._conversationId,
-    };
-  }
+    const pendingTurn = this.createPendingTurn();
+    this.pendingTurn = pendingTurn;
 
-  async *stream(): AsyncGenerator<SDKMessage> {
-    while (true) {
-      const msg = await this.nextMessage();
-      if (!msg) break;
-      yield msg;
-      if (msg.type === "result") break;
+    try {
+      const clientMessageId = generateClientMessageId();
+      this.send({
+        type: "input",
+        request_id: this.nextRequestId("input"),
+        runtime,
+        payload: {
+          kind: "create_message",
+          messages: [toCloudUserMessage(message, clientMessageId)],
+          supports_control_response: true,
+          source: SDK_AGENT_ORIGIN,
+        },
+      });
+
+      const terminal = await promiseWithTimeout(
+        pendingTurn.terminalPromise,
+        options.timeoutMs ?? this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
+        "Timed out waiting for Cloud Remote Client turn result.",
+      );
+
+      return {
+        runtime,
+        success: terminal.success,
+        stopReason: terminal.stopReason ?? (terminal.success ? "end_turn" : "error"),
+        detail: terminal.detail,
+        errorCode: terminal.errorCode,
+        runIds: Array.from(pendingTurn.runIds),
+      };
+    } finally {
+      this.pendingTurn = null;
     }
   }
 
   async recoverPendingApprovals(
+    runtime: RuntimeScope,
     options: RecoverPendingApprovalsOptions = {},
   ): Promise<RecoverPendingApprovalsResult> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-    if (!this.runtime) {
-      throw new Error("Session is not initialized");
-    }
-
     this.sendSync(true);
-    const requestId = this.nextRequestId("recover-approvals");
-    const responsePromise = this.waitForResponse(
-      requestId,
-      (message) =>
-        message.type === "recover_pending_approvals_ack" ||
-        message.type === "recover_pending_approvals_response",
-      options.timeoutMs ?? this.cloudOptions.requestTimeoutMs ?? 30_000,
-    );
-    this.sendToDevice({
-      type: "recover_pending_approvals",
-      request_id: requestId,
-      runtime: this.runtime,
-    });
-
     try {
-      await responsePromise;
+      await this.request(
+        "recover_pending_approvals",
+        { runtime },
+        {
+          timeoutMs: options.timeoutMs ?? this.cloudOptions.requestTimeoutMs ?? 30_000,
+          predicate: (message) =>
+            message.type === "recover_pending_approvals_ack" ||
+            message.type === "recover_pending_approvals_response",
+        },
+      );
       return { recovered: true, pendingApproval: false, unsupported: false };
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
@@ -911,72 +732,11 @@ export class CloudEnvironmentSession implements LettaCodeSession {
     }
   }
 
-  async listMessages(options: ListMessagesOptions = {}): Promise<ListMessagesResult> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-    const conversationId = options.conversationId ?? this._conversationId;
-    if (!conversationId) {
-      throw new Error("No conversation id available for listMessages()");
-    }
-
-    const fetchImpl = getFetch(this.cloudOptions.fetch);
-    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
-    const url = new URL(`${baseUrl}/v1/conversations/${encodeURIComponent(conversationId)}/messages`);
-    if (options.before !== undefined) url.searchParams.set("before", options.before);
-    if (options.after !== undefined) url.searchParams.set("after", options.after);
-    if (options.order !== undefined) url.searchParams.set("order", options.order);
-    if (options.limit !== undefined) url.searchParams.set("limit", String(options.limit));
-
-    const response = await fetchImpl(url, { headers: cloudHeaders(this.cloudOptions) });
-    const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud listMessages()");
-
-    const messages = Array.isArray(body)
-      ? body
-      : body && typeof body === "object" && Array.isArray((body as { messages?: unknown }).messages)
-        ? ((body as { messages: unknown[] }).messages)
-        : body && typeof body === "object" && Array.isArray((body as { data?: unknown }).data)
-          ? ((body as { data: unknown[] }).data)
-          : [];
-    const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-    return {
-      messages,
-      nextBefore:
-        typeof record.nextBefore === "string"
-          ? record.nextBefore
-          : typeof record.next_before === "string"
-            ? record.next_before
-            : null,
-      hasMore:
-        typeof record.hasMore === "boolean"
-          ? record.hasMore
-          : typeof record.has_more === "boolean"
-            ? record.has_more
-            : false,
-    };
-  }
-
-  async bootstrapState(options: BootstrapStateOptions = {}): Promise<BootstrapStateResult> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-    const page = await this.listMessages({
-      limit: options.limit,
-      order: options.order,
-    });
-
-    return {
-      agentId: this._agentId ?? "",
-      conversationId: this._conversationId ?? "",
-      model: this._model,
-      tools: [],
-      memfsEnabled: this.currentOptions().memfs === true,
-      messages: page.messages,
-      nextBefore: page.nextBefore ?? null,
-      hasMore: page.hasMore ?? false,
-      hasPendingApproval: false,
-    };
+  listMessages(
+    conversationId: string,
+    options: ListMessagesOptions = {},
+  ): Promise<ListMessagesResult> {
+    return listCloudMessages(this.cloudOptions, conversationId, options);
   }
 
   close(): void {
@@ -990,36 +750,20 @@ export class CloudEnvironmentSession implements LettaCodeSession {
       remove();
     }
     this.ws?.close();
-    this.ws = null;
     for (const [requestId, pending] of this.pendingResponses) {
       clearTimeout(pending.timer);
       pending.reject(new Error(`Cloud websocket closed before ${requestId} response arrived`));
     }
     this.pendingResponses.clear();
-    this.resolveAll(null);
-
-    if (this.sandbox !== null && this.sandboxPolicy?.terminateOnClose === true && this._agentId) {
-      const agentId = this._agentId;
-      void this.terminateAgentSandbox(agentId).catch(() => {
-        // close() is intentionally synchronous; cleanup failures are ignored.
-      });
-    }
+    this.rejectActiveTurn(new Error("Cloud status websocket closed."));
   }
 
-  get agentId(): string | null {
-    return this._agentId;
-  }
-
-  get sessionId(): string | null {
-    return this._sessionId;
-  }
-
-  get conversationId(): string | null {
-    return this._conversationId;
-  }
-
-  async [Symbol.asyncDispose](): Promise<void> {
-    this.close();
+  sendSync(recoverApprovals: boolean): void {
+    this.send({
+      type: "sync",
+      runtime: this.runtime,
+      recover_approvals: recoverApprovals,
+    });
   }
 
   private createPendingTurn(): PendingTurn {
@@ -1035,57 +779,6 @@ export class CloudEnvironmentSession implements LettaCodeSession {
       terminalPromise,
       runIds: new Set<string>(),
       terminalResolved: false,
-    };
-  }
-
-  private async dispatchAndWaitForTurn(
-    message: SendMessage,
-    pendingTurn: PendingTurn,
-  ): Promise<void> {
-    if (!this.runtime) {
-      throw new Error("Session is not initialized");
-    }
-
-    const clientMessageId = generateClientMessageId();
-    this.sendToDevice({
-      type: "input",
-      request_id: this.nextRequestId("input"),
-      runtime: this.runtime,
-      payload: {
-        kind: "create_message",
-        messages: [toCloudUserMessage(message, clientMessageId)],
-        supports_control_response: true,
-        source: SDK_AGENT_ORIGIN,
-      },
-    });
-
-    const terminal = await promiseWithTimeout(
-      pendingTurn.terminalPromise,
-      this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
-      "Timed out waiting for Cloud Remote Client turn result.",
-    );
-
-    this.enqueue(this.resultFromTerminal(terminal, pendingTurn));
-  }
-
-  private resultFromTerminal(
-    terminal: TerminalTurn,
-    pendingTurn: PendingTurn,
-  ): SDKResultMessage {
-    const stopReason = terminal.stopReason ?? (terminal.success ? "end_turn" : "error");
-    const success = terminal.success && !FAILURE_STOP_REASONS.has(stopReason);
-    const errorCode = terminal.errorCode ?? (success ? undefined : toSdkErrorCode(stopReason) ?? "error");
-    return {
-      type: "result",
-      success,
-      ...(success ? { result: this.activeTurnAssistantText } : { error: stopReason }),
-      ...(errorCode ? { errorCode } : {}),
-      ...(terminal.detail ? { errorDetail: terminal.detail } : {}),
-      recoverable: false,
-      stopReason,
-      durationMs: Date.now() - this.activeTurnStartedAt,
-      conversationId: this._conversationId,
-      runIds: Array.from(pendingTurn.runIds),
     };
   }
 
@@ -1133,7 +826,7 @@ export class CloudEnvironmentSession implements LettaCodeSession {
 
     this.trackEventSeq(message);
 
-    if (!this.runtime || !isRuntimeMatch(message, this.runtime)) return;
+    if (!isRuntimeMatch(message, this.runtime)) return;
     const type = typeof message.type === "string" ? message.type : undefined;
 
     if (type === "stream_delta") {
@@ -1143,9 +836,8 @@ export class CloudEnvironmentSession implements LettaCodeSession {
           ? ((delta as Record<string, unknown>).run_id as string)
           : undefined;
         if (runId && this.pendingTurn) this.pendingTurn.runIds.add(runId);
-        const sdkMessage = this.transformStreamDelta(delta as Record<string, unknown>);
-        if (sdkMessage) this.enqueue(sdkMessage);
       }
+      this.emit(message);
       return;
     }
 
@@ -1185,16 +877,22 @@ export class CloudEnvironmentSession implements LettaCodeSession {
         success: false,
         stopReason: getStopReason(message) ?? "error",
         detail,
-        errorCode: toSdkErrorCode(getStopReason(message)) ?? "error",
+        errorCode: "error",
         runId: getRunId(message),
       });
+    }
+  }
+
+  private emit(message: CloudStatusMessage): void {
+    for (const handler of this.messageHandlers) {
+      handler(message);
     }
   }
 
   private ackIfSequenced(message: CloudStatusMessage): void {
     if (typeof message.seq !== "number") return;
     try {
-      this.sendToDevice({ type: "ack", seq: message.seq });
+      this.send({ type: "ack", seq: message.seq });
     } catch {
       // Best-effort reliability ack.
     }
@@ -1227,7 +925,6 @@ export class CloudEnvironmentSession implements LettaCodeSession {
   }
 
   private async handleControlRequest(message: CloudStatusMessage): Promise<void> {
-    if (!this.runtime) return;
     const requestId = typeof message.request_id === "string" ? message.request_id : undefined;
     const request = message.request;
     if (!requestId || !request || typeof request !== "object") return;
@@ -1240,7 +937,7 @@ export class CloudEnvironmentSession implements LettaCodeSession {
         ? (requestRecord.input as Record<string, unknown>)
         : {};
     const response = await this.resolveToolApproval(toolName, toolInput);
-    this.sendToDevice({
+    this.send({
       type: "input",
       runtime: this.runtime,
       payload: {
@@ -1251,10 +948,141 @@ export class CloudEnvironmentSession implements LettaCodeSession {
     });
   }
 
-  private async resolveToolApproval(
+  private resolvePendingTerminal(terminal: TerminalTurn): void {
+    const pending = this.pendingTurn;
+    if (!pending || pending.terminalResolved) return;
+    if (terminal.runId) pending.runIds.add(terminal.runId);
+    pending.terminalResolved = true;
+    pending.resolveTerminal(terminal);
+  }
+
+  private rejectActiveTurn(error: Error): void {
+    const pending = this.pendingTurn;
+    if (!pending || pending.terminalResolved) return;
+    pending.terminalResolved = true;
+    pending.rejectTerminal(error);
+  }
+
+  private waitForResponse(
+    requestId: string,
+    predicate: (message: CloudStatusMessage) => boolean,
+    timeoutMs: number,
+  ): Promise<CloudStatusMessage> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingResponses.delete(requestId);
+        reject(new Error(`Timed out waiting for Cloud response ${requestId}.`));
+      }, timeoutMs);
+      this.pendingResponses.set(requestId, { predicate, resolve, reject, timer });
+    });
+  }
+
+  private nextRequestId(prefix: string): string {
+    this.requestCounter += 1;
+    return `${prefix}-${Date.now()}-${this.requestCounter}`;
+  }
+
+  private startPing(): void {
+    if (this.pingTimer) return;
+    this.pingTimer = setInterval(() => {
+      if (!this.ws || this.ws.readyState !== 1) return;
+      try {
+        this.ws.send(JSON.stringify({ type: "ping" }));
+      } catch {
+        // Best effort heartbeat.
+      }
+    }, this.cloudOptions.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS);
+    (this.pingTimer as { unref?: () => void }).unref?.();
+  }
+}
+
+export class CloudEnvironmentSession extends RemoteClientSessionCore {
+  private connectionId: string | null = null;
+  private sandbox: CloudAgentSandbox | null = null;
+  private sandboxPolicy: ResolvedSandboxPolicy | null = null;
+
+  constructor(
+    private readonly cloudOptions: LettaCodeCloudClientOptions,
+    mode: CloudSessionMode,
+  ) {
+    super(mode, {
+      label: "cloud",
+      requestTimeoutMs: cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
+      capabilities: {
+        enableMemfs: true,
+        updateModel: true,
+        changeDeviceState: true,
+      },
+    });
+  }
+
+  override async listMessages(options: ListMessagesOptions = {}): Promise<ListMessagesResult> {
+    const conversationId = options.conversationId ?? this._conversationId ?? this.conversationIdFromMode();
+    if (conversationId) {
+      return listCloudMessages(this.cloudOptions, conversationId, options);
+    }
+    return super.listMessages(options);
+  }
+
+  protected override enableMemfsBody(): Record<string, unknown> {
+    if (!this.runtime) return {};
+    return {
+      runtime: this.runtime,
+      agent_id: this.runtime.agent_id,
+    };
+  }
+
+  protected override async initializeRuntimeController(): Promise<RuntimeSessionInit> {
+    const resolved = await this.resolveRuntime();
+    const connection = await this.resolveConnection(resolved.runtime);
+    this.connectionId = connection.connectionId;
+    const controller = await CloudStatusRuntimeController.connect({
+      cloudOptions: this.cloudOptions,
+      runtime: resolved.runtime,
+      connectionId: connection.connectionId,
+      resolveToolApproval: this.resolveToolApproval,
+    });
+
+    return {
+      controller,
+      runtime: resolved.runtime,
+      tools: [],
+    };
+  }
+
+  protected override async afterRuntimeInitialized(): Promise<void> {
+    if (!this.controller || !this.runtime) return;
+    this.controller.send({
+      type: "sync",
+      runtime: this.runtime,
+      recover_approvals: true,
+    });
+  }
+
+  protected override async beforeTurn(): Promise<void> {
+    await this.refreshSandboxForTurn();
+  }
+
+  protected override onCoreClose(): void {
+    if (this.sandbox !== null && this.sandboxPolicy?.terminateOnClose === true && this._agentId) {
+      const agentId = this._agentId;
+      void this.terminateAgentSandbox(agentId).catch(() => {
+        // close() is intentionally synchronous; cleanup failures are ignored.
+      });
+    }
+  }
+
+  private conversationIdFromMode(): string | null {
+    if (this.mode.kind !== "session") return null;
+    if (this.mode.conversationId) return this.mode.conversationId;
+    if (this.mode.agentId && this.mode.defaultConversation) return "default";
+    return null;
+  }
+
+  private resolveToolApproval = async (
     toolName: string,
     toolInput: Record<string, unknown>,
-  ): Promise<CanUseToolResponse> {
+  ): Promise<CanUseToolResponse> => {
     const options = this.currentOptions();
     const hasCallback = typeof options.canUseTool === "function";
     const toolNeedsRuntimeUserInput = requiresRuntimeUserInput(toolName);
@@ -1305,216 +1133,7 @@ export class CloudEnvironmentSession implements LettaCodeSession {
       message: "No canUseTool callback registered",
       interrupt: false,
     };
-  }
-
-  private resolvePendingTerminal(terminal: TerminalTurn): void {
-    const pending = this.pendingTurn;
-    if (!pending || pending.terminalResolved) return;
-    if (terminal.runId) pending.runIds.add(terminal.runId);
-    pending.terminalResolved = true;
-    pending.resolveTerminal(terminal);
-  }
-
-  private rejectActiveTurn(error: Error): void {
-    const pending = this.pendingTurn;
-    if (!pending || pending.terminalResolved) return;
-    pending.terminalResolved = true;
-    pending.rejectTerminal(error);
-  }
-
-  private transformStreamDelta(delta: Record<string, unknown>): SDKMessage | null {
-    const messageType = typeof delta.message_type === "string" ? delta.message_type : undefined;
-    const runId = typeof delta.run_id === "string" ? delta.run_id : undefined;
-    const uuid = typeof delta.id === "string" ? delta.id : `cloud-${++this.messageCounter}`;
-
-    if (messageType === "assistant_message") {
-      const content = extractTextFromContent(delta.content);
-      if (!content) return null;
-      this.activeTurnAssistantText += content;
-      return { type: "assistant", content, uuid, runId };
-    }
-
-    if (messageType === "reasoning_message") {
-      const content = typeof delta.reasoning === "string"
-        ? delta.reasoning
-        : extractTextFromContent(delta.content);
-      if (!content) return null;
-      return { type: "reasoning", content, uuid, runId };
-    }
-
-    if (messageType === "tool_call_message" || messageType === "approval_request_message") {
-      const toolCall = firstToolCall(delta);
-      if (!toolCall) return null;
-      const toolCallId =
-        (typeof toolCall.tool_call_id === "string" ? toolCall.tool_call_id : undefined) ??
-        (typeof toolCall.id === "string" ? toolCall.id : undefined);
-      const toolName =
-        (typeof toolCall.name === "string" ? toolCall.name : undefined) ??
-        (toolCall.function &&
-        typeof toolCall.function === "object" &&
-        typeof (toolCall.function as Record<string, unknown>).name === "string"
-          ? ((toolCall.function as Record<string, unknown>).name as string)
-          : undefined);
-      const args =
-        toolCall.arguments ??
-        (toolCall.function && typeof toolCall.function === "object"
-          ? (toolCall.function as Record<string, unknown>).arguments
-          : undefined);
-      if (!toolCallId || !toolName) return null;
-      const { input, raw } = toolInputFromArguments(args);
-      return {
-        type: "tool_call",
-        toolCallId,
-        toolName,
-        toolInput: input,
-        ...(raw !== undefined ? { rawArguments: raw } : {}),
-        uuid,
-        runId,
-      };
-    }
-
-    if (messageType === "tool_return_message") {
-      const toolReturn = firstToolReturn(delta) ?? delta;
-      const toolCallId =
-        typeof toolReturn.tool_call_id === "string"
-          ? toolReturn.tool_call_id
-          : typeof delta.tool_call_id === "string"
-            ? delta.tool_call_id
-            : undefined;
-      if (!toolCallId) return null;
-      const content =
-        typeof toolReturn.tool_return === "string"
-          ? toolReturn.tool_return
-          : extractTextFromContent(toolReturn.content) ?? "";
-      const status = typeof toolReturn.status === "string" ? toolReturn.status : undefined;
-      return {
-        type: "tool_result",
-        toolCallId,
-        content,
-        isError: status === "error",
-        uuid,
-        runId,
-      };
-    }
-
-    return null;
-  }
-
-  private async applyPostInitializeOptions(): Promise<void> {
-    if (!this.runtime) return;
-    const options = this.currentOptions();
-
-    if (options.memfs === true) {
-      const requestId = this.nextRequestId("enable-memfs");
-      const response = await this.requestDevice(
-        {
-          type: "enable_memfs",
-          request_id: requestId,
-          runtime: this.runtime,
-          agent_id: this.runtime.agent_id,
-        },
-        (message) => message.type === "enable_memfs_response",
-        this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
-      );
-      if (response.success === false) {
-        throw new Error(typeof response.error === "string" ? response.error : "Failed to enable memfs");
-      }
-    }
-
-    if (options.model !== undefined) {
-      const requestId = this.nextRequestId("update-model");
-      const response = await this.requestDevice(
-        {
-          type: "update_model",
-          request_id: requestId,
-          runtime: this.runtime,
-          payload: { model_handle: options.model },
-        },
-        (message) => message.type === "update_model_response",
-        this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
-      );
-      if (response.success === false) {
-        throw new Error(typeof response.error === "string" ? response.error : "Failed to update model");
-      }
-      if (typeof response.model_handle === "string") this._model = response.model_handle;
-    }
-
-    const payload: Record<string, unknown> = {};
-    const mode = mapPermissionMode(options.permissionMode);
-    if (mode) payload.mode = mode;
-    if (options.cwd !== undefined) payload.cwd = options.cwd;
-    if (Object.keys(payload).length > 0) {
-      this.sendToDevice({
-        type: "change_device_state",
-        runtime: this.runtime,
-        payload,
-      });
-    }
-  }
-
-  private currentOptions(): LettaCodeClientSessionOptions | CreateAgentOptions {
-    return this.mode.kind === "create-agent" ? this.mode.options : this.mode.options;
-  }
-
-  private sendSync(recoverApprovals: boolean): void {
-    if (!this.runtime || !this.ws || this.ws.readyState !== 1) return;
-    this.sendToDevice({
-      type: "sync",
-      runtime: this.runtime,
-      recover_approvals: recoverApprovals,
-    });
-  }
-
-  private sendToDevice(command: Record<string, unknown>): void {
-    if (!this.ws || this.ws.readyState !== 1) {
-      throw new Error("Cloud status websocket is not open.");
-    }
-    this.ws.send(JSON.stringify(command));
-  }
-
-  private requestDevice(
-    command: Record<string, unknown> & { request_id?: string },
-    predicate: (message: CloudStatusMessage) => boolean,
-    timeoutMs: number,
-  ): Promise<CloudStatusMessage> {
-    const requestId = command.request_id ?? this.nextRequestId(String(command.type ?? "request"));
-    command.request_id = requestId;
-    const promise = this.waitForResponse(requestId, predicate, timeoutMs);
-    this.sendToDevice(command);
-    return promise;
-  }
-
-  private waitForResponse(
-    requestId: string,
-    predicate: (message: CloudStatusMessage) => boolean,
-    timeoutMs: number,
-  ): Promise<CloudStatusMessage> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingResponses.delete(requestId);
-        reject(new Error(`Timed out waiting for Cloud response ${requestId}.`));
-      }, timeoutMs);
-      this.pendingResponses.set(requestId, { predicate, resolve, reject, timer });
-    });
-  }
-
-  private nextRequestId(prefix: string): string {
-    this.requestCounter += 1;
-    return `${prefix}-${Date.now()}-${this.requestCounter}`;
-  }
-
-  private startPing(): void {
-    if (this.pingTimer) return;
-    this.pingTimer = setInterval(() => {
-      if (!this.ws || this.ws.readyState !== 1) return;
-      try {
-        this.ws.send(JSON.stringify({ type: "ping" }));
-      } catch {
-        // Best effort heartbeat.
-      }
-    }, this.cloudOptions.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS);
-    (this.pingTimer as { unref?: () => void }).unref?.();
-  }
+  };
 
   private async resolveRuntime(): Promise<{ runtime: RuntimeScope }> {
     if (this.mode.kind === "create-agent") {
@@ -1725,33 +1344,5 @@ export class CloudEnvironmentSession implements LettaCodeSession {
     throw new Error(
       `Timed out waiting for Cloud sandbox ${sandbox.sandboxId} (${sandbox.deviceId}) to come online.${suffix}`,
     );
-  }
-
-  private enqueue(message: SDKMessage): void {
-    const resolver = this.streamResolvers.shift();
-    if (resolver) {
-      resolver(message);
-    } else {
-      this.streamQueue.push(message);
-    }
-  }
-
-  private nextMessage(): Promise<SDKMessage | null> {
-    if (this.streamQueue.length > 0) {
-      return Promise.resolve(this.streamQueue.shift() ?? null);
-    }
-    if (this.closed) {
-      return Promise.resolve(null);
-    }
-    return new Promise((resolve) => {
-      this.streamResolvers.push(resolve);
-    });
-  }
-
-  private resolveAll(message: SDKMessage | null): void {
-    const resolvers = this.streamResolvers.splice(0);
-    for (const resolve of resolvers) {
-      resolve(message);
-    }
   }
 }

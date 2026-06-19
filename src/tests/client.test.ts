@@ -472,7 +472,11 @@ describe("LettaCodeClient", () => {
         create_conversation: { body: {} },
         cwd: "/tmp/project",
       });
-      expect(fakeControlSocket().sent[1]).toMatchObject({
+      const inputCommand = fakeControlSocket().sent.find(
+        (command): command is Record<string, unknown> =>
+          typeof command === "object" && command !== null && "type" in command && command.type === "input",
+      );
+      expect(inputCommand).toMatchObject({
         type: "input",
         runtime: { agent_id: "agent-123", conversation_id: "conv-created" },
       });

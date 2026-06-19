@@ -227,6 +227,77 @@ function resetFakeCloud(): void {
   FakeCloudSocket.scenario = "normal";
 }
 
+class FakeAppServerSocket {
+  static instances: FakeAppServerSocket[] = [];
+  readyState = 0;
+  sent: Array<Record<string, unknown>> = [];
+  private listeners = new Map<string, Set<Listener>>();
+
+  constructor(readonly url: string) {
+    FakeAppServerSocket.instances.push(this);
+    queueMicrotask(() => {
+      this.readyState = 1;
+      this.emit("open", {});
+    });
+  }
+
+  send(data: string): void {
+    const command = JSON.parse(data) as Record<string, unknown>;
+    this.sent.push(command);
+
+    if (command.type === "runtime_start") {
+      this.serverMessage({
+        type: "runtime_start_response",
+        request_id: command.request_id,
+        success: true,
+        runtime: { agent_id: "agent-created", conversation_id: "conv-created" },
+        agent: { id: "agent-created", model: "anthropic/claude-sonnet-4" },
+        conversation: { id: "conv-created", agent_id: "agent-created" },
+      });
+    }
+
+    if (command.type === "enable_memfs") {
+      this.serverMessage({
+        type: "enable_memfs_response",
+        request_id: command.request_id,
+        success: true,
+      });
+    }
+  }
+
+  close(): void {
+    this.readyState = 3;
+    this.emit("close", {});
+  }
+
+  addEventListener(type: string, listener: Listener): void {
+    let listeners = this.listeners.get(type);
+    if (!listeners) {
+      listeners = new Set();
+      this.listeners.set(type, listeners);
+    }
+    listeners.add(listener);
+  }
+
+  removeEventListener(type: string, listener: Listener): void {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  private serverMessage(message: unknown): void {
+    this.emit("message", { data: JSON.stringify(message) });
+  }
+
+  private emit(type: string, event: unknown): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(event);
+    }
+  }
+}
+
+function resetFakeAppServer(): void {
+  FakeAppServerSocket.instances = [];
+}
+
 describe("CloudEnvironmentSession", () => {
   test("creates and refreshes a Cloud agent sandbox before using the Remote Client websocket", async () => {
     resetFakeCloud();
@@ -371,8 +442,9 @@ describe("CloudEnvironmentSession", () => {
     session.close();
   });
 
-  test("creates Cloud agents with Cloud-specific REST payloads and errors", async () => {
+  test("creates Cloud agents through the local app-server harness", async () => {
     resetFakeCloud();
+    resetFakeAppServer();
     const requests: RecordedRequest[] = [];
     const client = new LettaCodeClient({
       backend: "cloud",
@@ -380,6 +452,11 @@ describe("CloudEnvironmentSession", () => {
       apiKey: "sk-test",
       fetch: createCloudFetchMock(requests),
       WebSocket: FakeCloudSocket,
+      appServer: {
+        url: "ws://app-server.test/ws",
+        WebSocket: FakeAppServerSocket,
+        requestTimeoutMs: 1_000,
+      },
     });
 
     await expect(client.createAgent({
@@ -389,19 +466,24 @@ describe("CloudEnvironmentSession", () => {
       tags: ["team:sdk"],
     })).resolves.toBe("agent-created");
 
-    expect(requests[0]).toMatchObject({ method: "POST", url: "https://api.test/v1/agents/" });
-    expect(requests[0]!.body).toMatchObject({
-      model: "anthropic/claude-sonnet-4",
-      system: "You are a repo assistant.",
-      tags: ["team:sdk", "origin:letta-code"],
-      memory_blocks: [{ label: "project", value: "Use Bun." }],
+    expect(requests).toHaveLength(0);
+    const controlSocket = FakeAppServerSocket.instances.find((socket) => new URL(socket.url).searchParams.get("channel") === "control")!;
+    const runtimeStart = controlSocket.sent.find((command) => command.type === "runtime_start")!;
+    expect(runtimeStart).toMatchObject({
+      create_agent: {
+        pin_global: true,
+        body: {
+          model: "anthropic/claude-sonnet-4",
+          system: "You are a repo assistant.",
+          tags: ["team:sdk", "origin:letta-code"],
+          memory_blocks: [{ label: "project", value: "Use Bun." }],
+        },
+      },
     });
+    expect(controlSocket.sent).toContainEqual(expect.objectContaining({ type: "enable_memfs" }));
 
     await expect(client.createAgent({ systemPrompt: "default" })).rejects.toThrow(
-      "Cloud createAgent() cannot expand SDK system prompt presets",
-    );
-    await expect(client.createAgent({ cwd: "/repo" })).rejects.toThrow(
-      "Cloud createAgent() creates the agent record only",
+      "App-server createAgent() does not yet support system prompt presets",
     );
   });
 

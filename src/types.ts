@@ -368,6 +368,11 @@ export interface LettaCodeCloudClientOptions {
   webSocketAuth?: "header" | "query";
   /** Heartbeat interval for the Cloud status websocket. Defaults to 30s. */
   pingIntervalMs?: number;
+  /**
+   * Advanced local app-server overrides used by cloud createAgent().
+   * Omit to let the SDK spawn a bundled local app-server authenticated to Cloud.
+   */
+  appServer?: LettaCodeLocalAppServerOptions;
   /** Cloud agent sandbox lifecycle options. */
   sandbox?: LettaCodeCloudSandboxOptions;
   /** Optional default execution target, overridable at session creation. */
