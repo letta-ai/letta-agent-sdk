@@ -31,11 +31,12 @@ const remoteClient = new LettaCodeClient({
   url: "http://127.0.0.1:4500",
 });
 
-// Cloud remains a typed placeholder in this release. Construction succeeds,
-// but using it will throw until the transport is implemented.
+// Cloud: use the Letta Cloud API to find an online environment, then stream
+// over its status websocket. Defaults apiKey from LETTA_API_KEY / LETTA_CLOUD_API_KEY.
 const client = new LettaCodeClient({
   backend: "cloud",
-  environment: { name: "Cameron's MacMini" }, // optional default
+  apiKey: process.env.LETTA_API_KEY,
+  environment: { name: "Cameron's MacMini" }, // required for sessions
 });
 ```
 
@@ -65,10 +66,10 @@ for await (const msg of session.stream()) {
 }
 ```
 
-By default, `resumeSession(agentId)` continues the agent’s default conversation. To start a fresh thread, use `createSession(agentId)` (see docs). For the remote app-server backend, pass an agent id to `createSession(agentId)`; default/LRU local-agent selection is only available through the local subprocess backend.
+By default, `resumeSession(agentId)` continues the agent’s default conversation. To start a fresh thread, use `createSession(agentId)` (see docs). For the remote app-server and cloud backends, pass an agent id to `createSession(agentId)`; default/LRU local-agent selection is only available through the local subprocess backend.
 
-For remote/cloud backends, `environment` is session-scoped and can override the
-client's default execution target once those backends are implemented:
+For cloud backends, `environment` is session-scoped and can override the
+client's default execution target:
 
 ```ts
 await using session = client.resumeSession(agentId, {
@@ -103,11 +104,41 @@ const result = await session.runTurn("Summarize this repository.");
 console.log(result.result);
 ```
 
+### Letta Cloud environment backend
 
-### Letta Cloud backend
+Use `backend: "cloud"` when an online Letta Cloud / Constellation environment
+should execute the session. `createAgent()` uses the Cloud API directly;
+`createSession()` / `resumeSession()` resolve the configured environment and
+send user turns through the Cloud environment message endpoint. The SDK listens
+on the environment status websocket for run lifecycle events and streams the
+resulting run via the Cloud run-stream API.
 
-`backend: "cloud"` remains a typed placeholder until the Cloud / Constellation
-transport is implemented.
+```ts
+const client = new LettaCodeClient({
+  backend: "cloud",
+  apiKey: process.env.LETTA_API_KEY,
+  environment: { deviceId: "work-laptop" },
+  requestTimeoutMs: 120_000,
+});
+
+const agentId = await client.createAgent({
+  model: "anthropic/claude-sonnet-4",
+  persona: "You are a helpful coding assistant.",
+});
+
+await using session = client.resumeSession(agentId, { cwd: process.cwd() });
+const result = await session.runTurn("Summarize this repository.");
+console.log(result.result);
+```
+
+Environment selectors may be a name string, `{ name }`, `{ id }`,
+`{ deviceId }`, `{ connectionId }`, or `{ lastUsed: true }` for an existing
+agent/default-conversation runtime. Names must be unique within the environment
+list. The environment must be online when the session starts.
+
+Cloud sessions do not use the user-managed app-server `runtime_start` protocol.
+SDK-hosted tools, approval recovery, `listMessages()`, and `bootstrapState()`
+are not yet supported on the cloud backend.
 
 
 ### Remote environments (ACK-only dispatch)

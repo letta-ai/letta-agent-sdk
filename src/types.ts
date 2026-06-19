@@ -256,7 +256,8 @@ export type AnyAgentTool = AgentTool<any, unknown>;
  *
  * - local: spawn/manage a local Letta Code subprocess and speak stdio.
  * - remote: connect to a user-managed app-server over websockets.
- * - cloud: connect through Letta Cloud/Constellation. Placeholder for now.
+ * - cloud: dispatch through Letta Cloud/Constellation environment APIs and
+ *   stream run events from cloud transports.
  */
 export type LettaCodeBackend = "local" | "remote" | "cloud";
 
@@ -264,10 +265,15 @@ export type LettaCodeBackend = "local" | "remote" | "cloud";
  * Stable execution target for remote/cloud runtimes.
  *
  * Strings are treated as human-readable environment names. Object forms allow
- * callers to avoid relying on names as unique identifiers once backend support
- * is implemented.
+ * callers to avoid relying on names as unique identifiers.
  */
-export type LettaCodeEnvironment = string | { name: string } | { id: string };
+export type LettaCodeEnvironment =
+  | string
+  | { name: string }
+  | { id: string }
+  | { connectionId: string }
+  | { deviceId: string }
+  | { lastUsed: true };
 
 export interface LettaCodeLocalClientOptions {
   backend?: "local";
@@ -291,6 +297,14 @@ export interface LettaCodeCloudClientOptions {
   apiKey?: string;
   /** Optional API base URL override. Defaults to Letta Cloud. */
   apiBaseUrl?: string;
+  /** Optional extra HTTP headers for Cloud API requests. */
+  headers?: Record<string, string>;
+  /** Optional fetch implementation for non-standard runtimes and tests. */
+  fetch?: typeof fetch;
+  /** Optional WebSocket constructor for non-browser runtimes and tests. */
+  WebSocket?: LettaCodeSocketConstructor;
+  /** Timeout for app-server request/turn correlation. Defaults to app-server client default. */
+  requestTimeoutMs?: number;
   /** Optional default execution target, overridable at session creation. */
   environment?: LettaCodeEnvironment;
 }

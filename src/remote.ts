@@ -98,7 +98,7 @@ function getDefaultApiKey(): string | undefined {
   if (typeof process === "undefined") {
     return undefined;
   }
-  return process.env.LETTA_API_KEY;
+  return process.env.LETTA_API_KEY ?? process.env.LETTA_CLOUD_API_KEY;
 }
 
 function createHeaders(options: RemoteEnvironmentClientOptions): Record<string, string> {
