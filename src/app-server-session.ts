@@ -457,6 +457,9 @@ export class AppServerSession implements LettaCodeSession {
 
     this.client = createAppServerClient({
       url,
+      ...(this.remoteOptions.authToken !== undefined
+        ? { authToken: this.remoteOptions.authToken }
+        : {}),
       ...(this.remoteOptions.WebSocket
         ? { WebSocket: this.remoteOptions.WebSocket as AppServerSocketConstructor }
         : {}),

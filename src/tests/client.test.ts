@@ -31,7 +31,10 @@ class FakeAppServerSocket {
   sent: unknown[] = [];
   private listeners = new Map<string, Set<Listener>>();
 
-  constructor(readonly url: string) {
+  constructor(
+    readonly url: string,
+    readonly options?: { headers?: Record<string, string> },
+  ) {
     FakeAppServerSocket.instances.push(this);
     queueMicrotask(() => {
       this.readyState = 1;
@@ -406,6 +409,30 @@ describe("LettaCodeClient", () => {
     expect(remoteClient.backend).toBe("remote");
     expect(cloudClient.backend).toBe("cloud");
     expect(cloudClient.environment).toEqual({ name: "LettaDevelopers" });
+  });
+
+  test("passes remote auth tokens to app-server websocket upgrades", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaCodeClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      authToken: " super-secret-token\n",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123");
+    try {
+      await session.initialize();
+
+      expect(fakeControlSocket().options).toEqual({
+        headers: { Authorization: "Bearer super-secret-token" },
+      });
+      expect(fakeStreamSocket().options).toEqual({
+        headers: { Authorization: "Bearer super-secret-token" },
+      });
+    } finally {
+      session.close();
+    }
   });
 
   test("throws a clear placeholder error when non-local backends are used", () => {

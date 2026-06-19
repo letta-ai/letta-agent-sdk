@@ -38,7 +38,14 @@ export interface LettaCodeSocketLike {
   once?(type: string, listener: (event: unknown) => void): void;
 }
 
-export type LettaCodeSocketConstructor = new (url: string) => LettaCodeSocketLike;
+export interface LettaCodeSocketOptions {
+  headers?: Record<string, string>;
+}
+
+export type LettaCodeSocketConstructor = new (
+  url: string,
+  options?: LettaCodeSocketOptions,
+) => LettaCodeSocketLike;
 
 // ═══════════════════════════════════════════════════════════════
 // MESSAGE CONTENT TYPES (for multimodal support)
@@ -300,6 +307,8 @@ export interface LettaCodeRemoteClientOptions {
   backend: "remote";
   /** URL of the user-managed app-server / websocket endpoint. */
   url: string;
+  /** Optional capability token sent as Authorization: Bearer <token> during websocket upgrade. */
+  authToken?: string;
   /** Optional WebSocket constructor for non-browser runtimes and tests. */
   WebSocket?: LettaCodeSocketConstructor;
   /** Timeout for app-server request/turn correlation. Defaults to app-server client default. */
