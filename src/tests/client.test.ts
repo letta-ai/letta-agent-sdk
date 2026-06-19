@@ -26,6 +26,7 @@ function urlOf(input: FetchInput | URL): string {
 class FakeAppServerSocket {
   static instances: FakeAppServerSocket[] = [];
   static mirrorStreamToControl = false;
+  static inputScenario: "normal" | "autoApprovalContinuation" | "manualApprovalWait" = "normal";
   readyState = 0;
   sent: unknown[] = [];
   private listeners = new Map<string, Set<Listener>>();
@@ -109,6 +110,62 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
     return;
   }
 
+  if (command.type === "enable_memfs") {
+    fakeControlSocket().serverMessage({
+      type: "enable_memfs_response",
+      request_id: command.request_id,
+      success: true,
+      memory_directory: "/tmp/memfs",
+    });
+    return;
+  }
+
+  if (command.type === "set_reflection_settings") {
+    fakeControlSocket().serverMessage({
+      type: "set_reflection_settings_response",
+      request_id: command.request_id,
+      success: true,
+      scope: command.scope,
+      reflection_settings: command.settings,
+    });
+    return;
+  }
+
+  if (command.type === "update_model") {
+    fakeControlSocket().serverMessage({
+      type: "update_model_response",
+      request_id: command.request_id,
+      success: true,
+      runtime: command.runtime,
+      model_handle: (command.payload as Record<string, unknown>)?.model_handle,
+    });
+    return;
+  }
+
+  if (command.type === "update_toolset") {
+    fakeControlSocket().serverMessage({
+      type: "update_toolset_response",
+      request_id: command.request_id,
+      success: true,
+      runtime: command.runtime,
+      current_toolset_preference: command.toolset_preference,
+    });
+    return;
+  }
+
+  if (command.type === "conversation_messages_list") {
+    fakeControlSocket().serverMessage({
+      type: "conversation_messages_list_response",
+      request_id: command.request_id,
+      success: true,
+      messages: [
+        { id: "msg-user", role: "user", content: "hello" },
+        { id: "msg-assistant", role: "assistant", content: "hi" },
+      ],
+    });
+    return;
+  }
+
   if (command.type === "runtime_start") {
     const createdAgent = command.create_agent as Record<string, unknown> | undefined;
     const agentId = (command.agent_id as string | undefined) ?? "agent-created";
@@ -133,6 +190,118 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
 
   if (command.type === "input") {
     const runtime = command.runtime;
+    const emitStream = (message: unknown) => {
+      if (FakeAppServerSocket.mirrorStreamToControl) {
+        fakeControlSocket().serverMessage(message);
+      }
+      fakeStreamSocket().serverMessage(message);
+    };
+
+    if (FakeAppServerSocket.inputScenario === "autoApprovalContinuation") {
+      emitStream({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          id: "tool-call-1",
+          message_type: "approval_request_message",
+          tool_calls: [
+            {
+              tool_call_id: "call-1",
+              name: "Bash",
+              arguments: '{"command":"pwd"}',
+            },
+          ],
+          run_id: "run-approval",
+        },
+      });
+      emitStream({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          message_type: "stop_reason",
+          stop_reason: "requires_approval",
+          run_id: "run-approval",
+        },
+      });
+      emitStream({
+        type: "update_loop_status",
+        runtime,
+        loop_status: {
+          status: "EXECUTING_CLIENT_SIDE_TOOL",
+          active_run_ids: ["run-approval"],
+        },
+      });
+      emitStream({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          id: "tool-result-1",
+          message_type: "tool_return_message",
+          tool_call_id: "call-1",
+          tool_return: "ok",
+          status: "success",
+          run_id: "run-approval",
+        },
+      });
+      emitStream({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          id: "msg-after-tool",
+          message_type: "assistant_message",
+          content: "done after tool",
+          run_id: "run-final",
+        },
+      });
+      emitStream({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          message_type: "stop_reason",
+          stop_reason: "end_turn",
+          run_id: "run-final",
+        },
+      });
+      return;
+    }
+
+    if (FakeAppServerSocket.inputScenario === "manualApprovalWait") {
+      emitStream({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          id: "tool-call-1",
+          message_type: "approval_request_message",
+          tool_calls: [
+            {
+              tool_call_id: "call-1",
+              name: "Bash",
+              arguments: '{"command":"rm -rf tmp"}',
+            },
+          ],
+          run_id: "run-approval",
+        },
+      });
+      emitStream({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          message_type: "stop_reason",
+          stop_reason: "requires_approval",
+          run_id: "run-approval",
+        },
+      });
+      emitStream({
+        type: "update_loop_status",
+        runtime,
+        loop_status: {
+          status: "WAITING_ON_APPROVAL",
+          active_run_ids: ["run-approval"],
+        },
+      });
+      return;
+    }
+
     const assistantDelta = {
       type: "stream_delta",
       runtime,
@@ -152,12 +321,8 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
         run_id: "run-1",
       },
     };
-    if (FakeAppServerSocket.mirrorStreamToControl) {
-      fakeControlSocket().serverMessage(assistantDelta);
-      fakeControlSocket().serverMessage(stopDelta);
-    }
-    fakeStreamSocket().serverMessage(assistantDelta);
-    fakeStreamSocket().serverMessage(stopDelta);
+    emitStream(assistantDelta);
+    emitStream(stopDelta);
   }
 }
 
@@ -169,8 +334,24 @@ describe("LettaCodeClient", () => {
     expect(client.environment).toBeUndefined();
   });
 
-  test("creates local sessions without starting the subprocess until use", () => {
-    const client = new LettaCodeClient({ backend: "local" });
+  test("creates local app-server sessions without starting transport until use", () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaCodeClient({
+      backend: "local",
+      appServer: { url: "ws://127.0.0.1:4500/ws", WebSocket: FakeAppServerSocket },
+    });
+    const session = client.resumeSession("agent-123");
+
+    try {
+      expect(session).not.toBeInstanceOf(Session);
+      expect(FakeAppServerSocket.instances).toHaveLength(0);
+    } finally {
+      session.close();
+    }
+  });
+
+  test("explicit local stdio transport keeps legacy Session fallback", () => {
+    const client = new LettaCodeClient({ backend: "local", transport: "stdio" });
     const session = client.resumeSession("agent-123");
 
     try {
@@ -186,6 +367,30 @@ describe("LettaCodeClient", () => {
     expect(() =>
       client.resumeSession("agent-123", { environment: "work-laptop" }),
     ).toThrow("environment overrides are only valid for remote/cloud backends");
+  });
+
+  test("local backend uses app-server when an agent id is provided", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaCodeClient({
+      backend: "local",
+      appServer: { url: "ws://127.0.0.1:4500/ws", WebSocket: FakeAppServerSocket },
+    });
+
+    const session = client.createSession("agent-123", { cwd: "/tmp/project" });
+    try {
+      const init = await session.initialize();
+      expect(init.agentId).toBe("agent-123");
+      expect(init.conversationId).toBe("conv-created");
+
+      expect(fakeControlSocket().sent[0]).toMatchObject({
+        type: "runtime_start",
+        agent_id: "agent-123",
+        create_conversation: { body: {} },
+        cwd: "/tmp/project",
+      });
+    } finally {
+      session.close();
+    }
   });
 
   test("constructs remote backend and keeps cloud construction typed", () => {
@@ -244,6 +449,73 @@ describe("LettaCodeClient", () => {
         runtime: { agent_id: "agent-123", conversation_id: "conv-created" },
       });
     } finally {
+      session.close();
+    }
+  });
+
+  test("app-server sessions wait through auto-handled requires_approval stops", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.inputScenario = "autoApprovalContinuation";
+    const client = new LettaCodeClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123");
+    try {
+      await session.initialize();
+      const messages: unknown[] = [];
+      await session.send("use a tool");
+      for await (const message of session.stream()) {
+        messages.push(message);
+      }
+
+      const result = messages.at(-1) as { type?: string; success?: boolean; stopReason?: string };
+      expect(result).toMatchObject({ type: "result", success: true, stopReason: "end_turn" });
+      expect(messages).toContainEqual(
+        expect.objectContaining({
+          type: "tool_call",
+          toolCallId: "call-1",
+          toolName: "Bash",
+        }),
+      );
+      expect(messages).toContainEqual(
+        expect.objectContaining({
+          type: "tool_result",
+          toolCallId: "call-1",
+          content: "ok",
+        }),
+      );
+      expect(result.stopReason).not.toBe("requires_approval");
+    } finally {
+      FakeAppServerSocket.inputScenario = "normal";
+      session.close();
+    }
+  });
+
+  test("app-server sessions terminalize only genuine pending approvals", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.inputScenario = "manualApprovalWait";
+    const client = new LettaCodeClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123");
+    try {
+      await session.initialize();
+      const result = await session.runTurn("use a tool");
+
+      expect(result).toMatchObject({
+        type: "result",
+        success: false,
+        approvalConflict: true,
+        stopReason: "requires_approval",
+      });
+    } finally {
+      FakeAppServerSocket.inputScenario = "normal";
       session.close();
     }
   });
@@ -397,6 +669,66 @@ describe("LettaCodeClient", () => {
     } finally {
       session.close();
     }
+  });
+
+  test("app-server sessions apply model memfs sleeptime and list messages", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaCodeClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("agent-123", {
+      model: "anthropic/claude-opus-4",
+      memfs: true,
+      sleeptime: { trigger: "step-count", stepCount: 3 },
+    });
+
+    try {
+      await session.initialize();
+      expect(fakeControlSocket().sent).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "enable_memfs",
+            agent_id: "agent-123",
+          }),
+          expect.objectContaining({
+            type: "set_reflection_settings",
+            settings: { trigger: "step-count", step_count: 3 },
+          }),
+          expect.objectContaining({
+            type: "update_model",
+            payload: { model_handle: "anthropic/claude-opus-4" },
+          }),
+        ]),
+      );
+
+      const page = await session.listMessages({ limit: 2, order: "desc" });
+      expect(page.messages).toHaveLength(2);
+      expect(fakeControlSocket().sent.at(-1)).toMatchObject({
+        type: "conversation_messages_list",
+        conversation_id: "default",
+        query: { limit: 2, order: "desc" },
+      });
+    } finally {
+      session.close();
+    }
+  });
+
+  test("app-server sessions reject unsupported stdio-only options", () => {
+    const client = new LettaCodeClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    expect(() => client.resumeSession("agent-123", { memfs: false })).toThrow(
+      "does not yet support disabling memfs",
+    );
+    expect(() =>
+      client.resumeSession("agent-123", { sleeptime: { behavior: "auto-launch" } }),
+    ).toThrow("does not yet support sleeptime.behavior");
   });
 
 

@@ -6,6 +6,7 @@ import {
   type AppServerMessageHandler,
   type AppServerSocketConstructor,
 } from "@letta-ai/letta-code/app-server-client";
+import { startLocalAppServer, type LocalAppServerHandle } from "./local-app-server.js";
 import type {
   AnyAgentTool,
   BootstrapStateOptions,
@@ -55,12 +56,53 @@ type ConversationRetrieveResponse = ProtocolMessage & {
   error?: string;
 };
 
+type ConversationMessagesListResponse = ProtocolMessage & {
+  type: "conversation_messages_list_response";
+  success: boolean;
+  messages: unknown[];
+  error?: string;
+};
+
+type EnableMemfsResponse = ProtocolMessage & {
+  type: "enable_memfs_response";
+  success: boolean;
+  memory_directory?: string;
+  error?: string;
+};
+
+type SetReflectionSettingsResponse = ProtocolMessage & {
+  type: "set_reflection_settings_response";
+  success: boolean;
+  error?: string;
+};
+
+type UpdateModelResponse = ProtocolMessage & {
+  type: "update_model_response";
+  success: boolean;
+  error?: string;
+};
+
+type UpdateToolsetResponse = ProtocolMessage & {
+  type: "update_toolset_response";
+  success: boolean;
+  error?: string;
+};
+
 type AppServerTurnResult = Awaited<ReturnType<AppServerClient["runTurn"]>>;
 
 type RuntimeStartCommand = Parameters<AppServerClient["runtimeStart"]>[0];
 type InputCommand = Parameters<AppServerClient["runTurn"]>[0];
 
-type AppServerSessionOptions = LettaCodeRemoteClientOptions & {
+export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
+  /** Base websocket URL. Remote sessions require this; local sessions may omit
+   * it to spawn an SDK-owned app-server lazily at initialize(). */
+  url?: string;
+  /** Spawn a local app-server when url is omitted. */
+  local?: boolean;
+  /** Optional local app-server listen URL. Defaults to ws://127.0.0.1:0. */
+  localListen?: string;
+  /** Timeout for local app-server startup. */
+  localStartupTimeoutMs?: number;
   /**
    * Cloud status websockets fan out device frames to every subscriber rather
    * than honoring local app-server's split control/stream channels. Enable this
@@ -150,22 +192,19 @@ function includeSdkAgentOriginTag(tags: string[] | undefined): string[] {
 
 function assertRemoteCreateAgentOptionsSupported(options: CreateAgentOptions): void {
   if (options.allowedTools !== undefined || options.disallowedTools !== undefined) {
-    throw new Error("Remote app-server createAgent() does not yet support allowedTools/disallowedTools.");
+    throw new Error("App-server createAgent() does not yet support allowedTools/disallowedTools.");
   }
   if (options.canUseTool !== undefined) {
-    throw new Error("Remote app-server createAgent() does not yet support canUseTool callbacks.");
-  }
-  if (options.memfs !== undefined) {
-    throw new Error("Remote app-server createAgent() does not yet support per-agent memfs toggles.");
+    throw new Error("App-server createAgent() does not yet support canUseTool callbacks.");
   }
   if (options.skillSources !== undefined) {
-    throw new Error("Remote app-server createAgent() does not yet support skillSources overrides.");
+    throw new Error("App-server createAgent() does not yet support skillSources overrides.");
   }
   if (options.systemInfoReminder !== undefined) {
-    throw new Error("Remote app-server createAgent() does not yet support systemInfoReminder overrides.");
+    throw new Error("App-server createAgent() does not yet support systemInfoReminder overrides.");
   }
-  if (options.sleeptime !== undefined) {
-    throw new Error("Remote app-server createAgent() does not yet support sleeptime overrides.");
+  if (options.sleeptime?.behavior !== undefined) {
+    throw new Error("App-server createAgent() does not yet support sleeptime.behavior overrides.");
   }
 }
 
@@ -173,35 +212,32 @@ export function assertRemoteSessionOptionsSupported(
   action: string,
   options: LettaCodeClientSessionOptions,
 ): void {
-  if (options.model !== undefined) {
-    throw new Error(`Remote app-server ${action}() does not yet support model overrides for existing agents.`);
-  }
   if (options.systemPrompt !== undefined) {
-    throw new Error(`Remote app-server ${action}() does not yet support systemPrompt overrides for existing agents.`);
+    throw new Error(`App-server ${action}() does not yet support systemPrompt overrides for existing agents.`);
   }
   if (options.allowedTools !== undefined || options.disallowedTools !== undefined) {
-    throw new Error(`Remote app-server ${action}() does not yet support allowedTools/disallowedTools.`);
+    throw new Error(`App-server ${action}() does not yet support allowedTools/disallowedTools.`);
   }
   if (options.canUseTool !== undefined) {
-    throw new Error(`Remote app-server ${action}() does not yet support canUseTool callbacks.`);
-  }
-  if (options.memfs !== undefined) {
-    throw new Error(`Remote app-server ${action}() does not yet support per-session memfs toggles.`);
+    throw new Error(`App-server ${action}() does not yet support canUseTool callbacks.`);
   }
   if (options.skillSources !== undefined) {
-    throw new Error(`Remote app-server ${action}() does not yet support skillSources overrides.`);
+    throw new Error(`App-server ${action}() does not yet support skillSources overrides.`);
   }
   if (options.systemInfoReminder !== undefined) {
-    throw new Error(`Remote app-server ${action}() does not yet support systemInfoReminder overrides.`);
+    throw new Error(`App-server ${action}() does not yet support systemInfoReminder overrides.`);
   }
-  if (options.sleeptime !== undefined) {
-    throw new Error(`Remote app-server ${action}() does not yet support sleeptime overrides.`);
+  if (options.memfs === false) {
+    throw new Error(`App-server ${action}() does not yet support disabling memfs through the SDK.`);
+  }
+  if (options.sleeptime?.behavior !== undefined) {
+    throw new Error(`App-server ${action}() does not yet support sleeptime.behavior overrides.`);
   }
   if (options.memfsStartup !== undefined) {
-    throw new Error(`Remote app-server ${action}() does not yet support memfsStartup overrides.`);
+    throw new Error(`App-server ${action}() does not use memfsStartup; app-server owns its startup synchronization.`);
   }
   if (options.includePartialMessages !== undefined) {
-    throw new Error(`Remote app-server ${action}() streams app-server deltas directly and does not support includePartialMessages.`);
+    throw new Error(`App-server ${action}() streams app-server deltas directly and does not support includePartialMessages.`);
   }
 }
 
@@ -209,7 +245,32 @@ function mapPermissionMode(mode: LettaCodeClientSessionOptions["permissionMode"]
   if (mode === undefined || mode === "default") return undefined;
   if (mode === "acceptEdits") return "acceptEdits";
   if (mode === "bypassPermissions") return "unrestricted";
-  throw new Error("Remote app-server sessions do not yet support permissionMode 'plan'.");
+  if (mode === "plan") return "memory";
+  return undefined;
+}
+
+function normalizeMemoryBlock(block: Record<string, unknown>): Record<string, unknown> {
+  const normalized = { ...block };
+  if (normalized.value === undefined && typeof normalized.content === "string") {
+    normalized.value = normalized.content;
+  }
+  return normalized;
+}
+
+function resolveReflectionSettings(
+  sleeptime: LettaCodeClientSessionOptions["sleeptime"],
+): { trigger: "off" | "step-count" | "compaction-event"; step_count: number } | null {
+  if (!sleeptime) return null;
+  return {
+    trigger: sleeptime.trigger ?? "step-count",
+    step_count: sleeptime.stepCount ?? 5,
+  };
+}
+
+function ensureSuccess(message: { success?: boolean; error?: string }, fallback: string): void {
+  if (message.success === false) {
+    throw new Error(message.error ?? fallback);
+  }
 }
 
 function extractTextFromContent(content: unknown): string | null {
@@ -294,11 +355,11 @@ export function createAgentBody(options: CreateAgentOptions): Record<string, unk
   if (options.systemPrompt !== undefined) {
     if (typeof options.systemPrompt === "string") {
       if (isPresetSystemPrompt(options.systemPrompt)) {
-        throw new Error("Remote app-server createAgent() does not yet support system prompt presets.");
+        throw new Error("App-server createAgent() does not yet support system prompt presets.");
       }
       body.system = options.systemPrompt;
     } else {
-      throw new Error("Remote app-server createAgent() does not yet support system prompt preset objects.");
+      throw new Error("App-server createAgent() does not yet support system prompt preset objects.");
     }
   }
 
@@ -306,12 +367,12 @@ export function createAgentBody(options: CreateAgentOptions): Record<string, unk
   const blockIds: string[] = [];
   for (const item of options.memory ?? []) {
     if (typeof item === "string") {
-      throw new Error("Remote app-server createAgent() does not yet support memory preset names.");
+      throw new Error("App-server createAgent() does not yet support memory preset names.");
     }
     if ("blockId" in item) {
       blockIds.push(item.blockId);
     } else {
-      memoryBlocks.push(item as unknown as Record<string, unknown>);
+      memoryBlocks.push(normalizeMemoryBlock(item as unknown as Record<string, unknown>));
     }
   }
   if (options.persona !== undefined) {
@@ -356,6 +417,7 @@ function requestControl(
 
 export class AppServerSession implements LettaCodeSession {
   private client: AppServerClient | null = null;
+  private ownedAppServer: LocalAppServerHandle | null = null;
   private runtime: RuntimeScope | null = null;
   private initialized = false;
   private closed = false;
@@ -391,8 +453,10 @@ export class AppServerSession implements LettaCodeSession {
       throw new Error("Session is closed");
     }
 
+    const url = await this.resolveAppServerUrl();
+
     this.client = createAppServerClient({
-      url: this.remoteOptions.url,
+      url,
       ...(this.remoteOptions.WebSocket
         ? { WebSocket: this.remoteOptions.WebSocket as AppServerSocketConstructor }
         : {}),
@@ -407,27 +471,34 @@ export class AppServerSession implements LettaCodeSession {
       this.removeExternalToolHandler = this.client.onExternalToolCall(this.handleExternalToolCall);
     }
 
-    await this.client.connect();
-    const response = await this.startRuntime();
-    if (!response.success || !response.runtime) {
-      throw new Error(response.error ?? "Failed to start app-server runtime");
+    try {
+      await this.client.connect();
+      const response = await this.startRuntime();
+      if (!response.success || !response.runtime) {
+        throw new Error(response.error ?? "Failed to start app-server runtime");
+      }
+
+      this.runtime = response.runtime;
+      this._agentId = response.runtime.agent_id;
+      this._conversationId = response.runtime.conversation_id;
+      this._sessionId = `${response.runtime.agent_id}:${response.runtime.conversation_id}`;
+      this._model = typeof response.agent?.model === "string" ? response.agent.model : "";
+      this.initialized = true;
+
+      await this.applyPostInitializeOptions();
+
+      return {
+        type: "init",
+        agentId: response.runtime.agent_id,
+        sessionId: this._sessionId,
+        conversationId: response.runtime.conversation_id,
+        model: this._model,
+        tools: Array.from(this.externalTools.keys()),
+      };
+    } catch (error) {
+      this.close();
+      throw error;
     }
-
-    this.runtime = response.runtime;
-    this._agentId = response.runtime.agent_id;
-    this._conversationId = response.runtime.conversation_id;
-    this._sessionId = `${response.runtime.agent_id}:${response.runtime.conversation_id}`;
-    this._model = typeof response.agent?.model === "string" ? response.agent.model : "";
-    this.initialized = true;
-
-    return {
-      type: "init",
-      agentId: response.runtime.agent_id,
-      sessionId: this._sessionId,
-      conversationId: response.runtime.conversation_id,
-      model: this._model,
-      tools: Array.from(this.externalTools.keys()),
-    };
   }
 
   async send(message: SendMessage): Promise<void> {
@@ -526,23 +597,96 @@ export class AppServerSession implements LettaCodeSession {
   }
 
   async recoverPendingApprovals(
-    _options: RecoverPendingApprovalsOptions = {},
+    options: RecoverPendingApprovalsOptions = {},
   ): Promise<RecoverPendingApprovalsResult> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+    if (!this.client || !this.runtime) {
+      throw new Error("Session is not initialized");
+    }
+
+    const response = await this.client.sync(
+      {
+        runtime: this.runtime,
+        recover_approvals: true,
+        force_device_status: true,
+      },
+      options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {},
+    );
+
+    if (!response.success) {
+      return {
+        recovered: false,
+        unsupported: false,
+        detail: response.error ?? "Failed to recover pending approvals",
+      };
+    }
+
+    return { recovered: true, pendingApproval: false, unsupported: false };
+  }
+
+  async listMessages(options: ListMessagesOptions = {}): Promise<ListMessagesResult> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+    if (!this.client) {
+      throw new Error("Session is not initialized");
+    }
+    const conversationId = options.conversationId ?? this._conversationId;
+    if (!conversationId) {
+      throw new Error("No conversation id available for listMessages()");
+    }
+
+    const query: Record<string, unknown> = {};
+    if (options.before !== undefined) query.before = options.before;
+    if (options.after !== undefined) query.after = options.after;
+    if (options.order !== undefined) query.order = options.order;
+    if (options.limit !== undefined) query.limit = options.limit;
+
+    const response = (await requestControl(
+      this.client,
+      "conversation_messages_list",
+      {
+        conversation_id: conversationId,
+        ...(Object.keys(query).length > 0 ? { query } : {}),
+      },
+      (message) => message.type === "conversation_messages_list_response",
+    )) as ConversationMessagesListResponse;
+
+    if (!response.success) {
+      throw new Error(response.error ?? "listMessages failed");
+    }
+
     return {
-      recovered: false,
-      unsupported: true,
-      detail: "Remote app-server sessions do not yet support approval recovery through the SDK.",
+      messages: response.messages ?? [],
+      nextBefore: null,
+      hasMore: false,
     };
   }
 
-  async listMessages(_options: ListMessagesOptions = {}): Promise<ListMessagesResult> {
-    throw new Error("Remote app-server sessions do not yet support listMessages().");
-  }
-
   async bootstrapState(
-    _options: BootstrapStateOptions = {},
+    options: BootstrapStateOptions = {},
   ): Promise<BootstrapStateResult> {
-    throw new Error("Remote app-server sessions do not yet support bootstrapState().");
+    if (!this.initialized) {
+      await this.initialize();
+    }
+    const page = await this.listMessages({
+      limit: options.limit,
+      order: options.order,
+    });
+
+    return {
+      agentId: this._agentId ?? "",
+      conversationId: this._conversationId ?? "",
+      model: this._model,
+      tools: Array.from(this.externalTools.keys()),
+      memfsEnabled: false,
+      messages: page.messages,
+      nextBefore: page.nextBefore ?? null,
+      hasMore: page.hasMore ?? false,
+      hasPendingApproval: false,
+    };
   }
 
   close(): void {
@@ -552,6 +696,8 @@ export class AppServerSession implements LettaCodeSession {
     this.removeMessageHandler?.();
     this.client?.close();
     this.client = null;
+    this.ownedAppServer?.close();
+    this.ownedAppServer = null;
     this.resolveAll(null);
   }
 
@@ -569,6 +715,119 @@ export class AppServerSession implements LettaCodeSession {
 
   async [Symbol.asyncDispose](): Promise<void> {
     this.close();
+  }
+
+  private async resolveAppServerUrl(): Promise<string> {
+    if (this.remoteOptions.url) {
+      return this.remoteOptions.url;
+    }
+    if (this.remoteOptions.local !== true) {
+      throw new Error("App-server session requires a url unless local app-server spawning is enabled.");
+    }
+    this.ownedAppServer = await startLocalAppServer({
+      listen: this.remoteOptions.localListen,
+      startupTimeoutMs: this.remoteOptions.localStartupTimeoutMs,
+    });
+    return this.ownedAppServer.url;
+  }
+
+  private currentOptions(): LettaCodeClientSessionOptions | CreateAgentOptions {
+    return this.mode.kind === "create-agent" ? this.mode.options : this.mode.options;
+  }
+
+  private async applyPostInitializeOptions(): Promise<void> {
+    if (!this.client || !this.runtime) return;
+
+    const options = this.currentOptions();
+
+    if (options.memfs === true || (this.mode.kind === "create-agent" && options.memfs !== false)) {
+      const response = (await requestControl(
+        this.client,
+        "enable_memfs",
+        { agent_id: this.runtime.agent_id },
+        (message) => message.type === "enable_memfs_response",
+      )) as EnableMemfsResponse;
+      ensureSuccess(response, "Failed to enable memfs");
+    }
+
+    const sleeptimeSettings = resolveReflectionSettings(options.sleeptime);
+    if (sleeptimeSettings) {
+      const response = (await requestControl(
+        this.client,
+        "set_reflection_settings",
+        {
+          runtime: this.runtime,
+          settings: sleeptimeSettings,
+          scope: "both",
+        },
+        (message) => message.type === "set_reflection_settings_response",
+      )) as SetReflectionSettingsResponse;
+      ensureSuccess(response, "Failed to update sleeptime settings");
+    }
+
+    if (this.mode.kind !== "session") return;
+
+    if (this.mode.options.model !== undefined) {
+      const response = (await requestControl(
+        this.client,
+        "update_model",
+        {
+          runtime: this.runtime,
+          payload: { model_handle: this.mode.options.model },
+        },
+        (message) => message.type === "update_model_response",
+      )) as UpdateModelResponse;
+      ensureSuccess(response, "Failed to update model");
+      this._model = this.mode.options.model;
+    }
+  }
+
+  async changeDeviceState(
+    updates: {
+      cwd?: string;
+      permissionMode?: LettaCodeClientSessionOptions["permissionMode"];
+      agentId?: string;
+      conversationId?: string;
+    },
+  ): Promise<void> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+    if (!this.client || !this.runtime) {
+      throw new Error("Session is not initialized");
+    }
+
+    const payload: Record<string, unknown> = {};
+    if (updates.cwd !== undefined) payload.cwd = updates.cwd;
+    const mode = mapPermissionMode(updates.permissionMode);
+    if (mode !== undefined) payload.mode = mode;
+    if (updates.agentId !== undefined) payload.agent_id = updates.agentId;
+    if (updates.conversationId !== undefined) payload.conversation_id = updates.conversationId;
+
+    this.client.send({
+      type: "change_device_state",
+      runtime: this.runtime,
+      payload,
+    } as Parameters<AppServerClient["send"]>[0]);
+  }
+
+  async updateToolset(toolsetPreference: string): Promise<void> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+    if (!this.client || !this.runtime) {
+      throw new Error("Session is not initialized");
+    }
+    const response = (await requestControl(
+      this.client,
+      "update_toolset",
+      {
+        runtime: this.runtime,
+        toolset_preference: toolsetPreference,
+      },
+      (message) => message.type === "update_toolset_response",
+    )) as UpdateToolsetResponse;
+    ensureSuccess(response, "Failed to update toolset");
   }
 
   private async startRuntime(): Promise<RuntimeStartResponse> {
@@ -622,7 +881,7 @@ export class AppServerSession implements LettaCodeSession {
     }
 
     throw new Error(
-      "Remote app-server createSession() requires an agent id. Call createAgent() first or pass an agent id.",
+      "App-server createSession() requires an agent id. Call createAgent() first or pass an agent id.",
     );
   }
 

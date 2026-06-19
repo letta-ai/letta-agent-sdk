@@ -102,9 +102,9 @@ describe("bootstrapState: protocol logic via mock", () => {
     expect(subtypeUsed).toBe("bootstrap_session_state");
   });
 
-  test("buildCliArgs: listMessagesDirect uses --memfs-startup skip", () => {
-    // listMessagesDirect internally uses resumeSession with memfsStartup: "skip"
-    // Verify this is reflected in the CLI args
+  test("buildCliArgs: legacy stdio prefetch can use --memfs-startup skip", () => {
+    // The legacy stdio path still supports read-only prefetch sessions that skip
+    // MemFS startup. App-server listMessagesDirect does not use CLI args.
     const opts: InternalSessionOptions = {
       agentId: "agent-test",
       defaultConversation: true,

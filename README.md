@@ -21,9 +21,15 @@ npm install @letta-ai/letta-code-sdk
 ```ts
 import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
 
-// Local: embedded Letta Code harness, stdio wire. This spawns/manages a
-// subprocess; it is not the same as `remote` + a localhost URL.
+// Local: SDK-owned Letta Code app-server over loopback websockets. The SDK
+// spawns/manages the app-server process for you.
 const localClient = new LettaCodeClient({ backend: "local" });
+
+// Legacy local stdio transport remains available as an explicit fallback.
+const legacyLocalClient = new LettaCodeClient({
+  backend: "local",
+  transport: "stdio",
+});
 
 // Remote: connect to a user-managed Letta Code app-server over websockets.
 const remoteClient = new LettaCodeClient({
@@ -65,7 +71,7 @@ for await (const msg of session.stream()) {
 }
 ```
 
-By default, `resumeSession(agentId)` continues the agent’s default conversation. To start a fresh thread, use `createSession(agentId)` (see docs). For the remote app-server backend, pass an agent id to `createSession(agentId)`; default/LRU local-agent selection is only available through the local subprocess backend.
+By default, `resumeSession(agentId)` continues the agent’s default conversation. To start a fresh thread, use `createSession(agentId)` (see docs). App-server sessions require an explicit agent id; default/LRU local-agent selection (`createSession()` with no agent id) remains available through the legacy local stdio fallback.
 
 For remote/cloud backends, `environment` is session-scoped and can override the
 client's default execution target once those backends are implemented:
@@ -76,8 +82,10 @@ await using session = client.resumeSession(agentId, {
 });
 ```
 
-The legacy top-level helpers (`createAgent`, `createSession`, `resumeSession`,
-and `prompt`) remain available and use the local subprocess backend.
+The top-level helpers (`createAgent`, `createSession`, `resumeSession`, and
+`prompt`) remain available. They use the local app-server path when an agent id
+is present; `createSession()`/`prompt()` without an agent id keep the historical
+default/LRU-agent behavior through the legacy local stdio fallback.
 
 ### User-managed app-server backend
 

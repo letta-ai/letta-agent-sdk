@@ -254,7 +254,7 @@ export type AnyAgentTool = AgentTool<any, unknown>;
 /**
  * How the SDK reaches or runs the Letta Code harness.
  *
- * - local: spawn/manage a local Letta Code subprocess and speak stdio.
+ * - local: spawn/manage a local Letta Code app-server over loopback websockets.
  * - remote: connect to a user-managed app-server over websockets.
  * - cloud: connect through Letta Cloud/Constellation. Placeholder for now.
  */
@@ -269,8 +269,31 @@ export type LettaCodeBackend = "local" | "remote" | "cloud";
  */
 export type LettaCodeEnvironment = string | { name: string } | { id: string };
 
+export interface LettaCodeLocalAppServerOptions {
+  /**
+   * Optional URL for tests or advanced users with a pre-started local app-server.
+   * Omit to let the SDK spawn and own a loopback app-server.
+   */
+  url?: string;
+  /** Optional WebSocket constructor for tests/non-standard runtimes. */
+  WebSocket?: LettaCodeSocketConstructor;
+  /** Timeout for app-server request/turn correlation. */
+  requestTimeoutMs?: number;
+  /** Local app-server listen URL when the SDK spawns it. Defaults to ws://127.0.0.1:0. */
+  listen?: string;
+  /** Timeout waiting for the spawned app-server to print its listening URL. */
+  startupTimeoutMs?: number;
+}
+
 export interface LettaCodeLocalClientOptions {
   backend?: "local";
+  /**
+   * Local transport. Defaults to app-server. Set to "stdio" for the legacy
+   * subprocess JSON transport fallback.
+   */
+  transport?: "app-server" | "stdio";
+  /** Advanced app-server overrides for local transport. */
+  appServer?: LettaCodeLocalAppServerOptions;
 }
 
 export interface LettaCodeRemoteClientOptions {

@@ -33,7 +33,13 @@
  */
 
 import { Session } from "./session.js";
-import type { CreateSessionOptions, CreateAgentOptions, SDKResultMessage } from "./types.js";
+import { LettaCodeClient } from "./client.js";
+import type {
+  CreateSessionOptions,
+  CreateAgentOptions,
+  LettaCodeSession,
+  SDKResultMessage,
+} from "./types.js";
 import { validateCreateSessionOptions, validateCreateAgentOptions } from "./validation.js";
 
 // Re-export types
@@ -43,6 +49,7 @@ export type {
   LettaCodeBackend,
   LettaCodeEnvironment,
   LettaCodeLocalClientOptions,
+  LettaCodeLocalAppServerOptions,
   LettaCodeRemoteClientOptions,
   LettaCodeCloudClientOptions,
   LettaCodeClientOptions,
@@ -158,10 +165,7 @@ export {
  */
 export async function createAgent(options: CreateAgentOptions = {}): Promise<string> {
   validateCreateAgentOptions(options);
-  const session = new Session({ ...options, createOnly: true });
-  const initMsg = await session.initialize();
-  session.close();
-  return initMsg.agentId;
+  return new LettaCodeClient().createAgent(options);
 }
 
 /**
@@ -179,13 +183,17 @@ export async function createAgent(options: CreateAgentOptions = {}): Promise<str
  * await using session = createSession(agentId);
  * ```
  */
-export function createSession(agentId?: string, options: CreateSessionOptions = {}): Session {
+export function createSession(
+  agentId?: string,
+  options: CreateSessionOptions = {},
+): LettaCodeSession {
   validateCreateSessionOptions(options);
   if (agentId) {
-    return new Session({ ...options, agentId, newConversation: true });
-  } else {
-    return new Session({ ...options, newConversation: true });
+    return new LettaCodeClient().createSession(agentId, options);
   }
+  // The app-server runtime_start protocol requires an explicit agent id. Keep
+  // the historical default/LRU-agent helper on the legacy stdio transport.
+  return new LettaCodeClient({ backend: "local", transport: "stdio" }).createSession(options);
 }
 
 /**
@@ -208,14 +216,10 @@ export function createSession(agentId?: string, options: CreateSessionOptions = 
  */
 export function resumeSession(
   id: string,
-  options: CreateSessionOptions = {}
-): Session {
+  options: CreateSessionOptions = {},
+): LettaCodeSession {
   validateCreateSessionOptions(options);
-  if (id.startsWith("conv-")) {
-    return new Session({ ...options, conversationId: id });
-  } else {
-    return new Session({ ...options, agentId: id, defaultConversation: true });
-  }
+  return new LettaCodeClient().resumeSession(id, options);
 }
 
 /**
@@ -287,13 +291,8 @@ export async function listMessagesDirect(
 ): Promise<ListMessagesResult> {
   // resumeSession uses --default which maps to the agent's default conversation.
   // The session is transient: we only need it long enough to list messages.
-  const session = resumeSession(agentId, {
+  const session = new LettaCodeClient().resumeSession(agentId, {
     permissionMode: "bypassPermissions",
-    // Use skip policy so we don't wait on a git pull for a read-only prefetch.
-    memfsStartup: "skip",
-    // Disable skills/reminders to minimise startup overhead.
-    skillSources: [],
-    systemInfoReminder: false,
   });
   await session.initialize();
   try {

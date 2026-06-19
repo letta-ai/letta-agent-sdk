@@ -11,6 +11,7 @@ import type {
   LettaCodeClientSessionOptions,
   LettaCodeEnvironment,
   LettaCodeRemoteClientOptions,
+  LettaCodeLocalClientOptions,
   LettaCodeSession,
   SDKResultMessage,
   SendMessage,
@@ -59,10 +60,11 @@ function looksLikeConversationId(id: string): boolean {
  * Top-level Letta Code SDK client.
  *
  * `backend` selects how the SDK reaches or runs the Letta Code harness.
- * `local` spawns the bundled Letta Code CLI subprocess and speaks the existing
- * stdio JSON protocol. `remote` connects to a user-managed Letta Code
- * app-server websocket endpoint. `cloud` remains a typed placeholder for the
- * upcoming Letta Cloud / Constellation transport.
+ * `local` spawns an SDK-owned Letta Code app-server and speaks the websocket
+ * protocol by default, with an explicit stdio fallback for legacy flows.
+ * `remote` connects to a user-managed Letta Code app-server websocket endpoint.
+ * `cloud` remains a typed placeholder for the upcoming Letta Cloud /
+ * Constellation transport.
  */
 export class LettaCodeClient {
   readonly backend: LettaCodeBackend;
@@ -85,6 +87,31 @@ export class LettaCodeClient {
       throw new Error(
         "LettaCodeClient environment is only valid for remote/cloud backends.",
       );
+    }
+
+    if (this.backend === "local") {
+      const localOptions = options as LettaCodeLocalClientOptions;
+      if (
+        localOptions.transport !== undefined &&
+        localOptions.transport !== "app-server" &&
+        localOptions.transport !== "stdio"
+      ) {
+        throw new Error("Invalid local transport. Valid values: app-server, stdio.");
+      }
+      const requestTimeoutMs = localOptions.appServer?.requestTimeoutMs;
+      if (
+        requestTimeoutMs !== undefined &&
+        (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs <= 0)
+      ) {
+        throw new Error("Invalid appServer.requestTimeoutMs. Expected a positive integer.");
+      }
+      const startupTimeoutMs = localOptions.appServer?.startupTimeoutMs;
+      if (
+        startupTimeoutMs !== undefined &&
+        (!Number.isInteger(startupTimeoutMs) || startupTimeoutMs <= 0)
+      ) {
+        throw new Error("Invalid appServer.startupTimeoutMs. Expected a positive integer.");
+      }
     }
 
     if (this.backend === "remote") {
@@ -125,6 +152,15 @@ export class LettaCodeClient {
       return initMsg.agentId;
     }
     this.assertLocalBackend("createAgent");
+    if (!this.useLegacyLocalStdio()) {
+      const session = new AppServerSession(this.localAppServerOptions(), {
+        kind: "create-agent",
+        options,
+      });
+      const initMsg = await session.initialize();
+      session.close();
+      return initMsg.agentId;
+    }
     const session = new Session({ ...options, createOnly: true });
     const initMsg = await session.initialize();
     session.close();
@@ -153,10 +189,18 @@ export class LettaCodeClient {
     if (this.backend === "remote") {
       if (!agentId) {
         throw new Error(
-          "Remote app-server createSession() requires an agent id. Call createAgent() first or pass an agent id.",
+          "App-server createSession() requires an agent id. Call createAgent() first or pass an agent id.",
         );
       }
       return new AppServerSession(this.remoteOptions(), {
+        kind: "session",
+        agentId,
+        newConversation: true,
+        options: resolvedOptions,
+      });
+    }
+    if (!this.useLegacyLocalStdio() && agentId) {
+      return new AppServerSession(this.localAppServerOptions(), {
         kind: "session",
         agentId,
         newConversation: true,
@@ -192,6 +236,21 @@ export class LettaCodeClient {
         });
       }
       return new AppServerSession(this.remoteOptions(), {
+        kind: "session",
+        agentId: id,
+        defaultConversation: true,
+        options,
+      });
+    }
+    if (!this.useLegacyLocalStdio()) {
+      if (looksLikeConversationId(id)) {
+        return new AppServerSession(this.localAppServerOptions(), {
+          kind: "session",
+          conversationId: id,
+          options,
+        });
+      }
+      return new AppServerSession(this.localAppServerOptions(), {
         kind: "session",
         agentId: id,
         defaultConversation: true,
@@ -246,6 +305,9 @@ export class LettaCodeClient {
           `${action}() environment overrides are only valid for remote/cloud backends.`,
         );
       }
+      if (!this.useLegacyLocalStdio()) {
+        assertRemoteSessionOptionsSupported(action, options);
+      }
       return;
     }
 
@@ -256,6 +318,27 @@ export class LettaCodeClient {
     throw new Error(
       `LettaCodeClient backend '${this.backend}' is not implemented yet. ${action} currently supports backend 'local' only.`,
     );
+  }
+
+  private useLegacyLocalStdio(): boolean {
+    return (this.options as LettaCodeLocalClientOptions).transport === "stdio";
+  }
+
+  private localAppServerOptions() {
+    const localOptions = this.options as LettaCodeLocalClientOptions;
+    const appServer = localOptions.appServer;
+    return {
+      local: appServer?.url === undefined,
+      ...(appServer?.url !== undefined ? { url: appServer.url } : {}),
+      ...(appServer?.WebSocket !== undefined ? { WebSocket: appServer.WebSocket } : {}),
+      ...(appServer?.requestTimeoutMs !== undefined
+        ? { requestTimeoutMs: appServer.requestTimeoutMs }
+        : {}),
+      ...(appServer?.listen !== undefined ? { localListen: appServer.listen } : {}),
+      ...(appServer?.startupTimeoutMs !== undefined
+        ? { localStartupTimeoutMs: appServer.startupTimeoutMs }
+        : {}),
+    };
   }
 
   private remoteOptions(): LettaCodeRemoteClientOptions {
