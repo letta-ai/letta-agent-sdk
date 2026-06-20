@@ -59,26 +59,14 @@ function createCloudFetchMock(
       return Promise.resolve(jsonResponse({ id: "conv-1", agent_id: "agent-from-conv" }));
     }
 
-    if (parsed.pathname === "/v1/sandboxes" && method === "POST") {
-      return Promise.resolve(jsonResponse({
-        sandboxId: "sandbox-1",
-        deviceId: "device-sandbox",
-        connectionName: "sandbox-agent-1",
-      }));
-    }
-
-    if (parsed.pathname === "/v1/sandboxes/sandbox-1/terminate" && method === "POST") {
-      return Promise.resolve(jsonResponse({ success: true }));
-    }
-
     if (parsed.pathname === "/v1/environments" && method === "GET") {
       return Promise.resolve(jsonResponse({
         connections: environmentConnections ?? [
           {
-            id: "env-sandbox",
-            connectionId: "conn-sandbox",
-            deviceId: "device-sandbox",
-            connectionName: "sandbox-agent-1",
+            id: "env-explicit",
+            connectionId: "conn-explicit",
+            deviceId: "device-explicit",
+            connectionName: "explicit-env",
             connectedAt: 1,
           },
         ],
@@ -471,7 +459,7 @@ function resetFakeAppServer(): void {
 }
 
 describe("CloudEnvironmentSession", () => {
-  test("creates a Cloud agent sandbox before using the Remote Client websocket", async () => {
+  test("requires an explicit environment while SDK-managed Cloud sandboxes are unavailable", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
     const client = new LettaCodeClient({
@@ -481,7 +469,28 @@ describe("CloudEnvironmentSession", () => {
       fetch: createCloudFetchMock(requests),
       WebSocket: FakeCloudSocket,
       requestTimeoutMs: 1_000,
-      sandbox: { pollIntervalMs: 1, readyTimeoutMs: 50 },
+    });
+
+    const session = client.resumeSession("agent-1");
+    await expect(session.initialize()).rejects.toThrow(
+      "Cloud backend requires an environment target until managed Cloud sandboxes land",
+    );
+
+    expect(requests.some((request) => new URL(request.url).pathname.includes("/sandboxes"))).toBe(false);
+    expect(FakeCloudSocket.instances).toHaveLength(0);
+  });
+
+  test("uses an explicit environment before using the Remote Client websocket", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
     });
 
     const session = client.resumeSession("agent-1", {
@@ -497,18 +506,13 @@ describe("CloudEnvironmentSession", () => {
       agentId: "agent-1",
       conversationId: "default",
     });
-    expect(requests.slice(0, 2).map((request) => `${request.method} ${new URL(request.url).pathname}`)).toEqual([
-      "POST /v1/sandboxes",
-      "GET /v1/environments",
-    ]);
-    expect(requests[0]!.body).toEqual({ agentId: "agent-1" });
-    expect(requests[0]!.headers.authorization ?? requests[0]!.headers.Authorization).toBe("Bearer sk-test");
+    expect(requests.some((request) => new URL(request.url).pathname.includes("/sandboxes"))).toBe(false);
 
     const controlSocket = FakeCloudSocket.socket("control")!;
     const streamSocket = FakeCloudSocket.socket("stream")!;
     const wsUrl = new URL(controlSocket.url);
     expect(wsUrl.protocol).toBe("wss:");
-    expect(wsUrl.pathname).toBe("/v1/environments/conn-sandbox/status/ws");
+    expect(wsUrl.pathname).toBe("/v1/environments/conn-explicit/status/ws");
     expect(wsUrl.searchParams.get("agentId")).toBe("agent-1");
     expect(wsUrl.searchParams.get("conversationId")).toBe("default");
     expect(wsUrl.searchParams.get("channel")).toBe("control");
@@ -574,12 +578,6 @@ describe("CloudEnvironmentSession", () => {
     expect(streamSocket.sent).toContainEqual({ type: "ack", seq: 102 });
 
     session.close();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(requests.at(-1)).toMatchObject({
-      method: "POST",
-      url: "https://api.test/v1/sandboxes/sandbox-1/terminate",
-    });
   });
 
   test("attaches to an explicit environment without creating a sandbox", async () => {
@@ -867,16 +865,14 @@ describe("CloudEnvironmentSession", () => {
       fetch: createCloudFetchMock(requests),
       WebSocket: FakeCloudSocket,
       requestTimeoutMs: 1_000,
-      sandbox: { pollIntervalMs: 1, readyTimeoutMs: 50 },
+      environment: "explicit-env",
     });
 
     const session = client.resumeSession("agent-1");
     await session.initialize();
 
-    const sandboxRequest = requests.find((request) => new URL(request.url).pathname.endsWith("/sandboxes"));
     const environmentRequest = requests.find((request) => new URL(request.url).pathname === "/v1/environments");
-    expect(sandboxRequest?.headers.authorization).toBe("Bearer sk-header");
-    expect(sandboxRequest?.headers["x-project-id"]).toBe("project-1");
+    expect(requests.some((request) => new URL(request.url).pathname.includes("/sandboxes"))).toBe(false);
     expect(environmentRequest?.headers.authorization).toBe("Bearer sk-header");
     expect(environmentRequest?.headers["x-project-id"]).toBe("project-1");
     expect(FakeCloudSocket.socket("control")!.options?.headers).toEqual({
@@ -952,7 +948,7 @@ describe("CloudEnvironmentSession", () => {
       fetch: createCloudFetchMock(requests),
       WebSocket: FakeCloudSocket,
       requestTimeoutMs: 1_000,
-      sandbox: { pollIntervalMs: 1, readyTimeoutMs: 50 },
+      environment: { connectionId: "conn-explicit" },
     });
 
     const session = client.resumeSession("agent-1", {
@@ -996,7 +992,6 @@ describe("CloudEnvironmentSession", () => {
       WebSocket: FakeCloudSocket,
       requestTimeoutMs: 1_000,
       environment: { connectionId: "conn-explicit" },
-      sandbox: { lifecycle: "external" },
     });
 
     const session = client.resumeSession("agent-1", {
@@ -1106,38 +1101,17 @@ describe("CloudEnvironmentSession", () => {
     }
   });
 
-  test("ignores stale same-name sandbox environments and cleans up failed ephemeral init", async () => {
-    resetFakeCloud();
-    const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+  test("rejects SDK-managed sandbox options until Cloud sandbox support lands", () => {
+    expect(() => new LettaCodeClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
-      fetch: createCloudFetchMock(requests, [
-        {
-          id: "env-stale",
-          connectionId: "conn-stale",
-          deviceId: "different-device",
-          connectionName: "sandbox-agent-1",
-          connectedAt: 1,
-        },
-      ]),
+      fetch: createCloudFetchMock([]),
       WebSocket: FakeCloudSocket,
-      requestTimeoutMs: 1_000,
-      sandbox: { pollIntervalMs: 1, readyTimeoutMs: 5 },
-    });
-
-    const session = client.resumeSession("agent-1");
-    await expect(session.initialize()).rejects.toThrow(
-      "Timed out waiting for Cloud sandbox sandbox-1 (device-sandbox) to come online",
+      sandbox: { lifecycle: "ephemeral" },
+    } as never)).toThrow(
+      "Cloud backend SDK-managed sandboxes are not available yet",
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(FakeCloudSocket.instances).toHaveLength(0);
-    expect(requests.some((request) =>
-      request.method === "POST" &&
-      new URL(request.url).pathname === "/v1/sandboxes/sandbox-1/terminate"
-    )).toBe(true);
   });
 
   test("reports terminal Cloud loop errors instead of idle success", async () => {
@@ -1152,7 +1126,6 @@ describe("CloudEnvironmentSession", () => {
       WebSocket: FakeCloudSocket,
       requestTimeoutMs: 1_000,
       environment: { connectionId: "conn-explicit" },
-      sandbox: { lifecycle: "external" },
     });
 
     const session = client.resumeSession("agent-1");
@@ -1184,7 +1157,6 @@ describe("CloudEnvironmentSession", () => {
       WebSocket: FakeCloudSocket,
       requestTimeoutMs: 1_000,
       environment: { connectionId: "conn-explicit" },
-      sandbox: { lifecycle: "external" },
     });
 
     const session = client.resumeSession("agent-1");

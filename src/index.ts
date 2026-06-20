@@ -52,8 +52,6 @@ export type {
   LettaCodeLocalAppServerOptions,
   LettaCodeRemoteClientOptions,
   LettaCodeCloudClientOptions,
-  LettaCodeCloudSandboxLifecycle,
-  LettaCodeCloudSandboxOptions,
   LettaCodeClientOptions,
   LettaCodeClientSessionOptions,
   LettaCodeSession,

@@ -3,9 +3,9 @@
 Status: current post-fix tracker. `SLOP_AUDIT.md` is retained as historical audit trail; this file is the source of truth for what is fixed and what remains.
 
 ## Goal
-Keep Cloud sandbox backend aligned with the app-server/listener runtime protocol. Cloud should own Cloud-only concerns (REST agent/conversation/environment/sandbox resolution and Cloud status-websocket transport reliability), while turn execution, request correlation, runtime startup, external tools, and terminality flow through the shared app-server client/controller path.
+Keep the Cloud backend aligned with the app-server/listener runtime protocol. Cloud should own Cloud-only concerns (REST agent/conversation/environment resolution and Cloud status-websocket transport reliability), while turn execution, request correlation, runtime startup, external tools, and terminality flow through the shared app-server client/controller path.
 
-This was the execution punch list for the de-slop pass. The architectural de-slop work is now complete on this branch; remaining items are live Cloud sandbox validation and optional hardening tests.
+This was the execution punch list for the de-slop pass. The architectural de-slop work is now complete on this branch. This PR intentionally requires callers to supply an explicit `environment`; SDK-managed Cloud sandboxes are split into a fast-follow paired with `letta-cloud#12516`.
 
 ## Current fixed baseline
 Already fixed in the current working tree:
@@ -14,13 +14,13 @@ Already fixed in the current working tree:
 - Cloud create-agent no longer suppresses app-server MemFS/default harness behavior.
 - Cloud pending approval recovery uses `sync` + `sync_response` with `recover_approvals:true` and `force_device_status:true`.
 - Cloud enables `reflectionSettings` and sends `set_reflection_settings` for supported sleeptime trigger settings.
-- Cloud sandbox cleanup tracks the sandbox owner agent id and cleans up failed ephemeral init.
-- Cloud sandbox environment matching uses `deviceId` only.
+- Direct Cloud sessions require an explicit `environment` until SDK-managed Cloud sandboxes land.
+- SDK-managed sandbox lifecycle options/CRUD were removed from this PR's public and runtime path; passing sandbox options fails fast instead of silently depending on unfinished Cloud listener registration.
 - `environment` is Cloud-only; remote app-server clients reject it.
 - Direct Cloud status sessions now open an `AppServerClient` over `/v1/environments/{connectionId}/status/ws` and issue `runtime_start` for the resolved `{agent_id, conversation_id}`.
 - The large duplicate `CloudStatusRuntimeController` turn state machine was removed. Cloud now reuses `AppServerRuntimeController` / `AppServerClient.runTurn()` for turn input, terminality, request correlation, `sync`, and external tool responses.
 - Cloud transport reliability remains a narrow gateway socket adapter: auth URL/header construction, split control/stream channels, Cloud gateway fanout de-dupe, ACKs, event-sequence gap `sync`, idempotency de-dupe, and heartbeat pings.
-- Cloud sandbox CRUD now matches the live Cloud contract: `POST /v1/sandboxes` with `{ agentId }` to create, `GET /v1/environments` filtered by sandbox `deviceId` to resolve the listener connection, and `POST /v1/sandboxes/{sandboxId}/terminate` for ephemeral cleanup. The stale `/v1/agents/{agentId}/sandboxes` and `/refresh` routes were removed from the SDK path.
+- Cloud sandbox CRUD was live-probed for the fast follow: production accepts `POST /v1/sandboxes` with `{ agentId }` to create and `POST /v1/sandboxes/{sandboxId}/terminate` for cleanup; the SDK does not call those routes in this PR.
 - Permission approvals are not Cloud-specific. `control_request` / `can_use_tool` -> SDK `canUseTool` -> app-server `approval_response` is core app-server/listener protocol behavior and now lives in the shared app-server-backed session path.
 - Approval responses now use the app-server/listener wire contract (`updated_input` and `selected_permission_suggestion_ids`) rather than SDK-only camelCase fields.
 - SDK-hosted tools are registered through `runtime_start.external_tools` and executed through the shared app-server external-tool handler.
@@ -39,18 +39,18 @@ Executed in this pass:
 - Both `AppServerSession` and `CloudEnvironmentSession` now register the same approval bridge on their `AppServerClient`.
 - App-server/Cloud turn input no longer injects SDK-only transport hints such as `supports_control_response` or `payload.source`.
 - Approval responses prefer the runtime scope carried on the control request (`runtime` or top-level `agent_id`/`conversation_id`) before falling back to locally cached session runtime.
-- Cloud-only code stays focused on sandbox lifecycle, Cloud REST lookup, gateway auth/routing, and gateway delivery-envelope quirks.
+- Cloud-only code stays focused on explicit environment resolution, Cloud REST lookup, gateway auth/routing, and gateway delivery-envelope quirks.
 
-### 1. Direct Cloud sandbox runtime-start contract verification
-The local fake now asserts `runtime_start` on Cloud status sockets. The existing `bun run test:live` suite exercises the local app-server path against real API-backed agents; direct `backend:"cloud"` sandbox `/status/ws` coverage is tracked separately here.
+### 1. Direct Cloud managed-sandbox runtime-start contract verification — split to fast follow
+The local fake now asserts `runtime_start` on Cloud status sockets for explicit environments. The existing `bun run test:live` suite exercises the local app-server path against real API-backed agents; direct `backend:"cloud"` managed-sandbox `/status/ws` coverage is blocked on the Cloud sandbox backend/listener work and should be added in the fast-follow PR.
 
 Live route probe:
 - Production Cloud accepts `POST /v1/sandboxes` and immediate `POST /v1/sandboxes/{sandboxId}/terminate` with the current `LETTA_API_KEY`.
 - Production Cloud rejects the SDK's former stale route `POST /v1/agents/{agentId}/sandboxes` with 404.
-- After the SDK route fix, direct `backend:"cloud"` initialization creates a sandbox successfully but still times out waiting for the sandbox listener environment/connection to come online. Ephemeral cleanup calls terminate; a follow-up `/v1/sandboxes` list did not show the just-created timed-out sandbox.
+- After the SDK route fix, direct `backend:"cloud"` managed-sandbox initialization created a sandbox successfully but still timed out waiting for the sandbox listener environment/connection to come online. That listener/registration work is expected to land via `letta-cloud#12516`, so this PR now requires explicit `environment` instead of creating SDK-managed sandboxes.
 
 Validation to add/run:
-- Live Cloud sandbox smoke after listener registration works: initialize direct Cloud session, confirm `/status/ws?channel=control|stream` accepts `runtime_start` and returns `runtime_start_response`.
+- Fast-follow live Cloud sandbox smoke after `letta-cloud#12516`: initialize direct Cloud session without explicit environment, confirm `/status/ws?channel=control|stream` accepts `runtime_start` and returns `runtime_start_response`.
 - Live turn smoke: after runtime_start, `runTurn()` completes through app-server client terminality.
 - Live external tool smoke: `runtime_start.external_tools` registers schemas and a Cloud-issued `external_tool_call_request` receives `external_tool_call_response`.
 
@@ -102,7 +102,7 @@ Live validation status:
 
 Final validation after this doc/test cleanup:
 - `bun run check` — passed.
-- `bun test src/tests/cloud-session.test.ts src/tests/client.test.ts --timeout 10000` — 37 pass, 0 fail.
-- `bun test --timeout 10000` — 201 pass, 9 skip, 0 fail.
+- `bun test src/tests/cloud-session.test.ts src/tests/client.test.ts --timeout 10000` — 38 pass, 0 fail.
+- `bun test --timeout 10000` — 202 pass, 9 skip, 0 fail.
 - `bash -lc 'set -a; source ~/dev/.env >/dev/null 2>&1; set +a; bun run test:live'` — 8 pass, 0 fail.
-- Direct `backend:"cloud"` production smoke after the sandbox route fix: sandbox creation succeeds through `POST /v1/sandboxes`, but initialization still times out waiting for an online listener connection. This is the remaining Cloud sandbox backend/listener-registration blocker before direct Cloud runtime smoke can pass.
+- Direct `backend:"cloud"` managed-sandbox production smoke after the sandbox route fix: sandbox creation succeeds through `POST /v1/sandboxes`, but initialization still times out waiting for an online listener connection. This is split out as a fast-follow paired with `letta-cloud#12516`; this PR's direct Cloud path requires an explicit environment.

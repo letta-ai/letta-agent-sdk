@@ -70,8 +70,8 @@ function looksLikeConversationId(id: string): boolean {
  * `local` spawns an SDK-owned Letta Code app-server and speaks the websocket
  * protocol by default, with an explicit stdio fallback for legacy flows.
  * `remote` connects to a user-managed Letta Code app-server websocket endpoint.
- * `cloud` creates/refreshes Letta Cloud agent sandboxes and controls them over
- * the Remote Client websocket protocol.
+ * `cloud` connects to an explicit Letta Cloud remote environment and controls
+ * it over the Remote Client websocket protocol.
  */
 export class LettaCodeClient {
   readonly backend: LettaCodeBackend;

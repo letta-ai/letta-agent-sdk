@@ -263,7 +263,7 @@ export type AnyAgentTool = AgentTool<any, unknown>;
  *
  * - local: spawn/manage a local Letta Code app-server over loopback websockets.
  * - remote: connect to a user-managed app-server over websockets.
- * - cloud: manage Letta Cloud agent sandboxes and control them over the Remote Client websocket.
+ * - cloud: connect to an explicit Letta Cloud remote environment over the Remote Client websocket.
  */
 export type LettaCodeBackend = "local" | "remote" | "cloud";
 
@@ -280,31 +280,6 @@ export type LettaCodeEnvironment =
   | { connectionId: string }
   | { deviceId: string }
   | { lastUsed: true };
-
-export type LettaCodeCloudSandboxLifecycle = "ephemeral" | "keep-warm" | "external";
-
-export interface LettaCodeCloudSandboxOptions {
-  /**
-   * Sandbox ownership policy.
-   *
-   * - ephemeral: SDK creates a sandbox and terminates it on close.
-   * - keep-warm: SDK creates a sandbox and leaves it warm on close.
-   * - external: SDK attaches to the configured environment without creating a sandbox.
-   *
-   * Defaults to ephemeral when no environment is supplied, otherwise external.
-   */
-  lifecycle?: LettaCodeCloudSandboxLifecycle;
-  /** Reserved for Cloud TTL APIs; accepted for forward compatibility. */
-  ttlMinutes?: number;
-  /** Timeout waiting for the created sandbox's environment connection to come online. */
-  readyTimeoutMs?: number;
-  /** Poll interval while waiting for the created sandbox's connectionId. */
-  pollIntervalMs?: number;
-  /** Reserved for Cloud TTL refresh APIs; accepted for forward compatibility. */
-  refreshOnTurn?: boolean;
-  /** Override close cleanup behavior. Defaults true for ephemeral, false otherwise. */
-  terminateOnClose?: boolean;
-}
 
 export interface LettaCodeLocalAppServerOptions {
   /**
@@ -371,9 +346,7 @@ export interface LettaCodeCloudClientOptions {
    * Omit to let the SDK spawn a bundled local app-server authenticated to Cloud.
    */
   appServer?: LettaCodeLocalAppServerOptions;
-  /** Cloud agent sandbox lifecycle options. */
-  sandbox?: LettaCodeCloudSandboxOptions;
-  /** Optional default execution target, overridable at session creation. */
+  /** Execution target for direct Cloud sessions; required here or per session. */
   environment?: LettaCodeEnvironment;
 }
 

@@ -15,7 +15,6 @@ import {
 } from "./app-server-session.js";
 import {
   RemoteEnvironmentClient,
-  type RemoteEnvironmentConnection,
   type RemoteEnvironmentTarget,
 } from "./remote.js";
 import {
@@ -38,8 +37,6 @@ import type {
 
 const DEFAULT_CLOUD_API_BASE_URL = "https://api.letta.com";
 const DEFAULT_TURN_TIMEOUT_MS = 120_000;
-const DEFAULT_SANDBOX_READY_TIMEOUT_MS = 120_000;
-const DEFAULT_SANDBOX_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_PING_INTERVAL_MS = 30_000;
 const SDK_AGENT_ORIGIN = "@letta-ai/letta-code-sdk";
 
@@ -77,20 +74,7 @@ type CloudConversation = Record<string, unknown> & {
   agent_id?: string;
 };
 
-type CloudAgentSandbox = {
-  sandboxId: string;
-  deviceId: string;
-  connectionName: string;
-};
-
 type CloudSessionMode = RuntimeSessionMode;
-
-type ResolvedSandboxPolicy = {
-  lifecycle: "ephemeral" | "keep-warm" | "external";
-  readyTimeoutMs: number;
-  pollIntervalMs: number;
-  terminateOnClose: boolean;
-};
 
 function getDefaultApiKey(): string | undefined {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } })
@@ -194,27 +178,14 @@ function validatePositiveInteger(value: number | undefined, name: string): void 
   }
 }
 
-function validateTtlMinutes(value: number | undefined): void {
-  if (value === undefined) return;
-  if (!Number.isInteger(value) || value < 1 || value > 60) {
-    throw new Error("Invalid sandbox.ttlMinutes. Expected an integer from 1 to 60.");
-  }
-}
-
 export function validateCloudClientOptions(options: LettaCodeCloudClientOptions): void {
   validatePositiveInteger(options.requestTimeoutMs, "requestTimeoutMs");
   validatePositiveInteger(options.appServer?.requestTimeoutMs, "appServer.requestTimeoutMs");
   validatePositiveInteger(options.appServer?.startupTimeoutMs, "appServer.startupTimeoutMs");
-  validateTtlMinutes(options.sandbox?.ttlMinutes);
-  validatePositiveInteger(options.sandbox?.readyTimeoutMs, "sandbox.readyTimeoutMs");
-  validatePositiveInteger(options.sandbox?.pollIntervalMs, "sandbox.pollIntervalMs");
-  if (
-    options.sandbox?.lifecycle !== undefined &&
-    options.sandbox.lifecycle !== "ephemeral" &&
-    options.sandbox.lifecycle !== "keep-warm" &&
-    options.sandbox.lifecycle !== "external"
-  ) {
-    throw new Error("Invalid sandbox.lifecycle. Valid values: ephemeral, keep-warm, external.");
+  if ((options as { sandbox?: unknown }).sandbox !== undefined) {
+    throw new Error(
+      "Cloud backend SDK-managed sandboxes are not available yet. Specify environment; managed sandbox support is blocked on letta-cloud#12516.",
+    );
   }
   if (
     options.webSocketAuth !== undefined &&
@@ -500,22 +471,8 @@ function createCloudStatusWebSocketConstructor(params: {
   return CloudStatusSocketAdapter as AppServerSocketConstructor;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function isCloudConversation(value: unknown): value is CloudConversation & { id: string } {
   return Boolean(value && typeof value === "object" && typeof (value as CloudConversation).id === "string");
-}
-
-function isCloudAgentSandbox(value: unknown): value is CloudAgentSandbox {
-  if (!value || typeof value !== "object") return false;
-  const sandbox = value as CloudAgentSandbox;
-  return (
-    typeof sandbox.sandboxId === "string" &&
-    typeof sandbox.deviceId === "string" &&
-    typeof sandbox.connectionName === "string"
-  );
 }
 
 function externalToolsByName(tools: AnyAgentTool[] | undefined): Map<string, AnyAgentTool> {
@@ -593,7 +550,7 @@ export function assertCloudSessionOptionsSupported(
     throw new Error(`Cloud backend ${action}() can enable MemFS, but disabling it is not wired through the remote device protocol yet.`);
   }
   if (options.memfsStartup !== undefined) {
-    throw new Error(`Cloud backend ${action}() does not use memfsStartup; sandbox/device startup owns synchronization.`);
+    throw new Error(`Cloud backend ${action}() does not use memfsStartup; remote device startup owns synchronization.`);
   }
   if (options.includePartialMessages !== undefined) {
     throw new Error(`Cloud backend ${action}() streams Remote Client deltas directly; includePartialMessages is not a separate toggle.`);
@@ -602,9 +559,6 @@ export function assertCloudSessionOptionsSupported(
 
 export class CloudEnvironmentSession extends RemoteClientSessionCore {
   private connectionId: string | null = null;
-  private sandbox: CloudAgentSandbox | null = null;
-  private sandboxOwnerAgentId: string | null = null;
-  private sandboxPolicy: ResolvedSandboxPolicy | null = null;
   private removeExternalToolHandler: (() => void) | null = null;
   private removeControlRequestHandler: (() => void) | null = null;
   private externalTools = new Map<string, AnyAgentTool>();
@@ -735,15 +689,6 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     this.removeExternalToolHandler = null;
     this.removeControlRequestHandler?.();
     this.removeControlRequestHandler = null;
-
-    if (this.sandbox !== null && this.sandboxPolicy?.terminateOnClose === true) {
-      const sandboxId = this.sandbox.sandboxId;
-      this.sandbox = null;
-      this.sandboxOwnerAgentId = null;
-      void this.terminateSandbox(sandboxId).catch(() => {
-        // close() is intentionally synchronous; cleanup failures are ignored.
-      });
-    }
   }
 
   private async resolveRuntime(): Promise<{ runtime: RuntimeScope }> {
@@ -813,34 +758,11 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     return { id: body.id, agent_id: body.agent_id };
   }
 
-  private resolveSandboxPolicy(): ResolvedSandboxPolicy {
-    if (this.sandboxPolicy) return this.sandboxPolicy;
-    const sandboxOptions = this.cloudOptions.sandbox ?? {};
-    const lifecycle =
-      sandboxOptions.lifecycle ?? (this.effectiveEnvironment() !== undefined ? "external" : "ephemeral");
-    const terminateOnClose =
-      sandboxOptions.terminateOnClose ?? (lifecycle === "ephemeral");
-    this.sandboxPolicy = {
-      lifecycle,
-      readyTimeoutMs: sandboxOptions.readyTimeoutMs ?? DEFAULT_SANDBOX_READY_TIMEOUT_MS,
-      pollIntervalMs: sandboxOptions.pollIntervalMs ?? DEFAULT_SANDBOX_POLL_INTERVAL_MS,
-      terminateOnClose,
-    };
-    return this.sandboxPolicy;
-  }
-
   private async resolveConnection(runtime: RuntimeScope): Promise<{ connectionId: string }> {
-    const policy = this.resolveSandboxPolicy();
-    if (policy.lifecycle !== "external") {
-      this.sandboxOwnerAgentId = runtime.agent_id;
-      this.sandbox = await this.createAgentSandbox(runtime.agent_id);
-      return this.waitForSandboxConnection(this.sandbox, policy);
-    }
-
     const environment = this.effectiveEnvironment();
     if (environment === undefined) {
       throw new Error(
-        "Cloud backend sandbox.lifecycle='external' requires an environment target.",
+        "Cloud backend requires an environment target until managed Cloud sandboxes land. Specify client or session environment; managed sandbox support is blocked on letta-cloud#12516.",
       );
     }
     const target = environmentToRemoteTarget(environment);
@@ -862,74 +784,5 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       ? this.mode.options.environment
       : undefined;
     return modeEnvironment ?? this.cloudOptions.environment;
-  }
-
-  private async createAgentSandbox(agentId: string): Promise<CloudAgentSandbox> {
-    const fetchImpl = getFetch(this.cloudOptions.fetch);
-    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
-    const response = await fetchImpl(
-      `${baseUrl}/v1/sandboxes`,
-      {
-        method: "POST",
-        headers: cloudHeaders(this.cloudOptions),
-        body: JSON.stringify({ agentId }),
-      },
-    );
-    const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud createAgentSandbox()");
-    if (!isCloudAgentSandbox(body)) {
-      throw new Error("Cloud createAgentSandbox() response did not include sandboxId/deviceId/connectionName.");
-    }
-    return body;
-  }
-
-  private async terminateSandbox(sandboxId: string): Promise<void> {
-    const fetchImpl = getFetch(this.cloudOptions.fetch);
-    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
-    const response = await fetchImpl(
-      `${baseUrl}/v1/sandboxes/${encodeURIComponent(sandboxId)}/terminate`,
-      {
-        method: "POST",
-        headers: cloudHeaders(this.cloudOptions),
-        body: JSON.stringify({}),
-      },
-    );
-    const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud terminateSandbox()");
-  }
-
-  private async waitForSandboxConnection(
-    sandbox: CloudAgentSandbox,
-    policy: ResolvedSandboxPolicy,
-  ): Promise<{ connectionId: string; environment?: RemoteEnvironmentConnection }> {
-    const client = new RemoteEnvironmentClient({
-      baseUrl: this.cloudOptions.apiBaseUrl,
-      apiKey: getCloudApiKey(this.cloudOptions),
-      headers: this.cloudOptions.headers,
-      fetch: this.cloudOptions.fetch,
-    });
-    const deadline = Date.now() + policy.readyTimeoutMs;
-    let lastError: Error | null = null;
-
-    while (Date.now() <= deadline) {
-      try {
-        const { connections } = await client.listEnvironments({ onlineOnly: true });
-        const match = connections.find(
-          (environment) =>
-            environment.connectionId && environment.deviceId === sandbox.deviceId,
-        );
-        if (match?.connectionId) {
-          return { connectionId: match.connectionId, environment: match };
-        }
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-      }
-      await delay(policy.pollIntervalMs);
-    }
-
-    const suffix = lastError ? ` Last error: ${lastError.message}` : "";
-    throw new Error(
-      `Timed out waiting for Cloud sandbox ${sandbox.sandboxId} (${sandbox.deviceId}) to come online.${suffix}`,
-    );
   }
 }
