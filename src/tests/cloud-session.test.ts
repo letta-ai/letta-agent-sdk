@@ -59,6 +59,48 @@ function createCloudFetchMock(
       return Promise.resolve(jsonResponse({ id: "conv-1", agent_id: "agent-from-conv" }));
     }
 
+    const agentSandboxMatch = /^\/v1\/agents\/([^/]+)\/sandboxes$/.exec(parsed.pathname);
+    if (agentSandboxMatch && method === "POST") {
+      const agentId = decodeURIComponent(agentSandboxMatch[1]!);
+      return Promise.resolve(jsonResponse({
+        sandboxId: `sandbox-${agentId}`,
+        deviceId: `device-${agentId}`,
+        connectionName: `sandbox-${agentId}-session`,
+      }));
+    }
+
+    const agentSandboxRefreshMatch = /^\/v1\/agents\/([^/]+)\/sandboxes\/refresh$/.exec(parsed.pathname);
+    if (agentSandboxRefreshMatch && method === "POST") {
+      const agentId = decodeURIComponent(agentSandboxRefreshMatch[1]!);
+      const body = bodyOf(init) as { ttlMinutes?: number } | undefined;
+      return Promise.resolve(jsonResponse({
+        success: true,
+        sandboxId: `sandbox-${agentId}`,
+        ttlMinutes: body?.ttlMinutes ?? 5,
+      }));
+    }
+
+    if (agentSandboxMatch && method === "DELETE") {
+      return Promise.resolve(jsonResponse({ success: true, message: "terminated" }));
+    }
+
+    const managedEnvironmentMatch = /^\/v1\/environments\/device-(.+)$/.exec(parsed.pathname);
+    if (managedEnvironmentMatch && method === "GET") {
+      const agentId = decodeURIComponent(managedEnvironmentMatch[1]!);
+      return Promise.resolve(jsonResponse({
+        id: `env-${agentId}`,
+        connectionId: `conn-${agentId}`,
+        deviceId: `device-${agentId}`,
+        connectionName: `sandbox-${agentId}-session`,
+        organizationId: "org-test",
+        podId: null,
+        connectedAt: 1,
+        lastHeartbeat: 1,
+        lastSeenAt: 1,
+        firstSeenAt: 1,
+      }));
+    }
+
     if (parsed.pathname === "/v1/environments" && method === "GET") {
       return Promise.resolve(jsonResponse({
         connections: environmentConnections ?? [
@@ -470,7 +512,7 @@ function resetFakeAppServer(): void {
 }
 
 describe("CloudEnvironmentSession", () => {
-  test("requires an explicit environment while SDK-managed Cloud sandboxes are unavailable", async () => {
+  test("creates, refreshes, and cleans up a managed Cloud sandbox when no environment is specified", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
     const client = new LettaCodeClient({
@@ -480,22 +522,83 @@ describe("CloudEnvironmentSession", () => {
       fetch: createCloudFetchMock(requests),
       WebSocket: FakeCloudSocket,
       requestTimeoutMs: 1_000,
+      sandbox: { ttlMinutes: 2 },
     });
 
     const session = client.resumeSession("agent-1");
-    await expect(session.initialize()).rejects.toThrow(
-      "Cloud backend requires an environment target until managed Cloud sandboxes land",
-    );
+    try {
+      const init = await session.initialize();
+      expect(init).toMatchObject({
+        type: "init",
+        agentId: "agent-1",
+        conversationId: "default",
+      });
 
-    await expect(client.createSession("agent-1").initialize()).rejects.toThrow(
-      "Cloud backend requires an environment target until managed Cloud sandboxes land",
-    );
-    await expect(client.resumeSession("conv-1").initialize()).rejects.toThrow(
-      "Cloud backend requires an environment target until managed Cloud sandboxes land",
-    );
+      expect(requests).toContainEqual(expect.objectContaining({
+        method: "POST",
+        url: "https://api.test/v1/agents/agent-1/sandboxes",
+        body: {},
+      }));
+      expect(requests).toContainEqual(expect.objectContaining({
+        method: "POST",
+        url: "https://api.test/v1/agents/agent-1/sandboxes/refresh",
+        body: { ttlMinutes: 2 },
+      }));
+      expect(requests).toContainEqual(expect.objectContaining({
+        method: "GET",
+        url: "https://api.test/v1/environments/device-agent-1",
+      }));
 
-    expect(requests).toHaveLength(0);
-    expect(FakeCloudSocket.instances).toHaveLength(0);
+      const controlSocket = FakeCloudSocket.socket("control")!;
+      expect(new URL(controlSocket.url).pathname).toBe("/v1/environments/conn-agent-1/status/ws");
+
+      const result = await session.runTurn("hello");
+      expect(result).toMatchObject({ success: true, result: "hello from cloud" });
+      expect(requests.filter((request) =>
+        new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes/refresh"
+      )).toHaveLength(2);
+    } finally {
+      session.close();
+    }
+
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(requests.filter((request) =>
+      new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes/refresh"
+    )).toHaveLength(3);
+    expect(requests).toContainEqual(expect.objectContaining({
+      method: "DELETE",
+      url: "https://api.test/v1/agents/agent-1/sandboxes",
+    }));
+  });
+
+  test("can leave managed Cloud sandbox cleanup to TTL", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { terminateOnClose: false },
+    });
+
+    const session = client.resumeSession("agent-1");
+    await session.initialize();
+    session.close();
+
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(requests.some((request) =>
+      new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes" &&
+        request.method === "DELETE"
+    )).toBe(false);
   });
 
   test("uses an explicit environment before using the Remote Client websocket", async () => {
@@ -1121,26 +1224,16 @@ describe("CloudEnvironmentSession", () => {
     }
   });
 
-  test("rejects SDK-managed sandbox options until Cloud sandbox support lands", () => {
-    const client = new LettaCodeClient({
+  test("validates managed Cloud sandbox options and environment exclusivity", () => {
+    expect(() => new LettaCodeClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
       fetch: createCloudFetchMock([]),
       WebSocket: FakeCloudSocket,
       environment: { connectionId: "conn-explicit" },
-    });
-
-    expect(() => client.resumeSession("agent-1", {
-      sandbox: { lifecycle: "ephemeral" },
-    } as never)).toThrow(
-      "does not accept SDK-managed sandbox options yet",
-    );
-    expect(() => client.createSession("agent-1", {
-      sandbox: { lifecycle: "ephemeral" },
-    } as never)).toThrow(
-      "does not accept SDK-managed sandbox options yet",
-    );
+      sandbox: { ttlMinutes: 5 },
+    })).toThrow("cannot specify both environment and sandbox options");
 
     expect(() => new LettaCodeClient({
       backend: "cloud",
@@ -1148,10 +1241,38 @@ describe("CloudEnvironmentSession", () => {
       apiKey: "sk-test",
       fetch: createCloudFetchMock([]),
       WebSocket: FakeCloudSocket,
-      sandbox: { lifecycle: "ephemeral" },
-    } as never)).toThrow(
-      "Cloud backend SDK-managed sandboxes are not available yet",
-    );
+      sandbox: { ttlMinutes: 61 },
+    })).toThrow("Invalid sandbox.ttlMinutes");
+
+    const clientWithEnvironment = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock([]),
+      WebSocket: FakeCloudSocket,
+      environment: { connectionId: "conn-explicit" },
+    });
+    expect(() => clientWithEnvironment.resumeSession("agent-1", {
+      sandbox: { ttlMinutes: 5 },
+    })).toThrow("cannot specify sandbox options when the client has a default environment");
+
+    const clientWithSandbox = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock([]),
+      WebSocket: FakeCloudSocket,
+      sandbox: { ttlMinutes: 5 },
+    });
+    expect(() => clientWithSandbox.resumeSession("agent-1", {
+      environment: { connectionId: "conn-explicit" },
+    })).toThrow("cannot specify an environment when the client has default sandbox options");
+
+    expect(() => new LettaCodeClient({
+      backend: "remote",
+      url: "ws://app-server.test/ws",
+      sandbox: { ttlMinutes: 5 },
+    } as never)).toThrow("sandbox options are only valid for cloud backends");
   });
 
   test("reports terminal Cloud loop errors instead of idle success", async () => {

@@ -47,11 +47,12 @@ function getOptionsEnvironment(
   return undefined;
 }
 
-function stripEnvironment(
+function stripCloudExecutionOptions(
   options: LettaCodeClientSessionOptions,
 ): CreateSessionOptions {
   const sessionOptions = { ...options };
   delete sessionOptions.environment;
+  delete sessionOptions.sandbox;
   return sessionOptions;
 }
 
@@ -99,6 +100,9 @@ export class LettaCodeClient {
       throw new Error(
         "LettaCodeClient environment is only valid for the cloud backend; remote url selects the app-server runtime.",
       );
+    }
+    if (this.backend !== "cloud" && (options as { sandbox?: unknown }).sandbox !== undefined) {
+      throw new Error("LettaCodeClient sandbox options are only valid for cloud backends.");
     }
 
     if (this.backend === "local") {
@@ -202,7 +206,7 @@ export class LettaCodeClient {
       typeof agentIdOrOptions === "string" ? options : (agentIdOrOptions ?? {});
 
     this.assertSessionBackend("createSession", resolvedOptions);
-    const sessionOptions = stripEnvironment(resolvedOptions);
+    const sessionOptions = stripCloudExecutionOptions(resolvedOptions);
     validateCreateSessionOptions(sessionOptions);
 
     if (this.backend === "remote") {
@@ -256,7 +260,7 @@ export class LettaCodeClient {
     options: LettaCodeClientSessionOptions = {},
   ): LettaCodeSession {
     this.assertSessionBackend("resumeSession", options);
-    const sessionOptions = stripEnvironment(options);
+    const sessionOptions = stripCloudExecutionOptions(options);
     validateCreateSessionOptions(sessionOptions);
 
     if (this.backend === "remote") {
@@ -352,6 +356,9 @@ export class LettaCodeClient {
           `${action}() environment overrides are only valid for cloud backends.`,
         );
       }
+      if (options.sandbox !== undefined) {
+        throw new Error(`${action}() sandbox options are only valid for cloud backends.`);
+      }
       if (!this.useLegacyLocalStdio()) {
         assertRemoteSessionOptionsSupported(action, options);
       }
@@ -364,10 +371,20 @@ export class LettaCodeClient {
           `${action}() environment overrides are only valid for cloud backends; remote url selects the app-server runtime.`,
         );
       }
+      if (options.sandbox !== undefined) {
+        throw new Error(`${action}() sandbox options are only valid for cloud backends; remote url selects the app-server runtime.`);
+      }
       assertRemoteSessionOptionsSupported(action, options);
       return;
     }
     if (this.backend === "cloud") {
+      const cloudOptions = this.cloudOptions();
+      if (cloudOptions.environment !== undefined && options.sandbox !== undefined) {
+        throw new Error(`Cloud backend ${action}() cannot specify sandbox options when the client has a default environment.`);
+      }
+      if (cloudOptions.sandbox !== undefined && options.environment !== undefined) {
+        throw new Error(`Cloud backend ${action}() cannot specify an environment when the client has default sandbox options.`);
+      }
       assertCloudSessionOptionsSupported(action, options);
       return;
     }
