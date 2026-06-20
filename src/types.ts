@@ -343,8 +343,6 @@ export interface LettaCodeRemoteClientOptions {
   WebSocket?: LettaCodeSocketConstructor;
   /** Timeout for app-server request/turn correlation. Defaults to app-server client default. */
   requestTimeoutMs?: number;
-  /** Optional default execution target, overridable at session creation. */
-  environment?: LettaCodeEnvironment;
 }
 
 export interface LettaCodeCloudClientOptions {
@@ -556,7 +554,7 @@ export interface CreateSessionOptions {
 /**
  * Session options accepted by LettaCodeClient methods.
  *
- * `environment` is a remote/cloud execution-target override. It is deliberately
+ * `environment` is a cloud execution-target override. It is deliberately
  * session-scoped rather than part of createAgent() options.
  */
 export interface LettaCodeClientSessionOptions extends CreateSessionOptions {

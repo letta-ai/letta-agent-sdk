@@ -4,6 +4,10 @@ import {
   type AppServerExternalToolCallHandler,
   type AppServerSocketConstructor,
 } from "@letta-ai/letta-code/app-server-client";
+import {
+  isHeadlessAutoAllowTool,
+  requiresRuntimeUserInput,
+} from "./interactiveToolPolicy.js";
 import { startLocalAppServer, type LocalAppServerHandle } from "./local-app-server.js";
 import {
   RemoteClientSessionCore,
@@ -19,6 +23,7 @@ import {
 } from "./remote-client-session-core.js";
 import type {
   AnyAgentTool,
+  CanUseToolResponse,
   CreateAgentOptions,
   LettaCodeRemoteClientOptions,
   LettaCodeClientSessionOptions,
@@ -83,6 +88,10 @@ export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
    * for cloud-backed sessions so assistant deltas are not double-counted.
    */
   ignoreControlStreamDeltas?: boolean;
+  /** Whether turn input payloads should opt into control_request approval replies. */
+  supportsControlResponse?: boolean;
+  /** Optional source marker attached to turn input payloads. */
+  inputSource?: string;
 };
 
 export type AppServerSessionMode = RuntimeSessionMode;
@@ -147,9 +156,6 @@ export function assertRemoteSessionOptionsSupported(
   }
   if (options.allowedTools !== undefined || options.disallowedTools !== undefined) {
     throw new Error(`App-server ${action}() does not yet support allowedTools/disallowedTools.`);
-  }
-  if (options.canUseTool !== undefined) {
-    throw new Error(`App-server ${action}() does not yet support canUseTool callbacks.`);
   }
   if (options.skillSources !== undefined) {
     throw new Error(`App-server ${action}() does not yet support skillSources overrides.`);
@@ -229,7 +235,7 @@ export function createAgentBody(
   return body;
 }
 
-function externalToolGroups(tools: AnyAgentTool[] | undefined): Array<Record<string, unknown>> | undefined {
+export function externalToolGroups(tools: AnyAgentTool[] | undefined): Array<Record<string, unknown>> | undefined {
   if (!tools || tools.length === 0) return undefined;
   return [
     {
@@ -243,7 +249,132 @@ function externalToolGroups(tools: AnyAgentTool[] | undefined): Array<Record<str
   ];
 }
 
-class AppServerRuntimeController implements RemoteClientRuntimeController {
+export function createExternalToolCallHandler(
+  externalTools: Map<string, AnyAgentTool>,
+): AppServerExternalToolCallHandler {
+  return async (request) => {
+    const tool = externalTools.get(request.tool_name);
+    if (!tool) {
+      throw new Error(`Unknown external tool: ${request.tool_name}`);
+    }
+    const result = await tool.execute(request.tool_call_id, request.input);
+    return {
+      content: result.content.map((part) => ({
+        type: part.type,
+        ...(part.text !== undefined ? { text: part.text } : {}),
+        ...(part.data !== undefined ? { data: part.data } : {}),
+        ...(part.mimeType !== undefined ? { mimeType: part.mimeType } : {}),
+      })),
+    };
+  };
+}
+
+type AppServerApprovalOptions = LettaCodeClientSessionOptions | CreateAgentOptions;
+
+export async function resolveAppServerToolApproval(
+  options: AppServerApprovalOptions,
+  toolName: string,
+  toolInput: Record<string, unknown>,
+): Promise<CanUseToolResponse> {
+  const hasCallback = typeof options.canUseTool === "function";
+  const toolNeedsRuntimeUserInput = requiresRuntimeUserInput(toolName);
+
+  if (toolNeedsRuntimeUserInput && !hasCallback) {
+    return {
+      behavior: "deny",
+      message: "No canUseTool callback registered",
+      interrupt: false,
+    };
+  }
+
+  if (options.permissionMode === "bypassPermissions" && !toolNeedsRuntimeUserInput) {
+    return { behavior: "allow", updatedInput: null, updatedPermissions: [] };
+  }
+
+  if (hasCallback) {
+    try {
+      const result = await options.canUseTool!(toolName, toolInput);
+      if (result.behavior === "allow") {
+        return {
+          behavior: "allow",
+          message: result.message,
+          updatedInput: result.updatedInput ?? null,
+          updatedPermissions: result.updatedPermissions ?? [],
+        };
+      }
+      return {
+        behavior: "deny",
+        message: result.message ?? "Denied by canUseTool callback",
+        interrupt: result.interrupt ?? false,
+      };
+    } catch (error) {
+      return {
+        behavior: "deny",
+        message: error instanceof Error ? error.message : "Callback error",
+        interrupt: false,
+      };
+    }
+  }
+
+  if (isHeadlessAutoAllowTool(toolName)) {
+    return { behavior: "allow", updatedInput: null, updatedPermissions: [] };
+  }
+
+  return {
+    behavior: "deny",
+    message: "No canUseTool callback registered",
+    interrupt: false,
+  };
+}
+
+export function registerAppServerControlRequestHandler(config: {
+  client: AppServerClient;
+  getRuntime: () => RuntimeScope | null;
+  getOptions: () => AppServerApprovalOptions;
+}): () => void {
+  return config.client.onMessage((rawMessage, channel) => {
+    const message = rawMessage as unknown as ProtocolMessage;
+    if (channel !== "control" || message.type !== "control_request") return;
+    void respondToAppServerControlRequest(config, message).catch(() => {
+      // Permission callback failures are converted into deny responses by resolveAppServerToolApproval().
+    });
+  });
+}
+
+async function respondToAppServerControlRequest(
+  config: {
+    client: AppServerClient;
+    getRuntime: () => RuntimeScope | null;
+    getOptions: () => AppServerApprovalOptions;
+  },
+  message: ProtocolMessage,
+): Promise<void> {
+  const runtime = config.getRuntime() ?? message.runtime;
+  if (!runtime) return;
+
+  const requestId = typeof message.request_id === "string" ? message.request_id : undefined;
+  const request = message.request;
+  if (!requestId || !request || typeof request !== "object") return;
+  const requestRecord = request as Record<string, unknown>;
+  if (requestRecord.subtype !== "can_use_tool") return;
+
+  const toolName = typeof requestRecord.tool_name === "string" ? requestRecord.tool_name : "unknown";
+  const toolInput =
+    requestRecord.input && typeof requestRecord.input === "object" && !Array.isArray(requestRecord.input)
+      ? (requestRecord.input as Record<string, unknown>)
+      : {};
+  const decision = await resolveAppServerToolApproval(config.getOptions(), toolName, toolInput);
+  config.client.input({
+    runtime,
+    payload: {
+      kind: "approval_response",
+      request_id: requestId,
+      decision,
+    },
+  } as Parameters<AppServerClient["input"]>[0]);
+}
+
+export class AppServerRuntimeController implements RemoteClientRuntimeController {
   constructor(
     private readonly client: AppServerClient,
     private readonly options: AppServerSessionOptions,
@@ -287,29 +418,49 @@ class AppServerRuntimeController implements RemoteClientRuntimeController {
     message: SendMessage,
     options: { timeoutMs?: number } = {},
   ): Promise<RuntimeTurnResult> {
+    const payload: Record<string, unknown> = {
+      kind: "create_message",
+      messages: [
+        {
+          role: "user",
+          content: normalizeSendMessage(message),
+        },
+      ],
+    };
+    if (this.options.supportsControlResponse !== false) {
+      payload.supports_control_response = true;
+    }
+    if (this.options.inputSource !== undefined) {
+      payload.source = this.options.inputSource;
+    }
+
     const command: InputCommand = {
       runtime,
-      payload: {
-        kind: "create_message",
-        messages: [
-          {
-            role: "user",
-            content: normalizeSendMessage(message),
-          },
-        ],
-      },
+      payload,
     } as InputCommand;
 
-    const turn = await this.client.runTurn(command, {
-      allowLoopStatusFallback: true,
-      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
-    });
+    try {
+      const turn = await this.client.runTurn(command, {
+        allowLoopStatusFallback: true,
+        ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      });
 
-    return {
-      runtime: turn.runtime,
-      stopReason: turn.stopReason,
-      runIds: turn.runIds,
-    };
+      return {
+        runtime: turn.runtime,
+        stopReason: turn.stopReason,
+        runIds: turn.runIds,
+      };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return {
+        runtime,
+        success: false,
+        stopReason: "error",
+        detail,
+        errorCode: "error",
+        runIds: [],
+      };
+    }
   }
 
   async recoverPendingApprovals(
@@ -375,6 +526,7 @@ export class AppServerSession extends RemoteClientSessionCore {
   private ownedAppServer: LocalAppServerHandle | null = null;
   private externalTools = new Map<string, AnyAgentTool>();
   private removeExternalToolHandler: (() => void) | null = null;
+  private removeControlRequestHandler: (() => void) | null = null;
 
   constructor(
     private readonly remoteOptions: AppServerSessionOptions,
@@ -417,8 +569,16 @@ export class AppServerSession extends RemoteClientSessionCore {
         : {}),
     });
 
+    this.removeControlRequestHandler = registerAppServerControlRequestHandler({
+      client,
+      getRuntime: () => this.runtime,
+      getOptions: () => this.currentOptions(),
+    });
+
     if (this.externalTools.size > 0) {
-      this.removeExternalToolHandler = client.onExternalToolCall(this.handleExternalToolCall);
+      this.removeExternalToolHandler = client.onExternalToolCall(
+        createExternalToolCallHandler(this.externalTools),
+      );
     }
 
     try {
@@ -437,6 +597,8 @@ export class AppServerSession extends RemoteClientSessionCore {
     } catch (error) {
       this.removeExternalToolHandler?.();
       this.removeExternalToolHandler = null;
+      this.removeControlRequestHandler?.();
+      this.removeControlRequestHandler = null;
       client.close();
       throw error;
     }
@@ -445,6 +607,8 @@ export class AppServerSession extends RemoteClientSessionCore {
   protected override onCoreClose(): void {
     this.removeExternalToolHandler?.();
     this.removeExternalToolHandler = null;
+    this.removeControlRequestHandler?.();
+    this.removeControlRequestHandler = null;
     this.ownedAppServer?.close();
     this.ownedAppServer = null;
   }
@@ -540,19 +704,4 @@ export class AppServerSession extends RemoteClientSessionCore {
     return response.conversation.agent_id;
   }
 
-  private handleExternalToolCall: AppServerExternalToolCallHandler = async (request) => {
-    const tool = this.externalTools.get(request.tool_name);
-    if (!tool) {
-      throw new Error(`Unknown external tool: ${request.tool_name}`);
-    }
-    const result = await tool.execute(request.tool_call_id, request.input);
-    return {
-      content: result.content.map((part) => ({
-        type: part.type,
-        ...(part.text !== undefined ? { text: part.text } : {}),
-        ...(part.data !== undefined ? { data: part.data } : {}),
-        ...(part.mimeType !== undefined ? { mimeType: part.mimeType } : {}),
-      })),
-    };
-  };
 }

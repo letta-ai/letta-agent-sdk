@@ -32,7 +32,10 @@ function bodyOf(init?: RequestInit): unknown {
   return JSON.parse(String(init.body));
 }
 
-function createCloudFetchMock(requests: RecordedRequest[]): typeof fetch {
+function createCloudFetchMock(
+  requests: RecordedRequest[],
+  environmentConnections?: Array<Record<string, unknown>>,
+): typeof fetch {
   return ((input: FetchInput | URL, init?: RequestInit) => {
     const url = urlOf(input);
     const parsed = new URL(url);
@@ -78,7 +81,7 @@ function createCloudFetchMock(requests: RecordedRequest[]): typeof fetch {
 
     if (parsed.pathname === "/v1/environments" && method === "GET") {
       return Promise.resolve(jsonResponse({
-        connections: [
+        connections: environmentConnections ?? [
           {
             id: "env-sandbox",
             connectionId: "conn-sandbox",
@@ -113,6 +116,19 @@ class FakeCloudSocket {
     });
   }
 
+  static socket(channel: "control" | "stream"): FakeCloudSocket | undefined {
+    return FakeCloudSocket.instances.find((socket) => socket.channel === channel);
+  }
+
+  static allSent(): Array<Record<string, unknown>> {
+    return FakeCloudSocket.instances.flatMap((socket) => socket.sent);
+  }
+
+  get channel(): "control" | "stream" | null {
+    const channel = new URL(this.url).searchParams.get("channel");
+    return channel === "control" || channel === "stream" ? channel : null;
+  }
+
   send(data: string): void {
     const command = JSON.parse(data) as Record<string, unknown>;
     this.sent.push(command);
@@ -142,9 +158,35 @@ class FakeCloudSocket {
   }
 
   private fakeDeviceHandle(command: Record<string, unknown>): void {
-    if (command.type === "recover_pending_approvals") {
+    if (command.type === "runtime_start") {
+      const runtime = {
+        agent_id: typeof command.agent_id === "string" ? command.agent_id : "agent-1",
+        conversation_id: typeof command.conversation_id === "string" ? command.conversation_id : "default",
+      };
       this.serverMessage({
-        type: "recover_pending_approvals_response",
+        type: "runtime_start_response",
+        request_id: command.request_id,
+        success: true,
+        runtime,
+        agent: { id: runtime.agent_id, model: "anthropic/claude-sonnet-4" },
+        conversation: { id: runtime.conversation_id, agent_id: runtime.agent_id },
+      });
+      return;
+    }
+
+    if (command.type === "sync" && typeof command.request_id === "string") {
+      this.serverMessage({
+        type: "sync_response",
+        request_id: command.request_id,
+        runtime: command.runtime,
+        success: true,
+      });
+      return;
+    }
+
+    if (command.type === "set_reflection_settings") {
+      this.serverMessage({
+        type: "set_reflection_settings_response",
         request_id: command.request_id,
         runtime: command.runtime,
         success: true,
@@ -167,7 +209,7 @@ class FakeCloudSocket {
     const payload = command.payload as Record<string, unknown> | undefined;
 
     if (payload?.kind === "create_message" && FakeCloudSocket.scenario === "approval") {
-      this.serverMessage({
+      this.serverMessageTo("control", {
         type: "control_request",
         runtime,
         request_id: "approval-1",
@@ -201,7 +243,7 @@ class FakeCloudSocket {
   }
 
   private finishTurn(runtime: unknown, content: string): void {
-    this.serverMessage({
+    this.serverMessageTo("stream", {
       type: "stream_delta",
       seq: 101,
       event_seq: 1,
@@ -213,7 +255,7 @@ class FakeCloudSocket {
         run_id: "run-cloud",
       },
     });
-    this.serverMessage({
+    this.serverMessageTo("stream", {
       type: "update_loop_status",
       seq: 102,
       event_seq: 2,
@@ -226,7 +268,7 @@ class FakeCloudSocket {
   }
 
   private finishTurnWithTerminalError(runtime: unknown): void {
-    this.serverMessage({
+    this.serverMessageTo("stream", {
       type: "update_loop_status",
       seq: 201,
       event_seq: 1,
@@ -236,7 +278,7 @@ class FakeCloudSocket {
         active_run_ids: [],
       },
     });
-    this.serverMessage({
+    this.serverMessageTo("stream", {
       type: "stream_delta",
       seq: 202,
       event_seq: 2,
@@ -252,7 +294,7 @@ class FakeCloudSocket {
   }
 
   private finishTurnAfterStaleIdle(runtime: unknown): void {
-    this.serverMessage({
+    this.serverMessageTo("stream", {
       type: "update_loop_status",
       seq: 301,
       event_seq: 1,
@@ -263,7 +305,7 @@ class FakeCloudSocket {
       },
     });
     setTimeout(() => {
-      this.serverMessage({
+      this.serverMessageTo("stream", {
         type: "update_loop_status",
         seq: 302,
         event_seq: 2,
@@ -273,7 +315,7 @@ class FakeCloudSocket {
           active_run_ids: [],
         },
       });
-      this.serverMessage({
+      this.serverMessageTo("stream", {
         type: "update_loop_status",
         seq: 303,
         event_seq: 3,
@@ -283,7 +325,7 @@ class FakeCloudSocket {
           active_run_ids: [],
         },
       });
-      this.serverMessage({
+      this.serverMessageTo("stream", {
         type: "stream_delta",
         seq: 304,
         event_seq: 4,
@@ -297,6 +339,10 @@ class FakeCloudSocket {
         },
       });
     }, 150);
+  }
+
+  private serverMessageTo(channel: "control" | "stream", message: unknown): void {
+    (FakeCloudSocket.socket(channel) ?? this).serverMessage(message);
   }
 
   private emit(type: string, event: unknown): void {
@@ -400,6 +446,7 @@ describe("CloudEnvironmentSession", () => {
       model: "anthropic/claude-sonnet-4",
       cwd: "/repo",
       permissionMode: "bypassPermissions",
+      sleeptime: { trigger: "step-count", stepCount: 3 },
     });
     const init = await session.initialize();
 
@@ -416,21 +463,37 @@ describe("CloudEnvironmentSession", () => {
     expect(requests[1]!.body).toEqual({ ttlMinutes: 7 });
     expect(requests[0]!.headers.authorization ?? requests[0]!.headers.Authorization).toBe("Bearer sk-test");
 
-    const socket = FakeCloudSocket.instances[0]!;
-    const wsUrl = new URL(socket.url);
+    const controlSocket = FakeCloudSocket.socket("control")!;
+    const streamSocket = FakeCloudSocket.socket("stream")!;
+    const wsUrl = new URL(controlSocket.url);
     expect(wsUrl.protocol).toBe("wss:");
     expect(wsUrl.pathname).toBe("/v1/environments/conn-sandbox/status/ws");
     expect(wsUrl.searchParams.get("agentId")).toBe("agent-1");
     expect(wsUrl.searchParams.get("conversationId")).toBe("default");
-    expect(wsUrl.searchParams.get("channel")).toBe("stream");
+    expect(wsUrl.searchParams.get("channel")).toBe("control");
+    expect(new URL(streamSocket.url).searchParams.get("channel")).toBe("stream");
     expect(wsUrl.searchParams.has("token")).toBe(false);
-    expect(socket.options?.headers?.Authorization).toBe("Bearer sk-test");
-    expect(socket.sent[0]).toMatchObject({ type: "sync", recover_approvals: true });
-    expect(socket.sent).toContainEqual(expect.objectContaining({
+    expect(controlSocket.options?.headers?.Authorization).toBe("Bearer sk-test");
+    expect(streamSocket.options?.headers?.Authorization).toBe("Bearer sk-test");
+    expect(controlSocket.sent[0]).toMatchObject({
+      type: "runtime_start",
+      agent_id: "agent-1",
+      conversation_id: "default",
+      recover_approvals: false,
+      force_device_status: true,
+      mode: "unrestricted",
+      cwd: "/repo",
+    });
+    expect(controlSocket.sent).toContainEqual(expect.objectContaining({
+      type: "set_reflection_settings",
+      settings: { trigger: "step-count", step_count: 3 },
+      scope: "both",
+    }));
+    expect(controlSocket.sent).toContainEqual(expect.objectContaining({
       type: "update_model",
       payload: { model_handle: "anthropic/claude-sonnet-4" },
     }));
-    expect(socket.sent).toContainEqual(expect.objectContaining({
+    expect(controlSocket.sent).toContainEqual(expect.objectContaining({
       type: "change_device_state",
       payload: { cwd: "/repo", mode: "unrestricted" },
     }));
@@ -440,6 +503,13 @@ describe("CloudEnvironmentSession", () => {
       pendingApproval: false,
       unsupported: false,
     });
+    expect(controlSocket.sent.some((command) => command.type === "recover_pending_approvals")).toBe(false);
+    expect(controlSocket.sent).toContainEqual(expect.objectContaining({
+      type: "sync",
+      recover_approvals: true,
+      force_device_status: true,
+      request_id: expect.any(String),
+    }));
 
     const result = await session.runTurn("hello");
     expect(result).toMatchObject({
@@ -449,7 +519,7 @@ describe("CloudEnvironmentSession", () => {
       conversationId: "default",
       runIds: ["run-cloud"],
     });
-    const inputCommand = socket.sent.find((command) => command.type === "input")!;
+    const inputCommand = controlSocket.sent.find((command) => command.type === "input")!;
     expect(inputCommand).toMatchObject({
       runtime: { agent_id: "agent-1", conversation_id: "default" },
       payload: {
@@ -458,8 +528,8 @@ describe("CloudEnvironmentSession", () => {
         messages: [expect.objectContaining({ role: "user", content: "hello" })],
       },
     });
-    expect(socket.sent).toContainEqual({ type: "ack", seq: 101 });
-    expect(socket.sent).toContainEqual({ type: "ack", seq: 102 });
+    expect(streamSocket.sent).toContainEqual({ type: "ack", seq: 101 });
+    expect(streamSocket.sent).toContainEqual({ type: "ack", seq: 102 });
     expect(requests.filter((request) => new URL(request.url).pathname.endsWith("/sandboxes/refresh"))).toHaveLength(2);
 
     session.close();
@@ -547,6 +617,8 @@ describe("CloudEnvironmentSession", () => {
       model: "anthropic/claude-sonnet-4",
       systemPrompt: "You are a repo assistant.",
       memory: [{ label: "project", value: "Use Bun." }],
+      tags: ["team:sdk"],
+      memfs: true,
     })).resolves.toBe("agent-created");
 
     expect(requests).toHaveLength(0);
@@ -562,12 +634,11 @@ describe("CloudEnvironmentSession", () => {
         },
       },
     });
-    expect((runtimeStart.create_agent as { body: Record<string, unknown> }).body.tags).toBeUndefined();
-    expect(controlSocket.sent).not.toContainEqual(expect.objectContaining({ type: "enable_memfs" }));
-
-    await expect(client.createAgent({ tags: ["team:sdk"] })).rejects.toThrow(
-      "Cloud backend createAgent() cannot set tags until Cloud supports tags on agent creation",
-    );
+    expect((runtimeStart.create_agent as { body: Record<string, unknown> }).body.tags).toEqual([
+      "team:sdk",
+      "origin:letta-code",
+    ]);
+    expect(controlSocket.sent).toContainEqual(expect.objectContaining({ type: "enable_memfs" }));
 
     await expect(client.createAgent({ systemPrompt: "default" })).rejects.toThrow(
       "App-server createAgent() does not yet support system prompt presets",
@@ -600,7 +671,7 @@ describe("CloudEnvironmentSession", () => {
 
     expect(result).toMatchObject({ success: true, result: "approved" });
     expect(decisions).toEqual([{ toolName: "Bash", input: { command: "pwd" } }]);
-    const approvalCommand = FakeCloudSocket.instances[0]!.sent.find((command) => {
+    const approvalCommand = FakeCloudSocket.socket("control")!.sent.find((command) => {
       const payload = command.payload as Record<string, unknown> | undefined;
       return command.type === "input" && payload?.kind === "approval_response";
     });
@@ -613,6 +684,121 @@ describe("CloudEnvironmentSession", () => {
     });
 
     session.close();
+  });
+
+  test("executes SDK-hosted external tool requests from the Cloud websocket", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+      sandbox: { lifecycle: "external" },
+    });
+
+    const session = client.resumeSession("agent-1", {
+      tools: [
+        {
+          name: "lookup_ticket",
+          label: "Lookup ticket",
+          description: "Lookup a ticket by id",
+          parameters: {
+            type: "object",
+            properties: { id: { type: "string" } },
+            required: ["id"],
+          },
+          execute: async (toolCallId, input) => ({
+            content: [
+              { type: "text", text: `${toolCallId}:${(input as { id: string }).id}` },
+            ],
+          }),
+        },
+      ],
+    });
+
+    try {
+      const init = await session.initialize();
+      expect(init.tools).toEqual(["lookup_ticket"]);
+
+      const controlSocket = FakeCloudSocket.socket("control")!;
+      const runtimeStart = controlSocket.sent.find((command) => command.type === "runtime_start")!;
+      expect(runtimeStart).toMatchObject({
+        external_tools: [
+          {
+            tools: [
+              {
+                name: "lookup_ticket",
+                label: "Lookup ticket",
+                description: "Lookup a ticket by id",
+                parameters: {
+                  type: "object",
+                  properties: { id: { type: "string" } },
+                  required: ["id"],
+                },
+              },
+            ],
+          },
+        ],
+      });
+      controlSocket.serverMessage({
+        type: "external_tool_call_request",
+        request_id: "external-tool-1",
+        runtime: { agent_id: "agent-1", conversation_id: "default" },
+        tool_call_id: "tool-call-1",
+        tool_name: "lookup_ticket",
+        input: { id: "LET-9239" },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(controlSocket.sent.at(-1)).toMatchObject({
+        type: "external_tool_call_response",
+        request_id: "external-tool-1",
+        result: {
+          content: [{ type: "text", text: "tool-call-1:LET-9239" }],
+        },
+      });
+    } finally {
+      session.close();
+    }
+  });
+
+  test("ignores stale same-name sandbox environments and cleans up failed ephemeral init", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests, [
+        {
+          id: "env-stale",
+          connectionId: "conn-stale",
+          deviceId: "different-device",
+          connectionName: "sandbox-agent-1",
+          connectedAt: 1,
+        },
+      ]),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { pollIntervalMs: 1, readyTimeoutMs: 5 },
+    });
+
+    const session = client.resumeSession("agent-1");
+    await expect(session.initialize()).rejects.toThrow(
+      "Timed out waiting for Cloud sandbox sandbox-1 (device-sandbox) to come online",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(FakeCloudSocket.instances).toHaveLength(0);
+    expect(requests.some((request) =>
+      request.method === "DELETE" &&
+      new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes"
+    )).toBe(true);
   });
 
   test("reports terminal Cloud loop errors instead of idle success", async () => {
@@ -642,8 +828,8 @@ describe("CloudEnvironmentSession", () => {
       stopReason: "error",
       conversationId: "default",
     });
-    expect(FakeCloudSocket.instances[0]!.sent).toContainEqual({ type: "ack", seq: 201 });
-    expect(FakeCloudSocket.instances[0]!.sent).toContainEqual({ type: "ack", seq: 202 });
+    expect(FakeCloudSocket.socket("stream")!.sent).toContainEqual({ type: "ack", seq: 201 });
+    expect(FakeCloudSocket.socket("stream")!.sent).toContainEqual({ type: "ack", seq: 202 });
 
     session.close();
   });
@@ -675,8 +861,8 @@ describe("CloudEnvironmentSession", () => {
       stopReason: "error",
       conversationId: "default",
     });
-    expect(FakeCloudSocket.instances[0]!.sent).toContainEqual({ type: "ack", seq: 301 });
-    expect(FakeCloudSocket.instances[0]!.sent).toContainEqual({ type: "ack", seq: 304 });
+    expect(FakeCloudSocket.socket("stream")!.sent).toContainEqual({ type: "ack", seq: 301 });
+    expect(FakeCloudSocket.socket("stream")!.sent).toContainEqual({ type: "ack", seq: 304 });
 
     session.close();
   });

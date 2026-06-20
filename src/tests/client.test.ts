@@ -369,7 +369,25 @@ describe("LettaCodeClient", () => {
 
     expect(() =>
       client.resumeSession("agent-123", { environment: "work-laptop" }),
-    ).toThrow("environment overrides are only valid for remote/cloud backends");
+    ).toThrow("environment overrides are only valid for cloud backends");
+  });
+
+  test("rejects environment on remote app-server clients", () => {
+    expect(() =>
+      new LettaCodeClient({
+        backend: "remote",
+        url: "wss://example.com/ws",
+        environment: "work-laptop",
+      } as never),
+    ).toThrow("remote url selects the app-server runtime");
+
+    const client = new LettaCodeClient({
+      backend: "remote",
+      url: "wss://example.com/ws",
+    });
+    expect(() =>
+      client.resumeSession("agent-123", { environment: "work-laptop" }),
+    ).toThrow("remote url selects the app-server runtime");
   });
 
   test("local backend uses app-server when an agent id is provided", async () => {
@@ -479,6 +497,70 @@ describe("LettaCodeClient", () => {
       expect(inputCommand).toMatchObject({
         type: "input",
         runtime: { agent_id: "agent-123", conversation_id: "conv-created" },
+        payload: { kind: "create_message", supports_control_response: true },
+      });
+    } finally {
+      session.close();
+    }
+  });
+
+  test("app-server sessions respond to can_use_tool control requests through the shared approval bridge", async () => {
+    FakeAppServerSocket.instances = [];
+    const approvals: Array<{ toolName: string; input: Record<string, unknown> }> = [];
+    const client = new LettaCodeClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123", {
+      canUseTool: (toolName, input) => {
+        approvals.push({ toolName, input });
+        return {
+          behavior: "allow",
+          message: "approved",
+          updatedInput: { command: "pwd" },
+          updatedPermissions: [],
+        };
+      },
+    });
+
+    try {
+      await session.initialize();
+      fakeControlSocket().serverMessage({
+        type: "control_request",
+        request_id: "approval-1",
+        runtime: { agent_id: "agent-123", conversation_id: "conv-created" },
+        request: {
+          subtype: "can_use_tool",
+          tool_name: "Bash",
+          input: { command: "pwd" },
+        },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(approvals).toEqual([{ toolName: "Bash", input: { command: "pwd" } }]);
+      const approvalCommand = fakeControlSocket().sent.find(
+        (command): command is Record<string, unknown> => {
+          if (!command || typeof command !== "object") return false;
+          const payload = (command as { payload?: { kind?: string } }).payload;
+          return (command as { type?: string }).type === "input" && payload?.kind === "approval_response";
+        },
+      );
+      expect(approvalCommand).toMatchObject({
+        type: "input",
+        runtime: { agent_id: "agent-123", conversation_id: "conv-created" },
+        payload: {
+          kind: "approval_response",
+          request_id: "approval-1",
+          decision: {
+            behavior: "allow",
+            message: "approved",
+            updatedInput: { command: "pwd" },
+            updatedPermissions: [],
+          },
+        },
       });
     } finally {
       session.close();

@@ -77,8 +77,8 @@ for await (const msg of session.stream()) {
 
 By default, `resumeSession(agentId)` continues the agent’s default conversation. To start a fresh thread, use `createSession(agentId)` (see docs). App-server sessions require an explicit agent id; default/LRU local-agent selection (`createSession()` with no agent id) remains available through the legacy local stdio fallback.
 
-For remote/cloud backends, `environment` is session-scoped and can override the
-client's default execution target:
+For cloud backends, `environment` is session-scoped and can override the
+client default. Remote app-server URLs already select their runtime:
 
 ```ts
 await using session = client.resumeSession(agentId, {

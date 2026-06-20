@@ -92,7 +92,12 @@ export class LettaCodeClient {
 
     if (this.backend === "local" && this.environment !== undefined) {
       throw new Error(
-        "LettaCodeClient environment is only valid for remote/cloud backends.",
+        "LettaCodeClient environment is only valid for cloud backends.",
+      );
+    }
+    if (this.backend === "remote" && this.environment !== undefined) {
+      throw new Error(
+        "LettaCodeClient environment is only valid for the cloud backend; remote url selects the app-server runtime.",
       );
     }
 
@@ -244,7 +249,7 @@ export class LettaCodeClient {
    * Resume an existing agent default conversation or a specific conversation.
    *
    * `options.environment` overrides the client's default execution target for
-   * remote/cloud backends.
+   * cloud backends. Remote app-server URLs already select the runtime.
    */
   resumeSession(
     id: string,
@@ -344,7 +349,7 @@ export class LettaCodeClient {
     if (this.backend === "local") {
       if (effectiveEnvironment !== undefined) {
         throw new Error(
-          `${action}() environment overrides are only valid for remote/cloud backends.`,
+          `${action}() environment overrides are only valid for cloud backends.`,
         );
       }
       if (!this.useLegacyLocalStdio()) {
@@ -354,6 +359,11 @@ export class LettaCodeClient {
     }
 
     if (this.backend === "remote") {
+      if (options.environment !== undefined) {
+        throw new Error(
+          `${action}() environment overrides are only valid for cloud backends; remote url selects the app-server runtime.`,
+        );
+      }
       assertRemoteSessionOptionsSupported(action, options);
       return;
     }
