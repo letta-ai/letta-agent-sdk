@@ -1,9 +1,11 @@
 # SLOP_PART2: Cloud SDK V2 Deslop Follow-up
 
+Status: current post-fix tracker. `SLOP_AUDIT.md` is retained as historical audit trail; this file is the source of truth for what is fixed and what remains.
+
 ## Goal
 Keep Cloud sandbox backend aligned with the app-server/listener runtime protocol. Cloud should own Cloud-only concerns (REST agent/conversation/environment/sandbox resolution and Cloud status-websocket transport reliability), while turn execution, request correlation, runtime startup, external tools, and terminality flow through the shared app-server client/controller path.
 
-This is an execution punch list, not another audit. Do not launch more agents for this pass.
+This was the execution punch list for the de-slop pass. The architectural de-slop work is now complete on this branch; remaining items are live Cloud sandbox validation and optional hardening tests.
 
 ## Current fixed baseline
 Already fixed in the current working tree:
@@ -23,8 +25,10 @@ Already fixed in the current working tree:
 - SDK-hosted tools are registered through `runtime_start.external_tools` and executed through the shared app-server external-tool handler.
 - Cloud create-agent preserves the shared app-server harness default for global pinning instead of forcing `pin_global:false`.
 - Remote/cloud history/bootstrap pagination flags are best-effort: app-server/cloud no longer fabricate `hasMore:false`, `nextBefore:null`, `memfsEnabled:false`, or `hasPendingApproval:false` when the backend has not reported them.
+- Cloud `listMessages()` and `bootstrapState()` no longer use Cloud REST `/v1/conversations/{id}/messages`; they inherit the shared app-server/listener `conversation_messages_list` path for default, resumed non-default, explicit override, and bootstrap history reads.
+- Final external de-slop review after the Cloud history fix reported no blockers from both Codex GPT-5.5 and Claude Opus 4.8. Their test nits were addressed by removing the stale Cloud REST messages mock and asserting bootstrap does not invent `hasPendingApproval` / `timings`.
 
-## Remaining P1 fixes
+## Remaining follow-ups
 
 ### 0. Lift approval bridge out of Cloud — completed
 The listener client was originally written with the Cloud gateway/bridge in mind, then later formalized as app-server. Apparent post-registration WS differences should be treated as historical artifacts unless live contracts prove otherwise. Once a runtime is started on a device, local app-server, remote app-server, and Cloud gateway sessions should speak the same protocol.
@@ -36,8 +40,8 @@ Executed in this pass:
 - Approval responses prefer the runtime scope carried on the control request (`runtime` or top-level `agent_id`/`conversation_id`) before falling back to locally cached session runtime.
 - Cloud-only code stays focused on sandbox lifecycle, Cloud REST lookup, gateway auth/routing, and gateway delivery-envelope quirks.
 
-### 1. Runtime-start contract verification against Cloud service
-The local fake now asserts `runtime_start` on Cloud status sockets, but live Cloud still needs confirmation.
+### 1. Direct Cloud sandbox runtime-start contract verification
+The local fake now asserts `runtime_start` on Cloud status sockets, but direct `backend:"cloud"` live sandbox coverage still needs confirmation. The existing `bun run test:live` suite exercises the local app-server path against real API-backed agents; it is not a direct Cloud sandbox `/status/ws` smoke.
 
 Validation to add/run:
 - Live Cloud sandbox smoke: initialize direct Cloud session, confirm `/status/ws?channel=control|stream` accepts `runtime_start` and returns `runtime_start_response`.
@@ -46,7 +50,7 @@ Validation to add/run:
 
 If live Cloud does not yet forward `runtime_start`, do not reintroduce the deleted controller. Fix the Cloud listener/status route or add a tiny protocol adapter at the transport boundary.
 
-### 2. Approval terminality parity coverage
+### 2. Optional approval terminality parity coverage
 The duplicate Cloud terminality code is gone, so parity now depends on `AppServerClient.runTurn()`.
 
 Tests still worth adding around the shared path:
@@ -56,7 +60,7 @@ Tests still worth adding around the shared path:
 
 Keep these tests in shared app-server/client coverage where possible; add Cloud fake coverage only for Cloud transport routing/ACK/gap behavior.
 
-### 3. Transport adapter edge cases
+### 3. Transport adapter edge cases — covered by unit/fake tests
 Added narrow tests for the Cloud socket adapter, not turn state:
 - Duplicate `idempotency_key` frame is ACKed but emitted once.
 - Event sequence gap on stream channel sends `sync { recover_approvals:true, force_device_status:true }` on the control socket.
@@ -69,16 +73,29 @@ Added narrow tests for the Cloud socket adapter, not turn state:
 - Removed the Cloud create-agent `pinGlobalAgent:false` override for harness parity.
 
 ## P1/P2 public contract decision: listMessages/bootstrapState
-The audits call this merge-blocking, but it is a cross-backend API contract problem rather than direct Cloud runtime state-machine slop.
+The audits called this merge-blocking, but it is a cross-backend API contract problem rather than direct Cloud runtime state-machine slop.
 
 Decision options:
 1. Narrow now: document/list types as raw best-effort history and mark pagination/bootstrap state fields as best-effort/nullable/not authoritative for app-server/cloud.
 2. Finish properly: extend app-server protocol to return cursor/hasMore and source `bootstrapState()` from backend state.
 
-This pass did option 1. Do not pretend hardcoded `hasMore:false` is truthful.
+This pass did option 1. Do not pretend hardcoded `hasMore:false` is truthful. Tests, docs, and callers should treat `hasMore`, `nextBefore`, `hasPendingApproval`, `memfsEnabled`, `tools`, and `timings` as optional/known-only when the backend reports them.
 
 ## Validation
-Run at minimum:
-- `bun test src/tests/cloud-session.test.ts src/tests/client.test.ts --timeout 10000`
-- `bun run check`
-- `bun test --timeout 15000` before declaring done.
+Completed before the current live-test cleanup:
+- `bun run check` — passed.
+- `bun test src/tests/cloud-session.test.ts --timeout 10000` — 16 pass.
+- `bun test --timeout 10000` — 201 pass, 9 skip, 0 fail.
+
+Live validation status:
+- `bun run test:live` uses `LETTA_LIVE_INTEGRATION=1` and `LETTA_API_KEY` from `~/dev/.env`.
+- It validates the top-level/local app-server path against real API-backed agents. This is useful shared-protocol validation, but not direct Cloud sandbox backend coverage.
+- Initial post-fix live run exposed a stale test expectation: `listMessages returns raw API messages and paginates` expected `hasMore` to always be boolean even though the de-slop decision made pagination flags optional/known-only when reported. The live test now accepts absent pagination flags.
+- The concurrent `listMessages while stream is active` live test now records/logs the terminal result before asserting success, so future live/model/app-server failures are diagnosable.
+- After the live-test contract cleanup, `bun run test:live` passed: 8 pass, 0 fail.
+
+Final validation after this doc/test cleanup:
+- `bun run check` — passed.
+- `bun test src/tests/cloud-session.test.ts src/tests/client.test.ts --timeout 10000` — 37 pass, 0 fail.
+- `bun test --timeout 10000` — 201 pass, 9 skip, 0 fail.
+- `bash -lc 'set -a; source ~/dev/.env >/dev/null 2>&1; set +a; bun run test:live'` — 8 pass, 0 fail.

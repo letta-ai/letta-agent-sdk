@@ -1,6 +1,6 @@
 # PR 146 SLOP Audit — Cloud Sandbox Backend
 
-Status: draft audit, product code intentionally unchanged.
+Status: historical audit. Product code was subsequently de-slopped on this branch; see `SLOP_PART2.md` for current fixed baseline, validation status, and remaining follow-ups.
 Branch: `letta/let-9238-cloud-sandbox-backend`
 SDK worktree: `/Users/loaner/dev/letta-code-sdk-public/.letta/worktrees/let-9238-cloud-sandbox-backend`
 App-server reference worktree: `/Users/loaner/dev/letta-code-prod/.letta/worktrees/let-9244-app-server-auth`
@@ -8,6 +8,8 @@ App-server reference worktree: `/Users/loaner/dev/letta-code-prod/.letta/worktre
 ## Why this file exists
 
 The audit must persist outside chat/compaction. Findings below should be evidence-based and updated as more code/app-server/Cloud behavior is checked. Avoid overconfident claims; mark live-service behavior separately from intended contract.
+
+Post-fix note: many concrete code-smell bullets below describe the pre-fix PR state. They are retained as audit trail, not current truth. Current code no longer has the bespoke Cloud runtime controller, Cloud-only approval/recovery path, Cloud REST history path, create-agent tag/origin/MemFS suppression, or fabricated app-server/cloud history/bootstrap flags.
 
 ## Context-free truth / north star (read this first)
 

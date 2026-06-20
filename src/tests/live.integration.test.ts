@@ -443,7 +443,9 @@ describeLive("live integration: letta-code-sdk", () => {
 
       expect(Array.isArray(page1.messages)).toBe(true);
       expect(page1.messages.length).toBeGreaterThan(0);
-      expect(typeof page1.hasMore).toBe("boolean");
+      if (page1.hasMore !== undefined) {
+        expect(typeof page1.hasMore).toBe("boolean");
+      }
       assertRawMessageShape(page1);
 
       let page2: ListMessagesResult | null = null;
@@ -518,7 +520,6 @@ describeLive("live integration: letta-code-sdk", () => {
 
       await streamPromise;
       const result = expectTerminalResult(streamMessages);
-      expect(result.success).toBe(true);
 
       await writeFixture("list_messages_during_stream", {
         init,
@@ -527,8 +528,13 @@ describeLive("live integration: letta-code-sdk", () => {
           hasMore: page.hasMore,
           nextBefore: page.nextBefore,
         },
+        terminalResult: summarizeMessage(result),
         streamSummary: streamMessages.map(summarizeMessage),
       });
+      if (!result.success) {
+        log("listMessages-during-stream terminal result failed", summarizeMessage(result));
+      }
+      expect(result.success).toBe(true);
     },
     TEST_TIMEOUT_MS,
   );
