@@ -38,7 +38,6 @@ import type {
 
 const DEFAULT_CLOUD_API_BASE_URL = "https://api.letta.com";
 const DEFAULT_TURN_TIMEOUT_MS = 120_000;
-const DEFAULT_SANDBOX_TTL_MINUTES = 5;
 const DEFAULT_SANDBOX_READY_TIMEOUT_MS = 120_000;
 const DEFAULT_SANDBOX_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_PING_INTERVAL_MS = 30_000;
@@ -88,10 +87,8 @@ type CloudSessionMode = RuntimeSessionMode;
 
 type ResolvedSandboxPolicy = {
   lifecycle: "ephemeral" | "keep-warm" | "external";
-  ttlMinutes: number;
   readyTimeoutMs: number;
   pollIntervalMs: number;
-  refreshOnTurn: boolean;
   terminateOnClose: boolean;
 };
 
@@ -733,21 +730,17 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     });
   }
 
-  protected override async beforeTurn(): Promise<void> {
-    await this.refreshSandboxForTurn();
-  }
-
   protected override onCoreClose(): void {
     this.removeExternalToolHandler?.();
     this.removeExternalToolHandler = null;
     this.removeControlRequestHandler?.();
     this.removeControlRequestHandler = null;
 
-    if (this.sandbox !== null && this.sandboxPolicy?.terminateOnClose === true && this.sandboxOwnerAgentId) {
-      const agentId = this.sandboxOwnerAgentId;
+    if (this.sandbox !== null && this.sandboxPolicy?.terminateOnClose === true) {
+      const sandboxId = this.sandbox.sandboxId;
       this.sandbox = null;
       this.sandboxOwnerAgentId = null;
-      void this.terminateAgentSandbox(agentId).catch(() => {
+      void this.terminateSandbox(sandboxId).catch(() => {
         // close() is intentionally synchronous; cleanup failures are ignored.
       });
     }
@@ -829,10 +822,8 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       sandboxOptions.terminateOnClose ?? (lifecycle === "ephemeral");
     this.sandboxPolicy = {
       lifecycle,
-      ttlMinutes: sandboxOptions.ttlMinutes ?? DEFAULT_SANDBOX_TTL_MINUTES,
       readyTimeoutMs: sandboxOptions.readyTimeoutMs ?? DEFAULT_SANDBOX_READY_TIMEOUT_MS,
       pollIntervalMs: sandboxOptions.pollIntervalMs ?? DEFAULT_SANDBOX_POLL_INTERVAL_MS,
-      refreshOnTurn: sandboxOptions.refreshOnTurn ?? lifecycle !== "external",
       terminateOnClose,
     };
     return this.sandboxPolicy;
@@ -843,7 +834,6 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     if (policy.lifecycle !== "external") {
       this.sandboxOwnerAgentId = runtime.agent_id;
       this.sandbox = await this.createAgentSandbox(runtime.agent_id);
-      await this.refreshAgentSandbox(runtime.agent_id, policy.ttlMinutes);
       return this.waitForSandboxConnection(this.sandbox, policy);
     }
 
@@ -878,11 +868,11 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     const fetchImpl = getFetch(this.cloudOptions.fetch);
     const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
     const response = await fetchImpl(
-      `${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/sandboxes`,
+      `${baseUrl}/v1/sandboxes`,
       {
         method: "POST",
         headers: cloudHeaders(this.cloudOptions),
-        body: JSON.stringify({}),
+        body: JSON.stringify({ agentId }),
       },
     );
     const body = await parseJsonResponse(response);
@@ -893,39 +883,19 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     return body;
   }
 
-  private async refreshAgentSandbox(agentId: string, ttlMinutes: number): Promise<void> {
+  private async terminateSandbox(sandboxId: string): Promise<void> {
     const fetchImpl = getFetch(this.cloudOptions.fetch);
     const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
     const response = await fetchImpl(
-      `${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/sandboxes/refresh`,
+      `${baseUrl}/v1/sandboxes/${encodeURIComponent(sandboxId)}/terminate`,
       {
         method: "POST",
         headers: cloudHeaders(this.cloudOptions),
-        body: JSON.stringify({ ttlMinutes }),
+        body: JSON.stringify({}),
       },
     );
     const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud refreshAgentSandbox()");
-  }
-
-  private async terminateAgentSandbox(agentId: string): Promise<void> {
-    const fetchImpl = getFetch(this.cloudOptions.fetch);
-    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
-    const response = await fetchImpl(
-      `${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/sandboxes`,
-      {
-        method: "DELETE",
-        headers: cloudHeaders(this.cloudOptions),
-      },
-    );
-    const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud terminateAgentSandbox()");
-  }
-
-  private async refreshSandboxForTurn(): Promise<void> {
-    const policy = this.resolveSandboxPolicy();
-    if (!policy.refreshOnTurn || !this.sandboxOwnerAgentId || !this.sandbox) return;
-    await this.refreshAgentSandbox(this.sandboxOwnerAgentId, policy.ttlMinutes);
+    assertOkResponse(response, body, "Cloud terminateSandbox()");
   }
 
   private async waitForSandboxConnection(

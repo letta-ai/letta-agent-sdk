@@ -59,7 +59,7 @@ function createCloudFetchMock(
       return Promise.resolve(jsonResponse({ id: "conv-1", agent_id: "agent-from-conv" }));
     }
 
-    if (parsed.pathname === "/v1/agents/agent-1/sandboxes" && method === "POST") {
+    if (parsed.pathname === "/v1/sandboxes" && method === "POST") {
       return Promise.resolve(jsonResponse({
         sandboxId: "sandbox-1",
         deviceId: "device-sandbox",
@@ -67,11 +67,7 @@ function createCloudFetchMock(
       }));
     }
 
-    if (parsed.pathname === "/v1/agents/agent-1/sandboxes/refresh" && method === "POST") {
-      return Promise.resolve(jsonResponse({ success: true }));
-    }
-
-    if (parsed.pathname === "/v1/agents/agent-1/sandboxes" && method === "DELETE") {
+    if (parsed.pathname === "/v1/sandboxes/sandbox-1/terminate" && method === "POST") {
       return Promise.resolve(jsonResponse({ success: true }));
     }
 
@@ -475,7 +471,7 @@ function resetFakeAppServer(): void {
 }
 
 describe("CloudEnvironmentSession", () => {
-  test("creates and refreshes a Cloud agent sandbox before using the Remote Client websocket", async () => {
+  test("creates a Cloud agent sandbox before using the Remote Client websocket", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
     const client = new LettaCodeClient({
@@ -485,7 +481,7 @@ describe("CloudEnvironmentSession", () => {
       fetch: createCloudFetchMock(requests),
       WebSocket: FakeCloudSocket,
       requestTimeoutMs: 1_000,
-      sandbox: { ttlMinutes: 7, pollIntervalMs: 1, readyTimeoutMs: 50 },
+      sandbox: { pollIntervalMs: 1, readyTimeoutMs: 50 },
     });
 
     const session = client.resumeSession("agent-1", {
@@ -501,12 +497,11 @@ describe("CloudEnvironmentSession", () => {
       agentId: "agent-1",
       conversationId: "default",
     });
-    expect(requests.slice(0, 3).map((request) => `${request.method} ${new URL(request.url).pathname}`)).toEqual([
-      "POST /v1/agents/agent-1/sandboxes",
-      "POST /v1/agents/agent-1/sandboxes/refresh",
+    expect(requests.slice(0, 2).map((request) => `${request.method} ${new URL(request.url).pathname}`)).toEqual([
+      "POST /v1/sandboxes",
       "GET /v1/environments",
     ]);
-    expect(requests[1]!.body).toEqual({ ttlMinutes: 7 });
+    expect(requests[0]!.body).toEqual({ agentId: "agent-1" });
     expect(requests[0]!.headers.authorization ?? requests[0]!.headers.Authorization).toBe("Bearer sk-test");
 
     const controlSocket = FakeCloudSocket.socket("control")!;
@@ -577,14 +572,13 @@ describe("CloudEnvironmentSession", () => {
     expect(inputCommand.payload).not.toHaveProperty("source");
     expect(streamSocket.sent).toContainEqual({ type: "ack", seq: 101 });
     expect(streamSocket.sent).toContainEqual({ type: "ack", seq: 102 });
-    expect(requests.filter((request) => new URL(request.url).pathname.endsWith("/sandboxes/refresh"))).toHaveLength(2);
 
     session.close();
     await Promise.resolve();
     await Promise.resolve();
     expect(requests.at(-1)).toMatchObject({
-      method: "DELETE",
-      url: "https://api.test/v1/agents/agent-1/sandboxes",
+      method: "POST",
+      url: "https://api.test/v1/sandboxes/sandbox-1/terminate",
     });
   });
 
@@ -1141,8 +1135,8 @@ describe("CloudEnvironmentSession", () => {
 
     expect(FakeCloudSocket.instances).toHaveLength(0);
     expect(requests.some((request) =>
-      request.method === "DELETE" &&
-      new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes"
+      request.method === "POST" &&
+      new URL(request.url).pathname === "/v1/sandboxes/sandbox-1/terminate"
     )).toBe(true);
   });
 

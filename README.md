@@ -40,12 +40,12 @@ const remoteClient = new LettaCodeClient({
   authToken: process.env.LETTA_APP_SERVER_TOKEN,
 });
 
-// Cloud: create/refresh a Letta Cloud agent sandbox and control it over the
+// Cloud: create a Letta Cloud agent sandbox and control it over the
 // Remote Client websocket protocol.
 const client = new LettaCodeClient({
   backend: "cloud",
   apiKey: process.env.LETTA_API_KEY,
-  sandbox: { lifecycle: "ephemeral", ttlMinutes: 5 },
+  sandbox: { lifecycle: "ephemeral" },
 });
 ```
 
@@ -131,7 +131,7 @@ const client = new LettaCodeClient({
   apiKey: process.env.LETTA_API_KEY,
   // Default when no environment is supplied: create a sandbox and terminate it
   // when the session closes.
-  sandbox: { lifecycle: "ephemeral", ttlMinutes: 5 },
+  sandbox: { lifecycle: "ephemeral" },
 });
 
 const agentId = await client.createAgent({
@@ -150,10 +150,10 @@ console.log(result.result);
 
 Sandbox lifecycle options:
 
-- `ephemeral` (default without `environment`): create/refresh a Cloud sandbox,
-  refresh its TTL before turns, and terminate it on `session.close()`.
-- `keep-warm`: create/refresh a Cloud sandbox but leave it running for its TTL
-  after the SDK session closes.
+- `ephemeral` (default without `environment`): create a Cloud sandbox and
+  terminate it on `session.close()`.
+- `keep-warm`: create a Cloud sandbox and leave it running after the SDK session
+  closes.
 - `external` (default when `environment` is supplied): attach to an existing
   Remote Client connection without creating or terminating a sandbox.
 
@@ -161,7 +161,7 @@ Sandbox lifecycle options:
 const client = new LettaCodeClient({
   backend: "cloud",
   apiKey: process.env.LETTA_API_KEY,
-  sandbox: { lifecycle: "keep-warm", ttlMinutes: 30 },
+  sandbox: { lifecycle: "keep-warm" },
 });
 
 // Attach to an existing remote environment instead of creating a sandbox.

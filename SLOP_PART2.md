@@ -20,6 +20,7 @@ Already fixed in the current working tree:
 - Direct Cloud status sessions now open an `AppServerClient` over `/v1/environments/{connectionId}/status/ws` and issue `runtime_start` for the resolved `{agent_id, conversation_id}`.
 - The large duplicate `CloudStatusRuntimeController` turn state machine was removed. Cloud now reuses `AppServerRuntimeController` / `AppServerClient.runTurn()` for turn input, terminality, request correlation, `sync`, and external tool responses.
 - Cloud transport reliability remains a narrow gateway socket adapter: auth URL/header construction, split control/stream channels, Cloud gateway fanout de-dupe, ACKs, event-sequence gap `sync`, idempotency de-dupe, and heartbeat pings.
+- Cloud sandbox CRUD now matches the live Cloud contract: `POST /v1/sandboxes` with `{ agentId }` to create, `GET /v1/environments` filtered by sandbox `deviceId` to resolve the listener connection, and `POST /v1/sandboxes/{sandboxId}/terminate` for ephemeral cleanup. The stale `/v1/agents/{agentId}/sandboxes` and `/refresh` routes were removed from the SDK path.
 - Permission approvals are not Cloud-specific. `control_request` / `can_use_tool` -> SDK `canUseTool` -> app-server `approval_response` is core app-server/listener protocol behavior and now lives in the shared app-server-backed session path.
 - Approval responses now use the app-server/listener wire contract (`updated_input` and `selected_permission_suggestion_ids`) rather than SDK-only camelCase fields.
 - SDK-hosted tools are registered through `runtime_start.external_tools` and executed through the shared app-server external-tool handler.
@@ -41,10 +42,15 @@ Executed in this pass:
 - Cloud-only code stays focused on sandbox lifecycle, Cloud REST lookup, gateway auth/routing, and gateway delivery-envelope quirks.
 
 ### 1. Direct Cloud sandbox runtime-start contract verification
-The local fake now asserts `runtime_start` on Cloud status sockets, but direct `backend:"cloud"` live sandbox coverage still needs confirmation. The existing `bun run test:live` suite exercises the local app-server path against real API-backed agents; it is not a direct Cloud sandbox `/status/ws` smoke.
+The local fake now asserts `runtime_start` on Cloud status sockets. The existing `bun run test:live` suite exercises the local app-server path against real API-backed agents; direct `backend:"cloud"` sandbox `/status/ws` coverage is tracked separately here.
+
+Live route probe:
+- Production Cloud accepts `POST /v1/sandboxes` and immediate `POST /v1/sandboxes/{sandboxId}/terminate` with the current `LETTA_API_KEY`.
+- Production Cloud rejects the SDK's former stale route `POST /v1/agents/{agentId}/sandboxes` with 404.
+- After the SDK route fix, direct `backend:"cloud"` initialization creates a sandbox successfully but still times out waiting for the sandbox listener environment/connection to come online. Ephemeral cleanup calls terminate; a follow-up `/v1/sandboxes` list did not show the just-created timed-out sandbox.
 
 Validation to add/run:
-- Live Cloud sandbox smoke: initialize direct Cloud session, confirm `/status/ws?channel=control|stream` accepts `runtime_start` and returns `runtime_start_response`.
+- Live Cloud sandbox smoke after listener registration works: initialize direct Cloud session, confirm `/status/ws?channel=control|stream` accepts `runtime_start` and returns `runtime_start_response`.
 - Live turn smoke: after runtime_start, `runTurn()` completes through app-server client terminality.
 - Live external tool smoke: `runtime_start.external_tools` registers schemas and a Cloud-issued `external_tool_call_request` receives `external_tool_call_response`.
 
@@ -99,3 +105,4 @@ Final validation after this doc/test cleanup:
 - `bun test src/tests/cloud-session.test.ts src/tests/client.test.ts --timeout 10000` — 37 pass, 0 fail.
 - `bun test --timeout 10000` — 201 pass, 9 skip, 0 fail.
 - `bash -lc 'set -a; source ~/dev/.env >/dev/null 2>&1; set +a; bun run test:live'` — 8 pass, 0 fail.
+- Direct `backend:"cloud"` production smoke after the sandbox route fix: sandbox creation succeeds through `POST /v1/sandboxes`, but initialization still times out waiting for an online listener connection. This is the remaining Cloud sandbox backend/listener-registration blocker before direct Cloud runtime smoke can pass.

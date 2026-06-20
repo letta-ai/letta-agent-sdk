@@ -288,19 +288,19 @@ export interface LettaCodeCloudSandboxOptions {
    * Sandbox ownership policy.
    *
    * - ephemeral: SDK creates a sandbox and terminates it on close.
-   * - keep-warm: SDK creates/refreshes a sandbox and leaves it warm on close.
+   * - keep-warm: SDK creates a sandbox and leaves it warm on close.
    * - external: SDK attaches to the configured environment without creating a sandbox.
    *
    * Defaults to ephemeral when no environment is supplied, otherwise external.
    */
   lifecycle?: LettaCodeCloudSandboxLifecycle;
-  /** Keepalive/autostop TTL in minutes for SDK-managed sandboxes. Cloud accepts 1-60. */
+  /** Reserved for Cloud TTL APIs; accepted for forward compatibility. */
   ttlMinutes?: number;
   /** Timeout waiting for the created sandbox's environment connection to come online. */
   readyTimeoutMs?: number;
   /** Poll interval while waiting for the created sandbox's connectionId. */
   pollIntervalMs?: number;
-  /** Refresh sandbox TTL before each turn. Defaults to true for SDK-managed sandboxes. */
+  /** Reserved for Cloud TTL refresh APIs; accepted for forward compatibility. */
   refreshOnTurn?: boolean;
   /** Override close cleanup behavior. Defaults true for ephemeral, false otherwise. */
   terminateOnClose?: boolean;
