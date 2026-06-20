@@ -547,7 +547,6 @@ describe("CloudEnvironmentSession", () => {
       model: "anthropic/claude-sonnet-4",
       systemPrompt: "You are a repo assistant.",
       memory: [{ label: "project", value: "Use Bun." }],
-      tags: ["team:sdk"],
     })).resolves.toBe("agent-created");
 
     expect(requests).toHaveLength(0);
@@ -555,16 +554,20 @@ describe("CloudEnvironmentSession", () => {
     const runtimeStart = controlSocket.sent.find((command) => command.type === "runtime_start")!;
     expect(runtimeStart).toMatchObject({
       create_agent: {
-        pin_global: true,
+        pin_global: false,
         body: {
           model: "anthropic/claude-sonnet-4",
           system: "You are a repo assistant.",
-          tags: ["team:sdk", "origin:letta-code"],
           memory_blocks: [{ label: "project", value: "Use Bun." }],
         },
       },
     });
-    expect(controlSocket.sent).toContainEqual(expect.objectContaining({ type: "enable_memfs" }));
+    expect((runtimeStart.create_agent as { body: Record<string, unknown> }).body.tags).toBeUndefined();
+    expect(controlSocket.sent).not.toContainEqual(expect.objectContaining({ type: "enable_memfs" }));
+
+    await expect(client.createAgent({ tags: ["team:sdk"] })).rejects.toThrow(
+      "Cloud backend createAgent() cannot set tags until Cloud supports tags on agent creation",
+    );
 
     await expect(client.createAgent({ systemPrompt: "default" })).rejects.toThrow(
       "App-server createAgent() does not yet support system prompt presets",

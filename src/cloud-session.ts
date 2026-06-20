@@ -516,6 +516,10 @@ function cloudHarnessAppServerOptions(
   };
   return {
     local: appServer?.url === undefined,
+    localBackend: "api",
+    pinGlobalAgent: false,
+    includeSdkOriginTag: false,
+    enableMemfsAfterInitialize: false,
     ...(appServer?.url !== undefined ? { url: appServer.url } : {}),
     ...(appServer?.WebSocket !== undefined ? { WebSocket: appServer.WebSocket } : {}),
     ...(clientOptions.requestTimeoutMs !== undefined || appServer?.requestTimeoutMs !== undefined
@@ -533,6 +537,9 @@ export async function createCloudAgent(
   clientOptions: LettaCodeCloudClientOptions,
   agentOptions: CreateAgentOptions,
 ): Promise<string> {
+  if (agentOptions.tags !== undefined) {
+    throw new Error("Cloud backend createAgent() cannot set tags until Cloud supports tags on agent creation.");
+  }
   const session = new AppServerSession(cloudHarnessAppServerOptions(clientOptions), {
     kind: "create-agent",
     options: agentOptions,

@@ -63,12 +63,20 @@ export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
   url?: string;
   /** Spawn a local app-server when url is omitted. */
   local?: boolean;
+  /** Optional backend for SDK-owned local app-server processes. */
+  localBackend?: string;
   /** Optional local app-server listen URL. Defaults to ws://127.0.0.1:0. */
   localListen?: string;
   /** Timeout for local app-server startup. */
   localStartupTimeoutMs?: number;
   /** Extra environment variables for SDK-owned local app-server processes. */
   localEnv?: Record<string, string | undefined>;
+  /** Whether create-agent runtime_start should pin the created agent globally. */
+  pinGlobalAgent?: boolean;
+  /** Whether SDK create-agent payloads should add the origin tag automatically. */
+  includeSdkOriginTag?: boolean;
+  /** Whether to run the post-initialize MemFS enable command when requested by SDK options. */
+  enableMemfsAfterInitialize?: boolean;
   /**
    * Cloud status websockets fan out device frames to every subscriber rather
    * than honoring local app-server's split control/stream channels. Enable this
@@ -171,12 +179,17 @@ function normalizeMemoryBlock(block: Record<string, unknown>): Record<string, un
   return normalized;
 }
 
-export function createAgentBody(options: CreateAgentOptions): Record<string, unknown> {
+export function createAgentBody(
+  options: CreateAgentOptions,
+  settings: { includeSdkOriginTag?: boolean } = {},
+): Record<string, unknown> {
   assertRemoteCreateAgentOptionsSupported(options);
 
-  const body: Record<string, unknown> = {
-    tags: includeSdkAgentOriginTag(options.tags),
-  };
+  const includeOriginTag = settings.includeSdkOriginTag ?? true;
+  const body: Record<string, unknown> = {};
+  if (includeOriginTag || options.tags !== undefined) {
+    body.tags = includeOriginTag ? includeSdkAgentOriginTag(options.tags) : options.tags;
+  }
 
   if (options.model !== undefined) body.model = options.model;
   if (options.embedding !== undefined) body.embedding = options.embedding;
@@ -385,6 +398,7 @@ export class AppServerSession extends RemoteClientSessionCore {
   }
 
   protected override shouldEnableMemfs(options: LettaCodeClientSessionOptions | CreateAgentOptions): boolean {
+    if (this.remoteOptions.enableMemfsAfterInitialize === false) return false;
     return options.memfs === true || (this.mode.kind === "create-agent" && options.memfs !== false);
   }
 
@@ -444,6 +458,7 @@ export class AppServerSession extends RemoteClientSessionCore {
     }
     this.ownedAppServer = await startLocalAppServer({
       listen: this.remoteOptions.localListen,
+      backend: this.remoteOptions.localBackend,
       startupTimeoutMs: this.remoteOptions.localStartupTimeoutMs,
       env: this.remoteOptions.localEnv,
     });
@@ -475,8 +490,10 @@ export class AppServerSession extends RemoteClientSessionCore {
 
     if (this.mode.kind === "create-agent") {
       command.create_agent = {
-        body: createAgentBody(this.mode.options),
-        pin_global: true,
+        body: createAgentBody(this.mode.options, {
+          includeSdkOriginTag: this.remoteOptions.includeSdkOriginTag,
+        }),
+        pin_global: this.remoteOptions.pinGlobalAgent ?? true,
       };
       return command as RuntimeStartCommand;
     }
