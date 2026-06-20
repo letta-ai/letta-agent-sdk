@@ -140,8 +140,6 @@ const agentId = await client.createAgent({
 });
 
 await using session = client.resumeSession(agentId, {
-  // Paths are resolved inside the remote environment, not on the caller machine.
-  cwd: "/workspace/project",
   permissionMode: "bypassPermissions",
 });
 
@@ -150,6 +148,10 @@ for await (const msg of session.stream()) {
   if (msg.type === "assistant") console.log(msg.content);
 }
 ```
+
+If you pass `cwd` for a Cloud session, use a path that exists inside the selected
+remote environment or managed sandbox. Local paths such as `process.cwd()` are
+not mapped into Cloud sandboxes automatically.
 
 You can still set a default `environment` on the client or override it per
 session to use an existing remote runtime instead of an SDK-managed sandbox:
