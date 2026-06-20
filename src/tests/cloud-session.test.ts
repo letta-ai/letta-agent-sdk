@@ -59,10 +59,6 @@ function createCloudFetchMock(
       return Promise.resolve(jsonResponse({ id: "conv-1", agent_id: "agent-from-conv" }));
     }
 
-    if (parsed.pathname === "/v1/conversations/default/messages" && method === "GET") {
-      return Promise.resolve(jsonResponse({ messages: [{ id: "msg-1" }], hasMore: false }));
-    }
-
     if (parsed.pathname === "/v1/agents/agent-1/sandboxes" && method === "POST") {
       return Promise.resolve(jsonResponse({
         sandboxId: "sandbox-1",
@@ -752,6 +748,116 @@ describe("CloudEnvironmentSession", () => {
         conversation_id: "default",
         query: { limit: 1 },
       }));
+    } finally {
+      session.close();
+    }
+  });
+
+  test("lists resumed conversation messages through runtime protocol instead of Cloud REST", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("conv-1");
+    try {
+      const page = await session.listMessages({ limit: 2, order: "desc" });
+      expect(page.messages).toEqual([{ id: "msg-from-runtime" }]);
+      expect(
+        requests.some((request) =>
+          new URL(request.url).pathname === "/v1/conversations/conv-1/messages"
+        ),
+      ).toBe(false);
+      expect(FakeCloudSocket.socket("control")!.sent).toContainEqual(
+        expect.objectContaining({
+          type: "conversation_messages_list",
+          conversation_id: "conv-1",
+          query: { order: "desc", limit: 2 },
+        }),
+      );
+    } finally {
+      session.close();
+    }
+  });
+
+  test("lists explicit Cloud conversation ids through runtime protocol instead of Cloud REST", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("agent-1");
+    try {
+      const page = await session.listMessages({ conversationId: "conv-explicit", limit: 1 });
+      expect(page.messages).toEqual([{ id: "msg-from-runtime" }]);
+      expect(
+        requests.some((request) =>
+          new URL(request.url).pathname === "/v1/conversations/conv-explicit/messages"
+        ),
+      ).toBe(false);
+      expect(FakeCloudSocket.socket("control")!.sent).toContainEqual(
+        expect.objectContaining({
+          type: "conversation_messages_list",
+          conversation_id: "conv-explicit",
+          query: { limit: 1 },
+        }),
+      );
+    } finally {
+      session.close();
+    }
+  });
+
+  test("bootstraps resumed Cloud conversations from runtime history", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("conv-1");
+    try {
+      const state = await session.bootstrapState({ limit: 3 });
+      expect(state).toMatchObject({
+        agentId: "agent-from-conv",
+        conversationId: "conv-1",
+        messages: [{ id: "msg-from-runtime" }],
+      });
+      expect(state.hasMore).toBeUndefined();
+      expect(state.nextBefore).toBeUndefined();
+      expect(state).not.toHaveProperty("hasPendingApproval");
+      expect(state).not.toHaveProperty("timings");
+      expect(
+        requests.some((request) =>
+          new URL(request.url).pathname === "/v1/conversations/conv-1/messages"
+        ),
+      ).toBe(false);
+      expect(FakeCloudSocket.socket("control")!.sent).toContainEqual(
+        expect.objectContaining({
+          type: "conversation_messages_list",
+          conversation_id: "conv-1",
+          query: { limit: 3 },
+        }),
+      );
     } finally {
       session.close();
     }

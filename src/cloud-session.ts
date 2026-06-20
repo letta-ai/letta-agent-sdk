@@ -34,8 +34,6 @@ import type {
   LettaCodeEnvironment,
   LettaCodeSocketConstructor,
   LettaCodeSocketLike,
-  ListMessagesOptions,
-  ListMessagesResult,
 } from "./types.js";
 
 const DEFAULT_CLOUD_API_BASE_URL = "https://api.letta.com";
@@ -605,52 +603,6 @@ export function assertCloudSessionOptionsSupported(
   }
 }
 
-async function listCloudMessages(
-  cloudOptions: LettaCodeCloudClientOptions,
-  conversationId: string,
-  options: ListMessagesOptions = {},
-): Promise<ListMessagesResult> {
-  const fetchImpl = getFetch(cloudOptions.fetch);
-  const baseUrl = normalizeCloudApiBaseUrl(cloudOptions.apiBaseUrl);
-  const url = new URL(`${baseUrl}/v1/conversations/${encodeURIComponent(conversationId)}/messages`);
-  if (options.before !== undefined) url.searchParams.set("before", options.before);
-  if (options.after !== undefined) url.searchParams.set("after", options.after);
-  if (options.order !== undefined) url.searchParams.set("order", options.order);
-  if (options.limit !== undefined) url.searchParams.set("limit", String(options.limit));
-
-  const response = await fetchImpl(url, { headers: cloudHeaders(cloudOptions) });
-  const body = await parseJsonResponse(response);
-  assertOkResponse(response, body, "Cloud listMessages()");
-
-  const messages = Array.isArray(body)
-    ? body
-    : body && typeof body === "object" && Array.isArray((body as { messages?: unknown }).messages)
-      ? ((body as { messages: unknown[] }).messages)
-      : body && typeof body === "object" && Array.isArray((body as { data?: unknown }).data)
-        ? ((body as { data: unknown[] }).data)
-        : [];
-  const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-  const result: ListMessagesResult = {
-    messages,
-  };
-  const nextBefore =
-    typeof record.nextBefore === "string" || record.nextBefore === null
-      ? record.nextBefore
-      : typeof record.next_before === "string" || record.next_before === null
-        ? record.next_before
-        : undefined;
-  if (nextBefore !== undefined) result.nextBefore = nextBefore;
-  const hasMore =
-    typeof record.hasMore === "boolean"
-      ? record.hasMore
-      : typeof record.has_more === "boolean"
-        ? record.has_more
-        : undefined;
-  if (hasMore !== undefined) result.hasMore = hasMore;
-  return result;
-}
-
-
 export class CloudEnvironmentSession extends RemoteClientSessionCore {
   private connectionId: string | null = null;
   private sandbox: CloudAgentSandbox | null = null;
@@ -676,14 +628,6 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     });
     const tools = mode.kind === "create-agent" ? mode.options.tools : mode.options.tools;
     this.externalTools = externalToolsByName(tools);
-  }
-
-  override async listMessages(options: ListMessagesOptions = {}): Promise<ListMessagesResult> {
-    const conversationId = options.conversationId ?? this._conversationId ?? this.conversationIdFromMode();
-    if (conversationId && conversationId !== "default") {
-      return listCloudMessages(this.cloudOptions, conversationId, options);
-    }
-    return super.listMessages(options);
   }
 
   protected override enableMemfsBody(): Record<string, unknown> {
@@ -807,13 +751,6 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
         // close() is intentionally synchronous; cleanup failures are ignored.
       });
     }
-  }
-
-  private conversationIdFromMode(): string | null {
-    if (this.mode.kind !== "session") return null;
-    if (this.mode.conversationId) return this.mode.conversationId;
-    if (this.mode.agentId && this.mode.defaultConversation) return "default";
-    return null;
   }
 
   private async resolveRuntime(): Promise<{ runtime: RuntimeScope }> {
