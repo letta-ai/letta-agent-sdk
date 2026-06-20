@@ -542,6 +542,8 @@ export interface LettaCodeSession extends AsyncDisposable {
   recoverPendingApprovals(
     options?: RecoverPendingApprovalsOptions,
   ): Promise<RecoverPendingApprovalsResult>;
+  /** Update the active remote/listener toolset preference for this session. */
+  updateToolset(toolsetPreference: string): Promise<void>;
   listMessages(options?: ListMessagesOptions): Promise<ListMessagesResult>;
   bootstrapState(options?: BootstrapStateOptions): Promise<BootstrapStateResult>;
   close(): void;
@@ -646,7 +648,8 @@ export interface SDKInitMessage {
   sessionId: string;
   conversationId: string;
   model: string;
-  tools: string[];
+  /** Backend-reported tool names, when the transport exposes an authoritative list. */
+  tools?: string[];
   memfsEnabled?: boolean;
   skillSources?: SkillSource[];
   systemInfoReminderEnabled?: boolean;
@@ -883,8 +886,8 @@ export interface BootstrapStateResult {
   conversationId: string;
   /** LLM model handle. */
   model: string | undefined;
-  /** Tool names registered on the agent. */
-  tools: string[];
+  /** Backend-reported tool names, when the transport exposes an authoritative list. */
+  tools?: string[];
   /** Whether memfs (git-backed memory) is enabled, when known. */
   memfsEnabled?: boolean;
   /** Initial history page (same shape as listMessages.messages). */

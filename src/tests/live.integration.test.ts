@@ -312,7 +312,7 @@ describeLive("live integration: letta-code-sdk", () => {
       expect(init.agentId).toBe(agentId);
       expect(init.sessionId.length).toBeGreaterThan(5);
       expect(init.conversationId.startsWith("conv-")).toBe(true);
-      expect(Array.isArray(init.tools)).toBe(true);
+      expect(init.tools === undefined || Array.isArray(init.tools)).toBe(true);
 
       await writeFixture("init_contract", {
         selectedAgentName,
@@ -419,7 +419,7 @@ describeLive("live integration: letta-code-sdk", () => {
   );
 
   test(
-    "listMessages returns raw API messages and paginates",
+    "listMessages returns raw API messages with best-effort cursors",
     async () => {
       await ensureAgentReady();
 

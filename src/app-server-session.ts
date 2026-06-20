@@ -66,6 +66,19 @@ type RuntimeStartCommand = Parameters<AppServerClient["runtimeStart"]>[0];
 
 type InputCommand = Parameters<AppServerClient["runTurn"]>[0];
 
+export function agentToolNames(
+  agent: Record<string, unknown> | null | undefined,
+): string[] | undefined {
+  const tools = agent?.tools;
+  if (!Array.isArray(tools)) return undefined;
+  return tools.flatMap((tool) => {
+    if (typeof tool === "string" && tool.length > 0) return [tool];
+    if (!tool || typeof tool !== "object") return [];
+    const name = (tool as { name?: unknown }).name;
+    return typeof name === "string" && name.length > 0 ? [name] : [];
+  });
+}
+
 export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
   /** Base websocket URL. Remote sessions require this; local sessions may omit
    * it to spawn an SDK-owned app-server lazily at initialize(). */
@@ -506,7 +519,7 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
       };
     }
 
-    return { recovered: true, pendingApproval: false, unsupported: false };
+    return { recovered: true, unsupported: false };
   }
 
   async listMessages(
@@ -570,13 +583,6 @@ export class AppServerSession extends RemoteClientSessionCore {
     super(mode, {
       label: "app-server",
       requestTimeoutMs: remoteOptions.requestTimeoutMs,
-      capabilities: {
-        enableMemfs: true,
-        reflectionSettings: true,
-        updateModel: true,
-        changeDeviceState: true,
-        updateToolset: true,
-      },
     });
     const tools = mode.kind === "create-agent" ? mode.options.tools : mode.options.tools;
     for (const tool of tools ?? []) {
@@ -623,11 +629,12 @@ export class AppServerSession extends RemoteClientSessionCore {
         throw new Error(response.error ?? "Failed to start app-server runtime");
       }
 
+      const tools = agentToolNames(response.agent);
       return {
         controller: new AppServerRuntimeController(client, this.remoteOptions),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
-        tools: Array.from(this.externalTools.keys()),
+        ...(tools !== undefined ? { tools } : {}),
       };
     } catch (error) {
       this.removeExternalToolHandler?.();

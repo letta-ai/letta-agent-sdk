@@ -130,11 +130,10 @@ describe("BootstrapStateResult type", () => {
   // Compile-time shape check — verifies TypeScript types are correct
   test("type has all required fields", () => {
     // This would fail to compile if required fields are missing
-    const result = {
+    const result: BootstrapStateResult = {
       agentId: "agent-1",
       conversationId: "conv-1",
       model: "anthropic/claude-sonnet-4-5",
-      tools: ["Bash", "Read"],
       memfsEnabled: true,
       messages: [],
       nextBefore: null,
@@ -144,7 +143,7 @@ describe("BootstrapStateResult type", () => {
 
     expect(result.agentId).toBeDefined();
     expect(result.conversationId).toBeDefined();
-    expect(Array.isArray(result.tools)).toBe(true);
+    expect(result.tools).toBeUndefined();
     expect(typeof result.memfsEnabled).toBe("boolean");
     expect(Array.isArray(result.messages)).toBe(true);
     expect(typeof result.hasPendingApproval).toBe("boolean");
@@ -155,7 +154,6 @@ describe("BootstrapStateResult type", () => {
       agentId: "a",
       conversationId: "c",
       model: undefined,
-      tools: [],
       memfsEnabled: false,
       messages: [],
       nextBefore: null,
@@ -165,6 +163,7 @@ describe("BootstrapStateResult type", () => {
 
     const withTimings: BootstrapStateResult = {
       ...withoutTimings,
+      tools: [],
       timings: { resolve_ms: 1, list_messages_ms: 5, total_ms: 6 },
     };
 

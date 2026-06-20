@@ -120,12 +120,12 @@ console.log(result.result);
 ### Letta Cloud backend
 
 Use `backend: "cloud"` to create or resume Cloud-hosted agents while running
-turns in an explicit Letta Cloud remote environment. This PR does not yet manage
-Cloud sandboxes; callers must supply `environment` until the paired Cloud
-sandbox backend work lands. Once connected, the SDK uses the Remote Client
+turns in an explicit Letta Cloud remote environment. The current SDK requires
+callers to supply `environment`; SDK-managed Cloud sandbox lifecycle is not yet
+available. Once connected, the SDK uses the Remote Client
 websocket protocol for
 `sync`, `input/create_message`, streaming deltas, approval responses, model
-updates, cwd/mode device-state updates, and heartbeats.
+updates, toolset updates, cwd/mode device-state updates, and heartbeats.
 
 ```ts
 const client = new LettaCodeClient({
@@ -163,9 +163,8 @@ await using session = client.resumeSession(agentId, {
 });
 ```
 
-SDK-managed Cloud sandbox lifecycle is intentionally not part of this PR. It is
-planned as a paired fast follow once the Cloud sandbox backend/listener support
-lands.
+SDK-managed Cloud sandbox lifecycle is not yet exposed by this SDK path. Passing
+legacy `sandbox` options fails fast; pass an explicit `environment` instead.
 
 By default, websocket authentication uses `Authorization` headers. Set
 `webSocketAuth: "query"` for browser-style websocket clients that cannot send
@@ -201,12 +200,22 @@ current ephemeral `connectionId`.
 
 ## Session configuration
 
-The SDK surfaces the same runtime controls as Letta Code CLI for skills, reminders, and sleeptime:
+App-server and Cloud sessions use the remote/listener protocol for runtime
+controls that can be applied to an existing agent, including `model`,
+`memfs: true`, sleeptime trigger settings, `cwd`, and `permissionMode`.
+Stdio-only CLI flags such as `skillSources`, `systemInfoReminder`,
+`sleeptime.behavior`, `memfs: false`, and partial-message toggles are rejected
+on app-server/Cloud sessions until those controls are wired through the remote
+protocol.
+
+If you need the legacy CLI flag surface, opt into the local stdio transport:
 
 ```ts
-import { createSession } from "@letta-ai/letta-code-sdk";
+import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
 
-const session = createSession("agent-123", {
+const client = new LettaCodeClient({ backend: "local", transport: "stdio" });
+
+const session = client.resumeSession("agent-123", {
   skillSources: ["project", "global"], // [] disables all skills (--no-skills)
   systemInfoReminder: false, // maps to --no-system-info-reminder
   sleeptime: {

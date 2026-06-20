@@ -8,6 +8,7 @@ import {
 import {
   AppServerRuntimeController,
   AppServerSession,
+  agentToolNames,
   createExternalToolCallHandler,
   externalToolGroups,
   registerAppServerControlRequestHandler,
@@ -483,10 +484,6 @@ function externalToolsByName(tools: AnyAgentTool[] | undefined): Map<string, Any
   return result;
 }
 
-function externalToolNames(tools: AnyAgentTool[] | undefined): string[] {
-  return Array.from(externalToolsByName(tools).keys());
-}
-
 function cloudHarnessAppServerOptions(
   clientOptions: LettaCodeCloudClientOptions,
 ): AppServerSessionOptions {
@@ -531,6 +528,11 @@ export function assertCloudSessionOptionsSupported(
   action: string,
   options: LettaCodeClientSessionOptions,
 ): void {
+  if ((options as { sandbox?: unknown }).sandbox !== undefined) {
+    throw new Error(
+      `Cloud backend ${action}() does not accept SDK-managed sandbox options yet. Specify environment; managed sandbox support is blocked on letta-cloud#12516.`,
+    );
+  }
   if (options.systemPrompt !== undefined) {
     throw new Error(`Cloud backend ${action}() cannot rewrite an existing agent's systemPrompt from the SDK adapter yet.`);
   }
@@ -570,12 +572,6 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     super(mode, {
       label: "cloud",
       requestTimeoutMs: cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
-      capabilities: {
-        enableMemfs: true,
-        reflectionSettings: true,
-        updateModel: true,
-        changeDeviceState: true,
-      },
     });
     const tools = mode.kind === "create-agent" ? mode.options.tools : mode.options.tools;
     this.externalTools = externalToolsByName(tools);
@@ -590,8 +586,9 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   protected override async initializeRuntimeController(): Promise<RuntimeSessionInit> {
+    const environment = this.requireEnvironment();
     const resolved = await this.resolveRuntime();
-    const connection = await this.resolveConnection(resolved.runtime);
+    const connection = await this.resolveConnection(resolved.runtime, environment);
     this.connectionId = connection.connectionId;
 
     const apiKey = getCloudApiKey(this.cloudOptions);
@@ -629,13 +626,14 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
         throw new Error(response.error ?? "Failed to start Cloud status runtime");
       }
 
+      const tools = agentToolNames(response.agent);
       return {
         controller: new AppServerRuntimeController(client, {
           requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
         }),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
-        tools: externalToolNames(this.currentOptions().tools),
+        ...(tools !== undefined ? { tools } : {}),
       };
     } catch (error) {
       this.removeExternalToolHandler?.();
@@ -758,13 +756,10 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     return { id: body.id, agent_id: body.agent_id };
   }
 
-  private async resolveConnection(runtime: RuntimeScope): Promise<{ connectionId: string }> {
-    const environment = this.effectiveEnvironment();
-    if (environment === undefined) {
-      throw new Error(
-        "Cloud backend requires an environment target until managed Cloud sandboxes land. Specify client or session environment; managed sandbox support is blocked on letta-cloud#12516.",
-      );
-    }
+  private async resolveConnection(
+    runtime: RuntimeScope,
+    environment: LettaCodeEnvironment,
+  ): Promise<{ connectionId: string }> {
     const target = environmentToRemoteTarget(environment);
     const client = new RemoteEnvironmentClient({
       baseUrl: this.cloudOptions.apiBaseUrl,
@@ -777,6 +772,16 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       conversationId: runtime.conversation_id,
     });
     return { connectionId: resolved.connectionId };
+  }
+
+  private requireEnvironment(): LettaCodeEnvironment {
+    const environment = this.effectiveEnvironment();
+    if (environment === undefined) {
+      throw new Error(
+        "Cloud backend requires an environment target until managed Cloud sandboxes land. Specify client or session environment; managed sandbox support is blocked on letta-cloud#12516.",
+      );
+    }
+    return environment;
   }
 
   private effectiveEnvironment(): LettaCodeEnvironment | undefined {

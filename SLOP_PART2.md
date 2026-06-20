@@ -13,8 +13,9 @@ Already fixed in the current working tree:
 - Cloud create-agent no longer rejects caller tags or suppresses `origin:letta-code`.
 - Cloud create-agent no longer suppresses app-server MemFS/default harness behavior.
 - Cloud pending approval recovery uses `sync` + `sync_response` with `recover_approvals:true` and `force_device_status:true`.
-- Cloud enables `reflectionSettings` and sends `set_reflection_settings` for supported sleeptime trigger settings.
+- Cloud sends the shared `set_reflection_settings` command for supported sleeptime trigger settings.
 - Direct Cloud sessions require an explicit `environment` until SDK-managed Cloud sandboxes land.
+- Direct Cloud sessions fail fast on missing `environment` before Cloud REST conversation create/retrieve or websocket side effects.
 - SDK-managed sandbox lifecycle options/CRUD were removed from this PR's public and runtime path; passing sandbox options fails fast instead of silently depending on unfinished Cloud listener registration.
 - `environment` is Cloud-only; remote app-server clients reject it.
 - Direct Cloud status sessions now open an `AppServerClient` over `/v1/environments/{connectionId}/status/ws` and issue `runtime_start` for the resolved `{agent_id, conversation_id}`.
@@ -26,8 +27,12 @@ Already fixed in the current working tree:
 - SDK-hosted tools are registered through `runtime_start.external_tools` and executed through the shared app-server external-tool handler.
 - Cloud create-agent preserves the shared app-server harness default for global pinning instead of forcing `pin_global:false`.
 - Remote/cloud history/bootstrap pagination flags are best-effort: app-server/cloud no longer fabricate `hasMore:false`, `nextBefore:null`, `memfsEnabled:false`, or `hasPendingApproval:false` when the backend has not reported them.
+- Remote/cloud init/bootstrap tools are backend-reported only. SDK-hosted `runtime_start.external_tools` are still registered/executed, but are no longer reported as if they were authoritative agent tools.
+- Remote/cloud pending approval recovery no longer fabricates `pendingApproval:false` from a successful `sync_response`; the field remains omitted unless a backend reports a known state.
 - Cloud `listMessages()` and `bootstrapState()` no longer use Cloud REST `/v1/conversations/{id}/messages`; they inherit the shared app-server/listener `conversation_messages_list` path for default, resumed non-default, explicit override, and bootstrap history reads.
-- Final external de-slop review after the Cloud history fix reported no blockers from both Codex GPT-5.5 and Claude Opus 4.8. Their test nits were addressed by removing the stale Cloud REST messages mock and asserting bootstrap does not invent `hasPendingApproval` / `timings`.
+- Removed the SDK-local `RemoteClientSessionCore` capability matrix. Shared app-server/listener protocol commands (`enable_memfs`, `set_reflection_settings`, `update_model`, `change_device_state`, `update_toolset`) now use one shared path for app-server and direct Cloud sessions instead of fake per-backend booleans.
+- Cloud `updateToolset()` now sends the shared `update_toolset` / `update_toolset_response` protocol path, with app-server and Cloud fake coverage.
+- Follow-up external review found additional contract lies in missing-environment side effects, fabricated recovery state, and fabricated tool lists. Those are addressed in the current working tree.
 
 ## Remaining follow-ups
 
@@ -56,15 +61,14 @@ Validation to add/run:
 
 If live Cloud does not yet forward `runtime_start`, do not reintroduce the deleted controller. Fix the Cloud listener/status route or add a tiny protocol adapter at the transport boundary.
 
-### 2. Optional approval terminality parity coverage
+### 2. Approval terminality parity coverage
 The duplicate Cloud terminality code is gone, so parity now depends on `AppServerClient.runTurn()`.
 
-Tests still worth adding around the shared path:
+Shared app-server/client coverage in the SDK asserts:
 - Auto-approval continuation: `requires_approval` stop followed by more activity and final `end_turn` succeeds.
-- Stale/manual approval guard: `WAITING_ON_APPROVAL` before turn activity does not terminalize.
 - Genuine pending approval: `requires_approval` stop then `WAITING_ON_APPROVAL` returns approval conflict.
 
-Keep these tests in shared app-server/client coverage where possible; add Cloud fake coverage only for Cloud transport routing/ACK/gap behavior.
+The stale/manual approval guard (`WAITING_ON_APPROVAL` before turn activity must not terminalize) exposed an upstream `@letta-ai/letta-code` app-server-client bug, so the regression test and fix belong upstream. After the SDK dependency includes that upstream fix, add the SDK-level assertion back if useful. Keep future tests in shared app-server/client coverage where possible; add Cloud fake coverage only for Cloud transport routing/ACK/gap behavior.
 
 ### 3. Transport adapter edge cases — covered by unit/fake tests
 Added narrow tests for the Cloud socket adapter, not turn state:
@@ -74,9 +78,9 @@ Added narrow tests for the Cloud socket adapter, not turn state:
 - Unknown SDK-hosted tool and thrown SDK-hosted tool errors return `external_tool_call_response.error` via the shared handler.
 - `sync_response { success:false, error }` surfaces a failed recovery result.
 
-### 4. Smaller parity cleanup
-- Enable `updateToolset` capability for Cloud only if the Cloud status listener accepts `update_toolset` / returns `update_toolset_response` the same way app-server does.
+### 4. Smaller parity cleanup — completed
 - Removed the Cloud create-agent `pinGlobalAgent:false` override for harness parity.
+- Removed fake SDK-side remote/cloud capability booleans instead of adding another `updateToolset` flag. Direct Cloud sessions now use the same shared `update_toolset` protocol command as app-server sessions.
 
 ## P1/P2 public contract decision: listMessages/bootstrapState
 The audits called this merge-blocking, but it is a cross-backend API contract problem rather than direct Cloud runtime state-machine slop.
@@ -85,7 +89,7 @@ Decision options:
 1. Narrow now: document/list types as raw best-effort history and mark pagination/bootstrap state fields as best-effort/nullable/not authoritative for app-server/cloud.
 2. Finish properly: extend app-server protocol to return cursor/hasMore and source `bootstrapState()` from backend state.
 
-This pass did option 1. Do not pretend hardcoded `hasMore:false` is truthful. Tests, docs, and callers should treat `hasMore`, `nextBefore`, `hasPendingApproval`, `memfsEnabled`, `tools`, and `timings` as optional/known-only when the backend reports them.
+This pass did option 1. Do not pretend hardcoded `hasMore:false` is truthful. Tests, docs, and callers should treat `hasMore`, `nextBefore`, `hasPendingApproval`, `memfsEnabled`, `tools`, and `timings` as optional/known-only when the backend reports them. Likewise, `recoverPendingApprovals().pendingApproval` is omitted when `sync_response` only confirms recovery was attempted/succeeded but does not report the remaining pending state.
 
 ## Validation
 Completed before the current live-test cleanup:
@@ -102,7 +106,7 @@ Live validation status:
 
 Final validation after this doc/test cleanup:
 - `bun run check` — passed.
-- `bun test src/tests/cloud-session.test.ts src/tests/client.test.ts --timeout 10000` — 38 pass, 0 fail.
-- `bun test --timeout 10000` — 202 pass, 9 skip, 0 fail.
+- `bun test src/tests/cloud-session.test.ts src/tests/client.test.ts src/tests/bootstrap-sdk.test.ts --timeout 10000` — 50 pass, 0 fail.
+- `bun test --timeout 10000` — 203 pass, 9 skip, 0 fail.
 - `bash -lc 'set -a; source ~/dev/.env >/dev/null 2>&1; set +a; bun run test:live'` — 8 pass, 0 fail.
 - Direct `backend:"cloud"` managed-sandbox production smoke after the sandbox route fix: sandbox creation succeeds through `POST /v1/sandboxes`, but initialization still times out waiting for an online listener connection. This is split out as a fast-follow paired with `letta-cloud#12516`; this PR's direct Cloud path requires an explicit environment.

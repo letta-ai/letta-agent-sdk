@@ -88,13 +88,6 @@ export type RuntimeSessionInit = {
 type RemoteClientSessionCoreConfig = {
   label: string;
   requestTimeoutMs?: number;
-  capabilities?: {
-    enableMemfs?: boolean;
-    reflectionSettings?: boolean;
-    updateModel?: boolean;
-    changeDeviceState?: boolean;
-    updateToolset?: boolean;
-  };
 };
 
 type ReflectionSettings = {
@@ -272,14 +265,13 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
 
   private readonly label: string;
   private readonly requestTimeoutMs: number | undefined;
-  private readonly capabilities: Required<NonNullable<RemoteClientSessionCoreConfig["capabilities"]>>;
   private streamQueue: SDKMessage[] = [];
   private streamResolvers: Array<(msg: SDKMessage | null) => void> = [];
   private removeMessageHandler: (() => void) | null = null;
   private activeTurn: Promise<void> | null = null;
   private activeTurnAssistantText = "";
   private messageCounter = 0;
-  private toolNames: string[] = [];
+  private toolNames: string[] | undefined;
 
   protected constructor(
     protected readonly mode: RuntimeSessionMode,
@@ -287,13 +279,6 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   ) {
     this.label = config.label;
     this.requestTimeoutMs = config.requestTimeoutMs;
-    this.capabilities = {
-      enableMemfs: config.capabilities?.enableMemfs ?? false,
-      reflectionSettings: config.capabilities?.reflectionSettings ?? false,
-      updateModel: config.capabilities?.updateModel ?? false,
-      changeDeviceState: config.capabilities?.changeDeviceState ?? false,
-      updateToolset: config.capabilities?.updateToolset ?? false,
-    };
   }
 
   async initialize(): Promise<SDKInitMessage> {
@@ -312,21 +297,22 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       this._conversationId = init.runtime.conversation_id;
       this._sessionId = `${init.runtime.agent_id}:${init.runtime.conversation_id}`;
       this._model = typeof init.model === "string" ? init.model : "";
-      this.toolNames = init.tools ?? [];
+      this.toolNames = init.tools;
       this.removeMessageHandler = this.controller.onMessage(this.handleProtocolMessage);
       this.initialized = true;
 
       await this.afterRuntimeInitialized();
       await this.applyPostInitializeOptions();
 
-      return {
+      const initMessage: SDKInitMessage = {
         type: "init",
         agentId: init.runtime.agent_id,
         sessionId: this._sessionId,
         conversationId: init.runtime.conversation_id,
         model: this._model,
-        tools: this.toolNames,
       };
+      if (this.toolNames !== undefined) initMessage.tools = this.toolNames;
+      return initMessage;
     } catch (error) {
       this.close();
       throw error;
@@ -457,9 +443,11 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       agentId: this._agentId ?? "",
       conversationId: this._conversationId ?? "",
       model: this._model,
-      tools: this.toolNames,
       messages: page.messages,
     };
+    if (this.toolNames !== undefined) {
+      state.tools = this.toolNames;
+    }
     if (this.currentOptions().memfs === true) {
       state.memfsEnabled = true;
     }
@@ -513,10 +501,6 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     if (!this.controller || !this.runtime) {
       throw new Error("Session is not initialized");
     }
-    if (!this.capabilities.changeDeviceState) {
-      throw new Error(`${this.label} session does not support changeDeviceState().`);
-    }
-
     const payload: Record<string, unknown> = {};
     if (updates.cwd !== undefined) payload.cwd = updates.cwd;
     const mode = mapPermissionMode(updates.permissionMode);
@@ -537,9 +521,6 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     }
     if (!this.controller || !this.runtime) {
       throw new Error("Session is not initialized");
-    }
-    if (!this.capabilities.updateToolset) {
-      throw new Error(`${this.label} session does not support updateToolset().`);
     }
     const response = await this.controller.request(
       "update_toolset",
@@ -588,7 +569,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
 
     const options = this.currentOptions();
 
-    if (this.capabilities.enableMemfs && this.shouldEnableMemfs(options)) {
+    if (this.shouldEnableMemfs(options)) {
       const response = await this.controller.request(
         "enable_memfs",
         this.enableMemfsBody(),
@@ -598,7 +579,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     }
 
     const sleeptimeSettings = resolveReflectionSettings(options.sleeptime);
-    if (this.capabilities.reflectionSettings && sleeptimeSettings) {
+    if (sleeptimeSettings) {
       const response = await this.controller.request(
         "set_reflection_settings",
         {
@@ -613,7 +594,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
 
     if (this.mode.kind !== "session") return;
 
-    if (this.capabilities.updateModel && this.mode.options.model !== undefined) {
+    if (this.mode.options.model !== undefined) {
       const response = await this.controller.request(
         "update_model",
         {
@@ -629,18 +610,16 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       this._model = updatedModel;
     }
 
-    if (this.capabilities.changeDeviceState) {
-      const payload: Record<string, unknown> = {};
-      const mode = mapPermissionMode(this.mode.options.permissionMode);
-      if (mode) payload.mode = mode;
-      if (this.mode.options.cwd !== undefined) payload.cwd = this.mode.options.cwd;
-      if (Object.keys(payload).length > 0) {
-        this.controller.send({
-          type: "change_device_state",
-          runtime: this.runtime,
-          payload,
-        });
-      }
+    const payload: Record<string, unknown> = {};
+    const mode = mapPermissionMode(this.mode.options.permissionMode);
+    if (mode) payload.mode = mode;
+    if (this.mode.options.cwd !== undefined) payload.cwd = this.mode.options.cwd;
+    if (Object.keys(payload).length > 0) {
+      this.controller.send({
+        type: "change_device_state",
+        runtime: this.runtime,
+        payload,
+      });
     }
   }
 

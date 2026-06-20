@@ -202,6 +202,17 @@ class FakeCloudSocket {
       return;
     }
 
+    if (command.type === "update_toolset") {
+      this.serverMessage({
+        type: "update_toolset_response",
+        request_id: command.request_id,
+        runtime: command.runtime,
+        success: true,
+        current_toolset_preference: command.toolset_preference,
+      });
+      return;
+    }
+
     if (command.type !== "input") return;
     const runtime = command.runtime;
     const payload = command.payload as Record<string, unknown> | undefined;
@@ -476,7 +487,14 @@ describe("CloudEnvironmentSession", () => {
       "Cloud backend requires an environment target until managed Cloud sandboxes land",
     );
 
-    expect(requests.some((request) => new URL(request.url).pathname.includes("/sandboxes"))).toBe(false);
+    await expect(client.createSession("agent-1").initialize()).rejects.toThrow(
+      "Cloud backend requires an environment target until managed Cloud sandboxes land",
+    );
+    await expect(client.resumeSession("conv-1").initialize()).rejects.toThrow(
+      "Cloud backend requires an environment target until managed Cloud sandboxes land",
+    );
+
+    expect(requests).toHaveLength(0);
     expect(FakeCloudSocket.instances).toHaveLength(0);
   });
 
@@ -543,9 +561,15 @@ describe("CloudEnvironmentSession", () => {
       payload: { cwd: "/repo", mode: "unrestricted" },
     }));
 
+    await session.updateToolset("developer");
+    expect(controlSocket.sent).toContainEqual(expect.objectContaining({
+      type: "update_toolset",
+      runtime: { agent_id: "agent-1", conversation_id: "default" },
+      toolset_preference: "developer",
+    }));
+
     await expect(session.recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
       recovered: true,
-      pendingApproval: false,
       unsupported: false,
     });
     expect(controlSocket.sent.some((command) => command.type === "recover_pending_approvals")).toBe(false);
@@ -1025,7 +1049,7 @@ describe("CloudEnvironmentSession", () => {
 
     try {
       const init = await session.initialize();
-      expect(init.tools).toEqual(["lookup_ticket", "throw_ticket"]);
+      expect(init.tools).toBeUndefined();
 
       const controlSocket = FakeCloudSocket.socket("control")!;
       const runtimeStart = controlSocket.sent.find((command) => command.type === "runtime_start")!;
@@ -1102,6 +1126,26 @@ describe("CloudEnvironmentSession", () => {
   });
 
   test("rejects SDK-managed sandbox options until Cloud sandbox support lands", () => {
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock([]),
+      WebSocket: FakeCloudSocket,
+      environment: { connectionId: "conn-explicit" },
+    });
+
+    expect(() => client.resumeSession("agent-1", {
+      sandbox: { lifecycle: "ephemeral" },
+    } as never)).toThrow(
+      "does not accept SDK-managed sandbox options yet",
+    );
+    expect(() => client.createSession("agent-1", {
+      sandbox: { lifecycle: "ephemeral" },
+    } as never)).toThrow(
+      "does not accept SDK-managed sandbox options yet",
+    );
+
     expect(() => new LettaCodeClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",

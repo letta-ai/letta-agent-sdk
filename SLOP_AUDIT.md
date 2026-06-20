@@ -9,7 +9,7 @@ App-server reference worktree: `/Users/loaner/dev/letta-code-prod/.letta/worktre
 
 The audit must persist outside chat/compaction. Findings below should be evidence-based and updated as more code/app-server/Cloud behavior is checked. Avoid overconfident claims; mark live-service behavior separately from intended contract.
 
-Post-fix note: many concrete code-smell bullets below describe the pre-fix PR state. They are retained as audit trail, not current truth. Current code no longer has the bespoke Cloud runtime controller, Cloud-only approval/recovery path, Cloud REST history path, create-agent tag/origin/MemFS suppression, fabricated app-server/cloud history/bootstrap flags, or stale `/v1/agents/{agentId}/sandboxes` sandbox CRUD routes. Current PR scope now requires an explicit Cloud `environment`; SDK-managed sandbox lifecycle is split into a fast-follow paired with `letta-cloud#12516`.
+Post-fix note: many concrete code-smell bullets below describe the pre-fix PR state. They are retained as audit trail, not current truth. Current code no longer has the bespoke Cloud runtime controller, Cloud-only approval/recovery path, Cloud REST history path, create-agent tag/origin/MemFS suppression, fabricated app-server/cloud history/bootstrap flags, fabricated pending-approval state after `sync_response`, fabricated remote/cloud agent tools from SDK-hosted external tools, stale `/v1/agents/{agentId}/sandboxes` sandbox CRUD routes, or the SDK-local `RemoteClientSessionCore` capability matrix. Shared app-server/listener protocol commands now use one shared path for app-server and direct Cloud sessions, including Cloud `updateToolset()`. Current PR scope now requires an explicit Cloud `environment` and fails fast before Cloud conversation REST/websocket side effects when it is missing; SDK-managed sandbox lifecycle is split into a fast-follow paired with `letta-cloud#12516`.
 
 ## Context-free truth / north star (read this first)
 
@@ -425,10 +425,11 @@ Source: recall task `task_31` completed during this audit.
 - Remote environments/status websocket already provide the execution/control plumbing.
 - Cloud sandbox CRUD is the missing lifecycle surface needed so SDK Cloud can allocate/manage agent sandboxes instead of requiring a pre-existing online environment.
 
-### Ari sandbox CRUD dependency
+### Ari sandbox CRUD dependency — historical route notes, superseded by live probe
 
 - Cloud PR remembered as `letta-cloud#12516`, title: `feat: expose agent sandbox API routes`.
-- Routes:
+- Historical routes from the early design note below are not the current live route contract. The current SDK branch no longer calls them; live probing found `POST /v1/sandboxes` and `POST /v1/sandboxes/{sandboxId}/terminate`, and SDK-managed sandbox lifecycle is split out of this PR until the Cloud listener/backend work lands.
+- Historical routes recorded during audit:
   - `POST /v1/agents/{agentId}/sandboxes` -> returns `{ sandboxId, deviceId, connectionName }`.
   - `POST /v1/agents/{agentId}/sandboxes/refresh` -> optional `{ ttlMinutes?: number }`; calls Daytona `setAutostopInterval(ttlMinutes)` and `refreshActivity()`.
   - `DELETE /v1/agents/{agentId}/sandboxes`.
@@ -453,7 +454,7 @@ Important nuance: this lifecycle work should stay around environment allocation.
 
 - `backend: "local"`: embedded/spawned Letta Code harness; not just remote localhost.
 - `backend: "remote"`: connects to a user-managed app-server websocket URL. A separate `environment` selector has no meaning because the URL already selects the runtime/app-server; prior conclusion was to throw rather than silently no-op.
-- `backend: "cloud"`: uses Letta Cloud/constellation; `environment` is optional and overridable.
+- `backend: "cloud"`: uses Letta Cloud/constellation. Current SDK branch requires an explicit `environment`; making it optional again belongs to the SDK-managed sandbox fast-follow after Cloud backend/listener support lands.
 - `createAgent()` should be harness-mediated. Client decides where harness runs. `environment` is session-scoped/client default, not part of `createAgent()`.
 - Previous mistake in earlier PR audits: unsupported guards were too broad because SDK adapter was narrow. Correct fix is mapping SDK behavior onto app-server protocol commands when the protocol already supports it.
 - Same lesson applies here: Cloud-specific unsupported errors are only acceptable when API/protocol truly does not exist.
@@ -691,25 +692,21 @@ Key independent confirmations from Codex contract audit:
 - P1: remote `environment` is a public no-op; narrow it to Cloud or wire a real remote selector.
 - P1: `listMessages()` / `bootstrapState()` are lossy synthetic contracts on remote/cloud. App-server drops pagination; remote/cloud bootstrap fills fields like `memfsEnabled`, `tools`, and `hasPendingApproval` from incomplete local state.
 - P1: unsupported-option handling mixes durable protocol gaps with temporary wiring gaps.
-- Added nuance below: Cloud accepts part of `sleeptime` and silently ignores it.
+- Resolved nuance below: Cloud previously accepted part of `sleeptime` and silently ignored it; current code sends the shared `set_reflection_settings` command and removed the fake capability matrix.
 
-### Finding: Cloud silently accepts `sleeptime.trigger` / `stepCount` and ignores them (high confidence, P1)
+### Resolved finding: Cloud silently accepted `sleeptime.trigger` / `stepCount` and ignored them (was P1)
 
 Evidence:
-- `assertCloudSessionOptionsSupported()` rejects only `options.sleeptime?.behavior !== undefined` (`src/cloud-session.ts:571-573`).
-- `RemoteClientSessionCore.resolveReflectionSettings()` maps `sleeptime.trigger` / `stepCount` into `set_reflection_settings` payload (`src/remote-client-session-core.ts:157-164`).
-- `RemoteClientSessionCore.applyPostInitializeOptions()` sends `set_reflection_settings` only when `this.capabilities.reflectionSettings` is true (`src/remote-client-session-core.ts:594-606`).
-- `CloudEnvironmentSession` capabilities omit `reflectionSettings` (`src/cloud-session.ts:1098-1106`).
-- README broadly claims "The SDK surfaces the same runtime controls as Letta Code CLI for skills, reminders, and sleeptime" (`README.md:205-221`).
+- At audit time, `assertCloudSessionOptionsSupported()` rejected only `options.sleeptime?.behavior !== undefined`, while `RemoteClientSessionCore.applyPostInitializeOptions()` sent `set_reflection_settings` only when SDK-local capability flags enabled it and `CloudEnvironmentSession` omitted that flag.
+- Current branch removed the capability matrix; Cloud/app-server shared initialization now sends `set_reflection_settings` whenever supported sleeptime trigger settings are provided.
+- README session-configuration docs are now scoped by backend instead of claiming blanket CLI parity for remote/app-server/Cloud sessions.
 
 Why it is SLOP:
 - Rejections are better than silent no-ops. A user passing `{ sleeptime: { trigger: "step-count", stepCount: 8 } }` to Cloud receives no error and no behavior.
 - This is worse than the other unsupported Cloud gaps because tests may not catch it unless they assert emitted `set_reflection_settings` or rejection.
 
 De-slop direction:
-- Until Cloud reflection settings are wired, reject the entire `sleeptime` option for Cloud, not just `behavior`.
-- Or enable `reflectionSettings` and implement/request-correlate `set_reflection_settings` over the Cloud status websocket if the protocol supports it.
-- Scope README session-configuration docs by backend; do not claim CLI parity for Cloud/remote controls that are currently rejected or ignored.
+- Completed by using the shared `set_reflection_settings` protocol path for Cloud/app-server sessions and scoping README backend docs.
 
 ### Finding: remote/cloud `bootstrapState()` synthesizes fields that look authoritative (high confidence, P1/P2)
 

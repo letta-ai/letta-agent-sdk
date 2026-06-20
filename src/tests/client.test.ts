@@ -26,7 +26,12 @@ function urlOf(input: FetchInput | URL): string {
 class FakeAppServerSocket {
   static instances: FakeAppServerSocket[] = [];
   static mirrorStreamToControl = false;
-  static inputScenario: "normal" | "autoApprovalContinuation" | "manualApprovalWait" | "hang" = "normal";
+  static reportedAgentTools: Array<{ name: string }> | undefined;
+  static inputScenario:
+    | "normal"
+    | "autoApprovalContinuation"
+    | "manualApprovalWait"
+    | "hang" = "normal";
   readyState = 0;
   sent: unknown[] = [];
   private listeners = new Map<string, Set<Listener>>();
@@ -156,6 +161,16 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
     return;
   }
 
+  if (command.type === "sync" && typeof command.request_id === "string") {
+    fakeControlSocket().serverMessage({
+      type: "sync_response",
+      request_id: command.request_id,
+      runtime: command.runtime,
+      success: true,
+    });
+    return;
+  }
+
   if (command.type === "conversation_messages_list") {
     fakeControlSocket().serverMessage({
       type: "conversation_messages_list_response",
@@ -181,7 +196,13 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
       request_id: command.request_id,
       success: true,
       runtime: { agent_id: agentId, conversation_id: conversationId },
-      agent: { id: agentId, model: "anthropic/claude-sonnet-4" },
+      agent: {
+        id: agentId,
+        model: "anthropic/claude-sonnet-4",
+        ...(FakeAppServerSocket.reportedAgentTools !== undefined
+          ? { tools: FakeAppServerSocket.reportedAgentTools }
+          : {}),
+      },
       conversation: { id: conversationId, agent_id: agentId },
       created: {
         agent: createdAgent !== undefined,
@@ -357,12 +378,15 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("explicit local stdio transport keeps legacy Session fallback", () => {
+  test("explicit local stdio transport keeps legacy Session fallback", async () => {
     const client = new LettaCodeClient({ backend: "local", transport: "stdio" });
     const session = client.resumeSession("agent-123");
 
     try {
       expect(session).toBeInstanceOf(Session);
+      await expect(session.updateToolset("developer")).rejects.toThrow(
+        "Local stdio sessions do not support updateToolset",
+      );
     } finally {
       session.close();
     }
@@ -414,6 +438,43 @@ describe("LettaCodeClient", () => {
         cwd: "/tmp/project",
       });
     } finally {
+      session.close();
+    }
+  });
+
+  test("app-server init tools are backend-reported, not SDK external tools", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.reportedAgentTools = [{ name: "Bash" }, { name: "Read" }];
+    const client = new LettaCodeClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("agent-123", {
+      tools: [
+        {
+          name: "lookup_ticket",
+          label: "Lookup ticket",
+          description: "Lookup a ticket by id",
+          parameters: { type: "object", properties: {} },
+          execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+        },
+      ],
+    });
+    try {
+      const init = await session.initialize();
+      expect(init.tools).toEqual(["Bash", "Read"]);
+      expect(fakeControlSocket().sent[0]).toMatchObject({
+        type: "runtime_start",
+        external_tools: [
+          {
+            tools: [expect.objectContaining({ name: "lookup_ticket" })],
+          },
+        ],
+      });
+    } finally {
+      FakeAppServerSocket.reportedAgentTools = undefined;
       session.close();
     }
   });
@@ -868,6 +929,24 @@ describe("LettaCodeClient", () => {
         type: "conversation_messages_list",
         conversation_id: "default",
         query: { limit: 2, order: "desc" },
+      });
+
+      await session.updateToolset("developer");
+      expect(fakeControlSocket().sent.at(-1)).toMatchObject({
+        type: "update_toolset",
+        runtime: { agent_id: "agent-123", conversation_id: "default" },
+        toolset_preference: "developer",
+      });
+
+      await expect(session.recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
+        recovered: true,
+        unsupported: false,
+      });
+      expect(fakeControlSocket().sent.at(-1)).toMatchObject({
+        type: "sync",
+        runtime: { agent_id: "agent-123", conversation_id: "default" },
+        recover_approvals: true,
+        force_device_status: true,
       });
     } finally {
       session.close();
