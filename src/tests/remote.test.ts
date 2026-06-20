@@ -88,32 +88,4 @@ describe("RemoteEnvironmentClient", () => {
     ).rejects.toThrow("Remote environment name is ambiguous");
   });
 
-  test("can fall back to any online environment when preferred target is unavailable", async () => {
-    const requests: string[] = [];
-    const fetchMock = createFetchMock((input) => {
-      const url = urlOf(input);
-      requests.push(url);
-
-      if (url === "https://api.test/v1/environments/offline-device") {
-        return jsonResponse({ ...onlineEnvironment, connectionId: null });
-      }
-
-      return jsonResponse({
-        connections: [onlineEnvironment],
-        hasNextPage: false,
-      });
-    });
-    const client = new RemoteEnvironmentClient({
-      baseUrl: "https://api.test",
-      fetch: fetchMock,
-    });
-
-    const resolved = await client.resolveEnvironment(
-      { deviceId: "offline-device" },
-      { fallback: "any_online" },
-    );
-
-    expect(resolved.connectionId).toBe("conn-1");
-    expect(requests.at(-1)).toBe("https://api.test/v1/environments?onlineOnly=true");
-  });
 });

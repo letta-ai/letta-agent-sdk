@@ -4,8 +4,6 @@ export type RemoteEnvironmentTarget =
   | { deviceId: string }
   | { connectionName: string };
 
-export type RemoteEnvironmentFallback = "fail_if_unavailable" | "any_online";
-
 export interface RemoteEnvironmentClientOptions {
   /** Letta API base URL. Defaults to https://api.letta.com. */
   baseUrl?: string;
@@ -43,12 +41,6 @@ export interface ResolvedRemoteEnvironment {
   connectionId: string;
   environment?: RemoteEnvironmentConnection;
   target: RemoteEnvironmentTarget;
-}
-
-export interface ResolveRemoteEnvironmentOptions {
-  agentId?: string;
-  conversationId?: string | null;
-  fallback?: RemoteEnvironmentFallback;
 }
 
 type RemoteFetch = typeof fetch;
@@ -130,12 +122,8 @@ export class RemoteEnvironmentClient {
     this.fetchImpl = getFetch(options);
   }
 
-  async listEnvironments(query: { onlineOnly?: boolean } = {}): Promise<RemoteEnvironmentListResult> {
+  async listEnvironments(): Promise<RemoteEnvironmentListResult> {
     const url = new URL(`${this.baseUrl}/v1/environments`);
-    if (query.onlineOnly !== undefined) {
-      url.searchParams.set("onlineOnly", String(query.onlineOnly));
-    }
-
     const response = await this.fetchImpl(url, {
       headers: createHeaders(this.options),
     });
@@ -150,61 +138,40 @@ export class RemoteEnvironmentClient {
     return parseJsonResponse<RemoteEnvironmentConnection>(response);
   }
 
-  async resolveEnvironment(
-    target: RemoteEnvironmentTarget,
-    options: ResolveRemoteEnvironmentOptions = {},
-  ): Promise<ResolvedRemoteEnvironment> {
+  async resolveEnvironment(target: RemoteEnvironmentTarget): Promise<ResolvedRemoteEnvironment> {
     if ("connectionId" in target) {
       return { connectionId: target.connectionId, target };
     }
 
-    try {
-      if ("deviceId" in target) {
-        return ensureOnline(await this.getEnvironmentByDeviceId(target.deviceId), target);
-      }
+    if ("deviceId" in target) {
+      return ensureOnline(await this.getEnvironmentByDeviceId(target.deviceId), target);
+    }
 
-      const { connections } = await this.listEnvironments();
-      if ("environmentId" in target) {
-        const match = connections.find((env) => env.id === target.environmentId);
-        if (!match) {
-          throw new Error(`Remote environment not found: ${target.environmentId}`);
-        }
-        return ensureOnline(match, target);
-      }
-
-      const matches = connections.filter(
-        (env) => env.connectionName === target.connectionName,
-      );
-      if (matches.length === 0) {
-        throw new Error(`Remote environment not found: ${target.connectionName}`);
-      }
-      if (matches.length > 1) {
-        throw new Error(
-          `Remote environment name is ambiguous: ${target.connectionName}`,
-        );
-      }
-      const match = matches[0];
+    const { connections } = await this.listEnvironments();
+    if ("environmentId" in target) {
+      const match = connections.find((env) => env.id === target.environmentId);
       if (!match) {
-        throw new Error(`Remote environment not found: ${target.connectionName}`);
+        throw new Error(`Remote environment not found: ${target.environmentId}`);
       }
       return ensureOnline(match, target);
-    } catch (error) {
-      if (options.fallback !== "any_online") {
-        throw error;
-      }
-
-      const { connections } = await this.listEnvironments({ onlineOnly: true });
-      const fallback = connections.find((env) => env.connectionId !== null);
-      if (!fallback?.connectionId) {
-        throw error;
-      }
-
-      return {
-        connectionId: fallback.connectionId,
-        environment: fallback,
-        target,
-      };
     }
+
+    const matches = connections.filter(
+      (env) => env.connectionName === target.connectionName,
+    );
+    if (matches.length === 0) {
+      throw new Error(`Remote environment not found: ${target.connectionName}`);
+    }
+    if (matches.length > 1) {
+      throw new Error(
+        `Remote environment name is ambiguous: ${target.connectionName}`,
+      );
+    }
+    const match = matches[0];
+    if (!match) {
+      throw new Error(`Remote environment not found: ${target.connectionName}`);
+    }
+    return ensureOnline(match, target);
   }
 
 }

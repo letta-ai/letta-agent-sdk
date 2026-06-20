@@ -749,10 +749,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       headers: this.cloudOptions.headers,
       fetch: this.cloudOptions.fetch,
     });
-    const resolved = await client.resolveEnvironment(target, {
-      agentId: runtime.agent_id,
-      conversationId: runtime.conversation_id,
-    });
+    const resolved = await client.resolveEnvironment(target);
     return { connectionId: resolved.connectionId };
   }
 
