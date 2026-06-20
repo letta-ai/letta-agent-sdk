@@ -34,12 +34,11 @@ const remoteClient = new LettaCodeClient({
   authToken: process.env.LETTA_APP_SERVER_TOKEN,
 });
 
-// Cloud: control an explicit Letta Cloud remote environment over the
-// Remote Client websocket protocol. SDK-managed sandboxes are a fast follow.
+// Cloud: create or resume Cloud-hosted agents and run turns in an
+// SDK-managed sandbox by default.
 const client = new LettaCodeClient({
   backend: "cloud",
   apiKey: process.env.LETTA_API_KEY,
-  environment: { connectionId: process.env.LETTA_ENVIRONMENT_CONNECTION_ID! },
 });
 ```
 
@@ -70,8 +69,9 @@ for await (const msg of session.stream()) {
 
 By default, `resumeSession(agentId)` continues the agent’s default conversation. To start a fresh thread, use `createSession(agentId)` (see docs). App-server sessions require an explicit agent id; default/LRU local-agent selection (`createSession()` with no agent id) remains available through the legacy local stdio fallback.
 
-For cloud backends, `environment` is session-scoped and can override the
-client default. Remote app-server URLs already select their runtime:
+For cloud backends, omitting `environment` lets the SDK create and manage a
+Cloud sandbox for the session. `environment` is still session-scoped and can
+override the client default when you want to use a specific remote runtime:
 
 ```ts
 await using session = client.resumeSession(agentId, {
@@ -114,19 +114,24 @@ for await (const msg of session.stream()) {
 ### Letta Cloud backend
 
 Use `backend: "cloud"` to create or resume Cloud-hosted agents while running
-turns in an explicit Letta Cloud remote environment. The current SDK requires
-callers to supply `environment`; SDK-managed Cloud sandbox lifecycle is not yet
-available. Once connected, the SDK uses the Remote Client
-websocket protocol for
-`sync`, `input/create_message`, streaming deltas, approval responses, model
-updates, toolset updates, cwd/mode device-state updates, and heartbeats.
+turns through the Remote Client websocket protocol. If no `environment` is
+provided, the SDK creates an agent-scoped Cloud sandbox, waits for its remote
+environment connection, refreshes its TTL while the session is active, and
+best-effort terminates it on close. Once connected, the SDK uses the Remote
+Client protocol for `sync`, `input/create_message`, streaming deltas, approval
+responses, model updates, toolset updates, cwd/mode device-state updates, and
+heartbeats.
 
 ```ts
 const client = new LettaCodeClient({
   backend: "cloud",
   apiKey: process.env.LETTA_API_KEY,
-  // Required until SDK-managed Cloud sandboxes land.
-  environment: { connectionId: process.env.LETTA_ENVIRONMENT_CONNECTION_ID! },
+  sandbox: {
+    // Optional: defaults to Cloud's 5-minute refresh TTL.
+    ttlMinutes: 5,
+    // Optional: defaults true. Set false for concurrent same-agent sessions.
+    terminateOnClose: true,
+  },
 });
 
 const agentId = await client.createAgent({
@@ -146,7 +151,8 @@ for await (const msg of session.stream()) {
 }
 ```
 
-You can set a default `environment` on the client or override it per session:
+You can still set a default `environment` on the client or override it per
+session to use an existing remote runtime instead of an SDK-managed sandbox:
 
 ```ts
 const client = new LettaCodeClient({
@@ -160,8 +166,11 @@ await using session = client.resumeSession(agentId, {
 });
 ```
 
-SDK-managed Cloud sandbox lifecycle is not yet exposed by this SDK path. Passing
-legacy `sandbox` options fails fast; pass an explicit `environment` instead.
+`environment` and `sandbox` are mutually exclusive. Managed sandbox refresh and
+termination use Cloud's agent-scoped sandbox routes, which operate on the latest
+active sandbox for an agent; set `sandbox.terminateOnClose: false` when multiple
+SDK sessions may run concurrently against the same agent and rely on TTL cleanup
+instead.
 
 By default, websocket authentication uses `Authorization` headers. Set
 `webSocketAuth: "query"` for browser-style websocket clients that cannot send
