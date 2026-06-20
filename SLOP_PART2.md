@@ -19,7 +19,10 @@ Already fixed in the current working tree:
 - The large duplicate `CloudStatusRuntimeController` turn state machine was removed. Cloud now reuses `AppServerRuntimeController` / `AppServerClient.runTurn()` for turn input, terminality, request correlation, `sync`, and external tool responses.
 - Cloud transport reliability remains a narrow gateway socket adapter: auth URL/header construction, split control/stream channels, Cloud gateway fanout de-dupe, ACKs, event-sequence gap `sync`, idempotency de-dupe, and heartbeat pings.
 - Permission approvals are not Cloud-specific. `control_request` / `can_use_tool` -> SDK `canUseTool` -> app-server `approval_response` is core app-server/listener protocol behavior and now lives in the shared app-server-backed session path.
+- Approval responses now use the app-server/listener wire contract (`updated_input` and `selected_permission_suggestion_ids`) rather than SDK-only camelCase fields.
 - SDK-hosted tools are registered through `runtime_start.external_tools` and executed through the shared app-server external-tool handler.
+- Cloud create-agent preserves the shared app-server harness default for global pinning instead of forcing `pin_global:false`.
+- Remote/cloud history/bootstrap pagination flags are best-effort: app-server/cloud no longer fabricate `hasMore:false`, `nextBefore:null`, `memfsEnabled:false`, or `hasPendingApproval:false` when the backend has not reported them.
 
 ## Remaining P1 fixes
 
@@ -29,7 +32,8 @@ The listener client was originally written with the Cloud gateway/bridge in mind
 Executed in this pass:
 - Moved `control_request` / `can_use_tool` handling and `CanUseToolResponse` resolution out of `CloudEnvironmentSession` into shared app-server-backed session code.
 - Both `AppServerSession` and `CloudEnvironmentSession` now register the same approval bridge on their `AppServerClient`.
-- App-server turn input opts into `supports_control_response` by default, not only for Cloud.
+- App-server/Cloud turn input no longer injects SDK-only transport hints such as `supports_control_response` or `payload.source`.
+- Approval responses prefer the runtime scope carried on the control request (`runtime` or top-level `agent_id`/`conversation_id`) before falling back to locally cached session runtime.
 - Cloud-only code stays focused on sandbox lifecycle, Cloud REST lookup, gateway auth/routing, and gateway delivery-envelope quirks.
 
 ### 1. Runtime-start contract verification against Cloud service
@@ -53,7 +57,7 @@ Tests still worth adding around the shared path:
 Keep these tests in shared app-server/client coverage where possible; add Cloud fake coverage only for Cloud transport routing/ACK/gap behavior.
 
 ### 3. Transport adapter edge cases
-Add narrow tests for the Cloud socket adapter, not turn state:
+Added narrow tests for the Cloud socket adapter, not turn state:
 - Duplicate `idempotency_key` frame is ACKed but emitted once.
 - Event sequence gap on stream channel sends `sync { recover_approvals:true, force_device_status:true }` on the control socket.
 - Header auth and query auth continue to behave across both control and stream sockets.
@@ -62,7 +66,7 @@ Add narrow tests for the Cloud socket adapter, not turn state:
 
 ### 4. Smaller parity cleanup
 - Enable `updateToolset` capability for Cloud only if the Cloud status listener accepts `update_toolset` / returns `update_toolset_response` the same way app-server does.
-- Re-evaluate `pinGlobalAgent:false` in Cloud create-agent. If not a documented Cloud requirement, remove it for harness parity.
+- Removed the Cloud create-agent `pinGlobalAgent:false` override for harness parity.
 
 ## P1/P2 public contract decision: listMessages/bootstrapState
 The audits call this merge-blocking, but it is a cross-backend API contract problem rather than direct Cloud runtime state-machine slop.
@@ -71,7 +75,7 @@ Decision options:
 1. Narrow now: document/list types as raw best-effort history and mark pagination/bootstrap state fields as best-effort/nullable/not authoritative for app-server/cloud.
 2. Finish properly: extend app-server protocol to return cursor/hasMore and source `bootstrapState()` from backend state.
 
-This pass should do option 1 unless the app-server protocol change is already trivial and in-scope. Do not pretend hardcoded `hasMore:false` is truthful.
+This pass did option 1. Do not pretend hardcoded `hasMore:false` is truthful.
 
 ## Validation
 Run at minimum:

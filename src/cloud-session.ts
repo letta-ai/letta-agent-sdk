@@ -424,6 +424,16 @@ function createCloudStatusWebSocketConstructor(params: {
       }
 
       this.ackIfSequenced(message);
+
+      // Cloud's status gateway can mirror device stream frames to the control
+      // subscriber. Drop them at the Cloud transport boundary instead of making
+      // shared app-server session code understand Cloud fanout quirks. Do this
+      // before idempotency/event tracking so the canonical stream-channel frame
+      // is still delivered and sequenced.
+      if (this.channel === "control" && message.type === "stream_delta") {
+        return false;
+      }
+
       if (this.isDuplicate(message)) return false;
       this.trackEventSeq(message);
       return true;
@@ -539,7 +549,6 @@ function cloudHarnessAppServerOptions(
   return {
     local: appServer?.url === undefined,
     localBackend: "api",
-    pinGlobalAgent: false,
     ...(appServer?.url !== undefined ? { url: appServer.url } : {}),
     ...(appServer?.WebSocket !== undefined ? { WebSocket: appServer.WebSocket } : {}),
     ...(clientOptions.requestTimeoutMs !== undefined || appServer?.requestTimeoutMs !== undefined
@@ -621,21 +630,24 @@ async function listCloudMessages(
         ? ((body as { data: unknown[] }).data)
         : [];
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-  return {
+  const result: ListMessagesResult = {
     messages,
-    nextBefore:
-      typeof record.nextBefore === "string"
-        ? record.nextBefore
-        : typeof record.next_before === "string"
-          ? record.next_before
-          : null,
-    hasMore:
-      typeof record.hasMore === "boolean"
-        ? record.hasMore
-        : typeof record.has_more === "boolean"
-          ? record.has_more
-          : false,
   };
+  const nextBefore =
+    typeof record.nextBefore === "string" || record.nextBefore === null
+      ? record.nextBefore
+      : typeof record.next_before === "string" || record.next_before === null
+        ? record.next_before
+        : undefined;
+  if (nextBefore !== undefined) result.nextBefore = nextBefore;
+  const hasMore =
+    typeof record.hasMore === "boolean"
+      ? record.hasMore
+      : typeof record.has_more === "boolean"
+        ? record.has_more
+        : undefined;
+  if (hasMore !== undefined) result.hasMore = hasMore;
+  return result;
 }
 
 
@@ -668,7 +680,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
 
   override async listMessages(options: ListMessagesOptions = {}): Promise<ListMessagesResult> {
     const conversationId = options.conversationId ?? this._conversationId ?? this.conversationIdFromMode();
-    if (conversationId) {
+    if (conversationId && conversationId !== "default") {
       return listCloudMessages(this.cloudOptions, conversationId, options);
     }
     return super.listMessages(options);
@@ -725,9 +737,6 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       return {
         controller: new AppServerRuntimeController(client, {
           requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
-          ignoreControlStreamDeltas: true,
-          supportsControlResponse: true,
-          inputSource: SDK_AGENT_ORIGIN,
         }),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
@@ -750,7 +759,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     const options = this.currentOptions();
     const command: Record<string, unknown> = {
       client_info: {
-        name: "@letta-ai/letta-code-sdk",
+        name: SDK_AGENT_ORIGIN,
         title: "Letta Code SDK",
       },
       agent_id: runtime.agent_id,

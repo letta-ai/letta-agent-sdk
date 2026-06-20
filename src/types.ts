@@ -870,13 +870,15 @@ export interface ListMessagesOptions {
 
 /**
  * Result from session.listMessages().
- * `messages` are raw Letta API message objects in the requested order.
+ * `messages` are raw Letta API message objects in the requested order. Cursor
+ * metadata is backend-supplied and omitted when the backend does not expose an
+ * authoritative pagination answer.
  */
 export interface ListMessagesResult {
   messages: unknown[];
-  /** ID of the oldest message in this page; use as `before` for the next page. */
+  /** ID of the oldest message in this page; use as `before` for the next page when present. */
   nextBefore?: string | null;
-  /** Whether more pages exist in the requested direction. */
+  /** Whether more pages exist in the requested direction, when known. */
   hasMore?: boolean;
 }
 
@@ -897,8 +899,9 @@ export interface BootstrapStateOptions {
 /**
  * Result from session.bootstrapState().
  *
- * Contains all data needed to render the initial conversation view
- * without additional round-trips.
+ * Contains best-effort data needed to render the initial conversation view
+ * without additional round-trips. Backend-derived booleans/cursors are omitted
+ * when the remote/app-server backend does not expose an authoritative value.
  */
 export interface BootstrapStateResult {
   /** Resolved agent ID for this session. */
@@ -909,16 +912,16 @@ export interface BootstrapStateResult {
   model: string | undefined;
   /** Tool names registered on the agent. */
   tools: string[];
-  /** Whether memfs (git-backed memory) is enabled. */
-  memfsEnabled: boolean;
+  /** Whether memfs (git-backed memory) is enabled, when known. */
+  memfsEnabled?: boolean;
   /** Initial history page (same shape as listMessages.messages). */
   messages: unknown[];
-  /** Cursor to fetch older messages. Null when no more pages. */
-  nextBefore: string | null;
-  /** Whether more history pages exist. */
-  hasMore: boolean;
-  /** Whether there is a pending approval waiting for a response. */
-  hasPendingApproval: boolean;
+  /** Cursor to fetch older messages. Null when the backend knows there are no more pages. */
+  nextBefore?: string | null;
+  /** Whether more history pages exist, when known. */
+  hasMore?: boolean;
+  /** Whether there is a pending approval waiting for a response, when known. */
+  hasPendingApproval?: boolean;
   /** Wall-clock timing breakdown in milliseconds (if provided by CLI). */
   timings?: {
     resolve_ms: number;

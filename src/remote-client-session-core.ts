@@ -453,17 +453,23 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       order: options.order,
     });
 
-    return {
+    const state: BootstrapStateResult = {
       agentId: this._agentId ?? "",
       conversationId: this._conversationId ?? "",
       model: this._model,
       tools: this.toolNames,
-      memfsEnabled: this.currentOptions().memfs === true,
       messages: page.messages,
-      nextBefore: page.nextBefore ?? null,
-      hasMore: page.hasMore ?? false,
-      hasPendingApproval: false,
     };
+    if (this.currentOptions().memfs === true) {
+      state.memfsEnabled = true;
+    }
+    if (page.nextBefore !== undefined) {
+      state.nextBefore = page.nextBefore;
+    }
+    if (page.hasMore !== undefined) {
+      state.hasMore = page.hasMore;
+    }
+    return state;
   }
 
   close(): void {

@@ -100,7 +100,13 @@ function createCloudFetchMock(
 
 class FakeCloudSocket {
   static instances: FakeCloudSocket[] = [];
-  static scenario: "normal" | "approval" | "terminal_error" | "stale_idle_then_error" = "normal";
+  static scenario:
+    | "normal"
+    | "approval"
+    | "terminal_error"
+    | "stale_idle_then_error"
+    | "duplicate_idempotency" = "normal";
+  static syncSucceeds = true;
   readyState = 0;
   sent: Array<Record<string, unknown>> = [];
   private listeners = new Map<string, Set<Listener>>();
@@ -179,7 +185,19 @@ class FakeCloudSocket {
         type: "sync_response",
         request_id: command.request_id,
         runtime: command.runtime,
+        success: FakeCloudSocket.syncSucceeds,
+        ...(FakeCloudSocket.syncSucceeds ? {} : { error: "sync failed" }),
+      });
+      return;
+    }
+
+    if (command.type === "conversation_messages_list") {
+      this.serverMessage({
+        type: "conversation_messages_list_response",
+        request_id: command.request_id,
+        runtime: command.runtime,
         success: true,
+        messages: [{ id: "msg-from-runtime" }],
       });
       return;
     }
@@ -232,6 +250,11 @@ class FakeCloudSocket {
       return;
     }
 
+    if (payload?.kind === "create_message" && FakeCloudSocket.scenario === "duplicate_idempotency") {
+      this.finishTurnWithDuplicateIdempotency(runtime);
+      return;
+    }
+
     if (payload?.kind === "approval_response") {
       this.finishTurn(runtime, "approved");
       return;
@@ -258,6 +281,32 @@ class FakeCloudSocket {
     this.serverMessageTo("stream", {
       type: "update_loop_status",
       seq: 102,
+      event_seq: 2,
+      runtime,
+      loop_status: {
+        status: "WAITING_ON_INPUT",
+        active_run_ids: ["run-cloud"],
+      },
+    });
+  }
+
+  private finishTurnWithDuplicateIdempotency(runtime: unknown): void {
+    const assistantFrame = {
+      type: "stream_delta",
+      idempotency_key: "assistant-dup",
+      runtime,
+      delta: {
+        id: "msg-cloud-dup",
+        message_type: "assistant_message",
+        content: "hello once",
+        run_id: "run-cloud",
+      },
+    };
+    this.serverMessageTo("stream", { ...assistantFrame, seq: 401, event_seq: 1 });
+    this.serverMessageTo("stream", { ...assistantFrame, seq: 402, event_seq: 1 });
+    this.serverMessageTo("stream", {
+      type: "update_loop_status",
+      seq: 403,
       event_seq: 2,
       runtime,
       loop_status: {
@@ -355,6 +404,7 @@ class FakeCloudSocket {
 function resetFakeCloud(): void {
   FakeCloudSocket.instances = [];
   FakeCloudSocket.scenario = "normal";
+  FakeCloudSocket.syncSucceeds = true;
 }
 
 class FakeAppServerSocket {
@@ -524,10 +574,11 @@ describe("CloudEnvironmentSession", () => {
       runtime: { agent_id: "agent-1", conversation_id: "default" },
       payload: {
         kind: "create_message",
-        supports_control_response: true,
         messages: [expect.objectContaining({ role: "user", content: "hello" })],
       },
     });
+    expect(inputCommand.payload).not.toHaveProperty("supports_control_response");
+    expect(inputCommand.payload).not.toHaveProperty("source");
     expect(streamSocket.sent).toContainEqual({ type: "ack", seq: 101 });
     expect(streamSocket.sent).toContainEqual({ type: "ack", seq: 102 });
     expect(requests.filter((request) => new URL(request.url).pathname.endsWith("/sandboxes/refresh"))).toHaveLength(2);
@@ -563,7 +614,147 @@ describe("CloudEnvironmentSession", () => {
     expect(socketUrl.pathname).toBe("/v1/environments/conn-explicit/status/ws");
     expect(socketUrl.searchParams.get("token")).toBe("sk-test");
     expect(FakeCloudSocket.instances[0]!.options).toBeUndefined();
+    expect(new URL(FakeCloudSocket.socket("control")!.url).searchParams.get("token")).toBe("sk-test");
+    expect(new URL(FakeCloudSocket.socket("stream")!.url).searchParams.get("token")).toBe("sk-test");
+    expect(FakeCloudSocket.socket("control")!.options).toBeUndefined();
+    expect(FakeCloudSocket.socket("stream")!.options).toBeUndefined();
     session.close();
+  });
+
+  test("acks duplicate Cloud idempotency frames but emits them once", async () => {
+    resetFakeCloud();
+    FakeCloudSocket.scenario = "duplicate_idempotency";
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("agent-1");
+    try {
+      const result = await session.runTurn("hello");
+      expect(result).toMatchObject({
+        success: true,
+        result: "hello once",
+      });
+      const streamSocket = FakeCloudSocket.socket("stream")!;
+      expect(streamSocket.sent).toContainEqual({ type: "ack", seq: 401 });
+      expect(streamSocket.sent).toContainEqual({ type: "ack", seq: 402 });
+      expect(streamSocket.sent).toContainEqual({ type: "ack", seq: 403 });
+    } finally {
+      session.close();
+    }
+  });
+
+  test("surfaces failed Cloud sync recovery responses", async () => {
+    resetFakeCloud();
+    FakeCloudSocket.syncSucceeds = false;
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("agent-1");
+    try {
+      await session.initialize();
+      await expect(session.recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
+        recovered: false,
+        unsupported: false,
+        detail: "sync failed",
+      });
+    } finally {
+      session.close();
+    }
+  });
+
+  test("sends recovery sync on Cloud stream event sequence gaps", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("agent-1");
+    try {
+      await session.initialize();
+      const controlSocket = FakeCloudSocket.socket("control")!;
+      const streamSocket = FakeCloudSocket.socket("stream")!;
+      const syncCount = controlSocket.sent.filter((command) => command.type === "sync").length;
+      streamSocket.serverMessage({
+        type: "update_loop_status",
+        seq: 501,
+        event_seq: 1,
+        runtime: { agent_id: "agent-1", conversation_id: "default" },
+        loop_status: { status: "WAITING_ON_INPUT", active_run_ids: [] },
+      });
+      streamSocket.serverMessage({
+        type: "update_loop_status",
+        seq: 502,
+        event_seq: 3,
+        runtime: { agent_id: "agent-1", conversation_id: "default" },
+        loop_status: { status: "WAITING_ON_INPUT", active_run_ids: [] },
+      });
+      expect(streamSocket.sent).toContainEqual({ type: "ack", seq: 501 });
+      expect(streamSocket.sent).toContainEqual({ type: "ack", seq: 502 });
+      expect(controlSocket.sent.filter((command) => command.type === "sync").length).toBe(syncCount + 1);
+      expect(controlSocket.sent.at(-1)).toMatchObject({
+        type: "sync",
+        runtime: { agent_id: "agent-1", conversation_id: "default" },
+        recover_approvals: true,
+        force_device_status: true,
+      });
+    } finally {
+      session.close();
+    }
+  });
+
+  test("lists default-conversation messages through runtime protocol instead of Cloud REST", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("agent-1");
+    try {
+      const page = await session.listMessages({ limit: 1 });
+      expect(page.messages).toEqual([{ id: "msg-from-runtime" }]);
+      expect(page.hasMore).toBeUndefined();
+      expect(page.nextBefore).toBeUndefined();
+      expect(requests.some((request) =>
+        new URL(request.url).pathname === "/v1/conversations/default/messages"
+      )).toBe(false);
+      expect(FakeCloudSocket.socket("control")!.sent).toContainEqual(expect.objectContaining({
+        type: "conversation_messages_list",
+        conversation_id: "default",
+        query: { limit: 1 },
+      }));
+    } finally {
+      session.close();
+    }
   });
 
   test("uses bearer auth from headers for Cloud REST, environment polling, and websocket upgrades", async () => {
@@ -588,7 +779,11 @@ describe("CloudEnvironmentSession", () => {
     expect(sandboxRequest?.headers["x-project-id"]).toBe("project-1");
     expect(environmentRequest?.headers.authorization).toBe("Bearer sk-header");
     expect(environmentRequest?.headers["x-project-id"]).toBe("project-1");
-    expect(FakeCloudSocket.instances[0]!.options?.headers).toEqual({
+    expect(FakeCloudSocket.socket("control")!.options?.headers).toEqual({
+      Authorization: "Bearer sk-header",
+      "x-project-id": "project-1",
+    });
+    expect(FakeCloudSocket.socket("stream")!.options?.headers).toEqual({
       Authorization: "Bearer sk-header",
       "x-project-id": "project-1",
     });
@@ -626,7 +821,7 @@ describe("CloudEnvironmentSession", () => {
     const runtimeStart = controlSocket.sent.find((command) => command.type === "runtime_start")!;
     expect(runtimeStart).toMatchObject({
       create_agent: {
-        pin_global: false,
+        pin_global: true,
         body: {
           model: "anthropic/claude-sonnet-4",
           system: "You are a repo assistant.",
@@ -663,7 +858,7 @@ describe("CloudEnvironmentSession", () => {
     const session = client.resumeSession("agent-1", {
       canUseTool: (toolName, input) => {
         decisions.push({ toolName, input });
-        return { behavior: "allow" };
+        return { behavior: "allow", updatedInput: { command: "echo approved" } };
       },
     });
 
@@ -679,7 +874,11 @@ describe("CloudEnvironmentSession", () => {
       payload: {
         kind: "approval_response",
         request_id: "approval-1",
-        decision: { behavior: "allow", updatedInput: null, updatedPermissions: [] },
+        decision: {
+          behavior: "allow",
+          updated_input: { command: "echo approved" },
+          selected_permission_suggestion_ids: [],
+        },
       },
     });
 
@@ -717,20 +916,29 @@ describe("CloudEnvironmentSession", () => {
             ],
           }),
         },
+        {
+          name: "throw_ticket",
+          label: "Throw ticket",
+          description: "Always throws",
+          parameters: { type: "object", properties: {} },
+          execute: async () => {
+            throw new Error("tool exploded");
+          },
+        },
       ],
     });
 
     try {
       const init = await session.initialize();
-      expect(init.tools).toEqual(["lookup_ticket"]);
+      expect(init.tools).toEqual(["lookup_ticket", "throw_ticket"]);
 
       const controlSocket = FakeCloudSocket.socket("control")!;
       const runtimeStart = controlSocket.sent.find((command) => command.type === "runtime_start")!;
       expect(runtimeStart).toMatchObject({
         external_tools: [
           {
-            tools: [
-              {
+            tools: expect.arrayContaining([
+              expect.objectContaining({
                 name: "lookup_ticket",
                 label: "Lookup ticket",
                 description: "Lookup a ticket by id",
@@ -739,8 +947,9 @@ describe("CloudEnvironmentSession", () => {
                   properties: { id: { type: "string" } },
                   required: ["id"],
                 },
-              },
-            ],
+              }),
+              expect.objectContaining({ name: "throw_ticket" }),
+            ]),
           },
         ],
       });
@@ -752,8 +961,7 @@ describe("CloudEnvironmentSession", () => {
         tool_name: "lookup_ticket",
         input: { id: "LET-9239" },
       });
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(controlSocket.sent.at(-1)).toMatchObject({
         type: "external_tool_call_response",
@@ -761,6 +969,37 @@ describe("CloudEnvironmentSession", () => {
         result: {
           content: [{ type: "text", text: "tool-call-1:LET-9239" }],
         },
+      });
+
+      controlSocket.serverMessage({
+        type: "external_tool_call_request",
+        request_id: "external-tool-missing",
+        runtime: { agent_id: "agent-1", conversation_id: "default" },
+        tool_call_id: "tool-call-missing",
+        tool_name: "missing_ticket",
+        input: {},
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(controlSocket.sent.at(-1)).toMatchObject({
+        type: "external_tool_call_response",
+        request_id: "external-tool-missing",
+        error: "Unknown external tool: missing_ticket",
+      });
+
+      controlSocket.serverMessage({
+        type: "external_tool_call_request",
+        request_id: "external-tool-thrown",
+        runtime: { agent_id: "agent-1", conversation_id: "default" },
+        tool_call_id: "tool-call-thrown",
+        tool_name: "throw_ticket",
+        input: {},
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(controlSocket.sent.at(-1)).toMatchObject({
+        type: "external_tool_call_response",
+        request_id: "external-tool-thrown",
+        error: "tool exploded",
       });
     } finally {
       session.close();
@@ -825,7 +1064,6 @@ describe("CloudEnvironmentSession", () => {
       error: "error",
       errorCode: "error",
       errorDetail: "cloud turn failed",
-      stopReason: "error",
       conversationId: "default",
     });
     expect(FakeCloudSocket.socket("stream")!.sent).toContainEqual({ type: "ack", seq: 201 });
@@ -858,7 +1096,6 @@ describe("CloudEnvironmentSession", () => {
       error: "error",
       errorCode: "error",
       errorDetail: "delayed cloud turn failed",
-      stopReason: "error",
       conversationId: "default",
     });
     expect(FakeCloudSocket.socket("stream")!.sent).toContainEqual({ type: "ack", seq: 301 });

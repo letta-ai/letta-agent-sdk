@@ -55,6 +55,10 @@ type ConversationMessagesListResponse = ProtocolMessage & {
   type: "conversation_messages_list_response";
   success: boolean;
   messages: unknown[];
+  next_before?: string | null;
+  nextBefore?: string | null;
+  has_more?: boolean;
+  hasMore?: boolean;
   error?: string;
 };
 
@@ -82,16 +86,6 @@ export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
   includeSdkOriginTag?: boolean;
   /** Whether to run the post-initialize MemFS enable command when requested by SDK options. */
   enableMemfsAfterInitialize?: boolean;
-  /**
-   * Cloud status websockets fan out device frames to every subscriber rather
-   * than honoring local app-server's split control/stream channels. Enable this
-   * for cloud-backed sessions so assistant deltas are not double-counted.
-   */
-  ignoreControlStreamDeltas?: boolean;
-  /** Whether turn input payloads should opt into control_request approval replies. */
-  supportsControlResponse?: boolean;
-  /** Optional source marker attached to turn input payloads. */
-  inputSource?: string;
 };
 
 export type AppServerSessionMode = RuntimeSessionMode;
@@ -271,6 +265,18 @@ export function createExternalToolCallHandler(
 
 type AppServerApprovalOptions = LettaCodeClientSessionOptions | CreateAgentOptions;
 
+type AppServerApprovalResponseDecision =
+  | {
+      behavior: "allow";
+      message?: string;
+      updated_input?: Record<string, unknown> | null;
+      selected_permission_suggestion_ids?: string[];
+    }
+  | {
+      behavior: "deny";
+      message: string;
+    };
+
 export async function resolveAppServerToolApproval(
   options: AppServerApprovalOptions,
   toolName: string,
@@ -327,6 +333,48 @@ export async function resolveAppServerToolApproval(
   };
 }
 
+function permissionSuggestionId(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.id === "string") return record.id;
+  if (typeof record.suggestion_id === "string") return record.suggestion_id;
+  if (typeof record.permission_suggestion_id === "string") return record.permission_suggestion_id;
+  return null;
+}
+
+export function toAppServerApprovalDecision(
+  decision: CanUseToolResponse,
+): AppServerApprovalResponseDecision {
+  if (decision.behavior === "deny") {
+    return {
+      behavior: "deny",
+      message: decision.message,
+    };
+  }
+
+  const selectedPermissionSuggestionIds = (decision.updatedPermissions ?? [])
+    .map(permissionSuggestionId)
+    .filter((id): id is string => id !== null);
+
+  return {
+    behavior: "allow",
+    ...(decision.message !== undefined ? { message: decision.message } : {}),
+    updated_input: decision.updatedInput ?? null,
+    selected_permission_suggestion_ids: selectedPermissionSuggestionIds,
+  };
+}
+
+function runtimeScopeFromMessage(message: ProtocolMessage): RuntimeScope | null {
+  if (message.runtime) return message.runtime;
+  const agentId = typeof message.agent_id === "string" ? message.agent_id : null;
+  const conversationId = typeof message.conversation_id === "string" ? message.conversation_id : null;
+  if (agentId && conversationId) {
+    return { agent_id: agentId, conversation_id: conversationId };
+  }
+  return null;
+}
+
 export function registerAppServerControlRequestHandler(config: {
   client: AppServerClient;
   getRuntime: () => RuntimeScope | null;
@@ -349,7 +397,7 @@ async function respondToAppServerControlRequest(
   },
   message: ProtocolMessage,
 ): Promise<void> {
-  const runtime = config.getRuntime() ?? message.runtime;
+  const runtime = runtimeScopeFromMessage(message) ?? config.getRuntime();
   if (!runtime) return;
 
   const requestId = typeof message.request_id === "string" ? message.request_id : undefined;
@@ -369,7 +417,7 @@ async function respondToAppServerControlRequest(
     payload: {
       kind: "approval_response",
       request_id: requestId,
-      decision,
+      decision: toAppServerApprovalDecision(decision),
     },
   } as Parameters<AppServerClient["input"]>[0]);
 }
@@ -382,13 +430,6 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
 
   onMessage(handler: (message: ProtocolMessage, channel?: string) => void): () => void {
     return this.client.onMessage((message, channel) => {
-      if (
-        this.options.ignoreControlStreamDeltas === true &&
-        channel === "control" &&
-        message.type === "stream_delta"
-      ) {
-        return;
-      }
       handler(message as unknown as ProtocolMessage, channel);
     });
   }
@@ -427,40 +468,21 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
         },
       ],
     };
-    if (this.options.supportsControlResponse !== false) {
-      payload.supports_control_response = true;
-    }
-    if (this.options.inputSource !== undefined) {
-      payload.source = this.options.inputSource;
-    }
-
     const command: InputCommand = {
       runtime,
       payload,
     } as InputCommand;
 
-    try {
-      const turn = await this.client.runTurn(command, {
-        allowLoopStatusFallback: true,
-        ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
-      });
+    const turn = await this.client.runTurn(command, {
+      allowLoopStatusFallback: true,
+      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    });
 
-      return {
-        runtime: turn.runtime,
-        stopReason: turn.stopReason,
-        runIds: turn.runIds,
-      };
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      return {
-        runtime,
-        success: false,
-        stopReason: "error",
-        detail,
-        errorCode: "error",
-        runIds: [],
-      };
-    }
+    return {
+      runtime: turn.runtime,
+      stopReason: turn.stopReason,
+      runIds: turn.runIds,
+    };
   }
 
   async recoverPendingApprovals(
@@ -510,11 +532,24 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
       throw new Error(response.error ?? "listMessages failed");
     }
 
-    return {
+    const result: ListMessagesResult = {
       messages: response.messages ?? [],
-      nextBefore: null,
-      hasMore: false,
     };
+    const nextBefore =
+      typeof response.nextBefore === "string" || response.nextBefore === null
+        ? response.nextBefore
+        : typeof response.next_before === "string" || response.next_before === null
+          ? response.next_before
+          : undefined;
+    if (nextBefore !== undefined) result.nextBefore = nextBefore;
+    const hasMore =
+      typeof response.hasMore === "boolean"
+        ? response.hasMore
+        : typeof response.has_more === "boolean"
+          ? response.has_more
+          : undefined;
+    if (hasMore !== undefined) result.hasMore = hasMore;
+    return result;
   }
 
   close(): void {

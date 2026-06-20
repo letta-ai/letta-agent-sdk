@@ -26,7 +26,7 @@ function urlOf(input: FetchInput | URL): string {
 class FakeAppServerSocket {
   static instances: FakeAppServerSocket[] = [];
   static mirrorStreamToControl = false;
-  static inputScenario: "normal" | "autoApprovalContinuation" | "manualApprovalWait" = "normal";
+  static inputScenario: "normal" | "autoApprovalContinuation" | "manualApprovalWait" | "hang" = "normal";
   readyState = 0;
   sent: unknown[] = [];
   private listeners = new Map<string, Set<Listener>>();
@@ -305,6 +305,10 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
       return;
     }
 
+    if (FakeAppServerSocket.inputScenario === "hang") {
+      return;
+    }
+
     const assistantDelta = {
       type: "stream_delta",
       runtime,
@@ -497,8 +501,11 @@ describe("LettaCodeClient", () => {
       expect(inputCommand).toMatchObject({
         type: "input",
         runtime: { agent_id: "agent-123", conversation_id: "conv-created" },
-        payload: { kind: "create_message", supports_control_response: true },
+        payload: { kind: "create_message" },
       });
+      const payload = inputCommand?.payload as Record<string, unknown> | undefined;
+      expect(payload).not.toHaveProperty("supports_control_response");
+      expect(payload).not.toHaveProperty("source");
     } finally {
       session.close();
     }
@@ -530,7 +537,8 @@ describe("LettaCodeClient", () => {
       fakeControlSocket().serverMessage({
         type: "control_request",
         request_id: "approval-1",
-        runtime: { agent_id: "agent-123", conversation_id: "conv-created" },
+        agent_id: "agent-from-request",
+        conversation_id: "conv-from-request",
         request: {
           subtype: "can_use_tool",
           tool_name: "Bash",
@@ -550,19 +558,53 @@ describe("LettaCodeClient", () => {
       );
       expect(approvalCommand).toMatchObject({
         type: "input",
-        runtime: { agent_id: "agent-123", conversation_id: "conv-created" },
+        runtime: { agent_id: "agent-from-request", conversation_id: "conv-from-request" },
         payload: {
           kind: "approval_response",
           request_id: "approval-1",
           decision: {
             behavior: "allow",
             message: "approved",
-            updatedInput: { command: "pwd" },
-            updatedPermissions: [],
+            updated_input: { command: "pwd" },
+            selected_permission_suggestion_ids: [],
           },
         },
       });
     } finally {
+      session.close();
+    }
+  });
+
+  test("app-server transport failures emit streamed error before failed result", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.inputScenario = "hang";
+    const client = new LettaCodeClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+      requestTimeoutMs: 5,
+    });
+
+    const session = client.createSession("agent-123");
+    try {
+      await session.initialize();
+      await session.send("this will time out");
+      const messages: unknown[] = [];
+      for await (const message of session.stream()) {
+        messages.push(message);
+      }
+
+      expect(messages[0]).toMatchObject({
+        type: "error",
+        stopReason: "error",
+      });
+      expect(messages.at(-1)).toMatchObject({
+        type: "result",
+        success: false,
+        errorCode: "error",
+      });
+    } finally {
+      FakeAppServerSocket.inputScenario = "normal";
       session.close();
     }
   });
@@ -820,6 +862,8 @@ describe("LettaCodeClient", () => {
 
       const page = await session.listMessages({ limit: 2, order: "desc" });
       expect(page.messages).toHaveLength(2);
+      expect(page.hasMore).toBeUndefined();
+      expect(page.nextBefore).toBeUndefined();
       expect(fakeControlSocket().sent.at(-1)).toMatchObject({
         type: "conversation_messages_list",
         conversation_id: "default",
