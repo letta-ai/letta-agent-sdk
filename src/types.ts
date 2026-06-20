@@ -67,7 +67,7 @@ export interface RunTurnOptions {
   maxApprovalRecoveryAttempts?: number;
 
   /**
-   * Timeout in milliseconds for each recover_pending_approvals request.
+   * Timeout in milliseconds for each approval recovery request.
    * Overrides session-level approvalRecoveryTimeoutMs when provided.
    */
   recoveryTimeoutMs?: number;
@@ -278,8 +278,7 @@ export type LettaCodeEnvironment =
   | { name: string }
   | { id: string }
   | { connectionId: string }
-  | { deviceId: string }
-  | { lastUsed: true };
+  | { deviceId: string };
 
 export interface LettaCodeLocalAppServerOptions {
   /**
@@ -420,15 +419,10 @@ export interface InternalSessionOptions {
   maxApprovalRecoveryAttempts?: number;
 
   /**
-   * Timeout in milliseconds for a single recover_pending_approvals control request.
+   * Timeout in milliseconds for a single approval recovery request.
    */
   approvalRecoveryTimeoutMs?: number;
 
-  /**
-   * Controls how the git-backed memory pull runs at session startup.
-   * Maps to --memfs-startup <blocking|background|skip> CLI flag.
-   */
-  memfsStartup?: "blocking" | "background" | "skip";
 }
 
 export type PermissionMode =
@@ -499,20 +493,10 @@ export interface CreateSessionOptions {
   maxApprovalRecoveryAttempts?: number;
 
   /**
-   * Timeout in milliseconds for a single recover_pending_approvals control request.
+   * Timeout in milliseconds for a single approval recovery request.
    */
   approvalRecoveryTimeoutMs?: number;
 
-  /**
-   * Controls how the git-backed memory pull runs at session startup.
-   *
-   * - "blocking"  (default): await pull before emitting init; exit on conflict.
-   * - "background": fire pull async; session init proceeds immediately.
-   * - "skip": skip the pull entirely this session (fastest cold-open).
-   *
-   * Maps to the CLI --memfs-startup flag.
-   */
-  memfsStartup?: "blocking" | "background" | "skip";
 }
 
 /**

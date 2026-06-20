@@ -2,8 +2,7 @@ export type RemoteEnvironmentTarget =
   | { connectionId: string }
   | { environmentId: string }
   | { deviceId: string }
-  | { connectionName: string }
-  | { lastUsed: true };
+  | { connectionName: string };
 
 export type RemoteEnvironmentFallback = "fail_if_unavailable" | "any_online";
 
@@ -38,18 +37,6 @@ export interface RemoteEnvironmentConnection {
 export interface RemoteEnvironmentListResult {
   connections: RemoteEnvironmentConnection[];
   hasNextPage: boolean;
-}
-
-export interface RemoteRuntimeLastEnvironment {
-  environmentId: string | null;
-  deviceId: string;
-  connectionName: string;
-  metadata: Record<string, unknown> | null;
-  status: "online" | "offline" | "unreachable";
-  isOnline: boolean;
-  lastSeenAt: number | null;
-  lastUsedAt: number;
-  source: "environment" | "sandbox" | "unknown";
 }
 
 export interface ResolvedRemoteEnvironment {
@@ -163,17 +150,6 @@ export class RemoteEnvironmentClient {
     return parseJsonResponse<RemoteEnvironmentConnection>(response);
   }
 
-  async getLastEnvironment(params: {
-    agentId: string;
-    conversationId: string;
-  }): Promise<RemoteRuntimeLastEnvironment> {
-    const response = await this.fetchImpl(
-      `${this.baseUrl}/v1/environments/runtimes/${encodeURIComponent(params.agentId)}/${encodeURIComponent(params.conversationId)}/last`,
-      { headers: createHeaders(this.options) },
-    );
-    return parseJsonResponse<RemoteRuntimeLastEnvironment>(response);
-  }
-
   async resolveEnvironment(
     target: RemoteEnvironmentTarget,
     options: ResolveRemoteEnvironmentOptions = {},
@@ -185,18 +161,6 @@ export class RemoteEnvironmentClient {
     try {
       if ("deviceId" in target) {
         return ensureOnline(await this.getEnvironmentByDeviceId(target.deviceId), target);
-      }
-
-      if ("lastUsed" in target) {
-        if (!options.agentId) {
-          throw new Error("agentId is required to resolve last used environment");
-        }
-        const conversationId = options.conversationId ?? "default";
-        const last = await this.getLastEnvironment({
-          agentId: options.agentId,
-          conversationId,
-        });
-        return ensureOnline(await this.getEnvironmentByDeviceId(last.deviceId), target);
       }
 
       const { connections } = await this.listEnvironments();

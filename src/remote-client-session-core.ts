@@ -545,7 +545,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   }
 
   protected currentOptions(): LettaCodeClientSessionOptions | CreateAgentOptions {
-    return this.mode.kind === "create-agent" ? this.mode.options : this.mode.options;
+    return this.mode.options;
   }
 
   protected shouldEnableMemfs(options: LettaCodeClientSessionOptions | CreateAgentOptions): boolean {
@@ -608,17 +608,9 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       this._model = updatedModel;
     }
 
-    const payload: Record<string, unknown> = {};
-    const mode = mapPermissionMode(this.mode.options.permissionMode);
-    if (mode) payload.mode = mode;
-    if (this.mode.options.cwd !== undefined) payload.cwd = this.mode.options.cwd;
-    if (Object.keys(payload).length > 0) {
-      this.controller.send({
-        type: "change_device_state",
-        runtime: this.runtime,
-        payload,
-      });
-    }
+    // Initial cwd and permission mode are part of runtime_start for
+    // app-server/listener sessions. Reserve change_device_state for explicit
+    // post-init mutations via changeDeviceState().
   }
 
   private handleProtocolMessage = (message: ProtocolMessage): void => {

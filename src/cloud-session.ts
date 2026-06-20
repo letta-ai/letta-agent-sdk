@@ -75,7 +75,7 @@ type CloudConversation = Record<string, unknown> & {
   agent_id?: string;
 };
 
-type CloudSessionMode = RuntimeSessionMode;
+type CloudSessionMode = Extract<RuntimeSessionMode, { kind: "session" }>;
 
 function getDefaultApiKey(): string | undefined {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } })
@@ -185,7 +185,7 @@ export function validateCloudClientOptions(options: LettaCodeCloudClientOptions)
   validatePositiveInteger(options.appServer?.startupTimeoutMs, "appServer.startupTimeoutMs");
   if ((options as { sandbox?: unknown }).sandbox !== undefined) {
     throw new Error(
-      "Cloud backend SDK-managed sandboxes are not available yet. Specify environment; managed sandbox support is blocked on letta-cloud#12516.",
+      "Cloud backend SDK-managed sandboxes are not available yet. Specify environment.",
     );
   }
   if (
@@ -214,9 +214,6 @@ function environmentToRemoteTarget(
   }
   if ("deviceId" in environment) {
     return { deviceId: environment.deviceId };
-  }
-  if ("lastUsed" in environment) {
-    return { lastUsed: true };
   }
   throw new Error("Unknown cloud environment selector.");
 }
@@ -530,7 +527,7 @@ export function assertCloudSessionOptionsSupported(
 ): void {
   if ((options as { sandbox?: unknown }).sandbox !== undefined) {
     throw new Error(
-      `Cloud backend ${action}() does not accept SDK-managed sandbox options yet. Specify environment; managed sandbox support is blocked on letta-cloud#12516.`,
+      `Cloud backend ${action}() does not accept SDK-managed sandbox options yet. Specify environment.`,
     );
   }
   if (options.systemPrompt !== undefined) {
@@ -548,7 +545,7 @@ export function assertCloudSessionOptionsSupported(
   if (options.sleeptime?.behavior !== undefined) {
     throw new Error(`Cloud backend ${action}() has not wired sleeptime.behavior to the remote device protocol yet.`);
   }
-  if (options.memfsStartup !== undefined) {
+  if ((options as { memfsStartup?: unknown }).memfsStartup !== undefined) {
     throw new Error(`Cloud backend ${action}() does not use memfsStartup; remote device startup owns synchronization.`);
   }
   if (options.includePartialMessages !== undefined) {
@@ -561,6 +558,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   private removeExternalToolHandler: (() => void) | null = null;
   private removeControlRequestHandler: (() => void) | null = null;
   private externalTools = new Map<string, AnyAgentTool>();
+  private readonly cloudMode: CloudSessionMode;
 
   constructor(
     private readonly cloudOptions: LettaCodeCloudClientOptions,
@@ -570,16 +568,9 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       label: "cloud",
       requestTimeoutMs: cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
     });
-    const tools = mode.kind === "create-agent" ? mode.options.tools : mode.options.tools;
+    this.cloudMode = mode;
+    const tools = mode.options.tools;
     this.externalTools = externalToolsByName(tools);
-  }
-
-  protected override enableMemfsBody(): Record<string, unknown> {
-    if (!this.runtime) return {};
-    return {
-      runtime: this.runtime,
-      agent_id: this.runtime.agent_id,
-    };
   }
 
   protected override async initializeRuntimeController(): Promise<RuntimeSessionInit> {
@@ -687,19 +678,13 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   private async resolveRuntime(): Promise<{ runtime: RuntimeScope }> {
-    if (this.mode.kind === "create-agent") {
-      const agentId = await createCloudAgent(this.cloudOptions, this.mode.options);
-      const conversation = await this.createConversation(agentId);
-      return { runtime: { agent_id: agentId, conversation_id: conversation.id } };
-    }
+    let agentId = this.cloudMode.agentId;
+    let conversationId = this.cloudMode.conversationId;
 
-    let agentId = this.mode.agentId;
-    let conversationId = this.mode.conversationId;
-
-    if (agentId && this.mode.newConversation) {
+    if (agentId && this.cloudMode.newConversation) {
       const conversation = await this.createConversation(agentId);
       conversationId = conversation.id;
-    } else if (agentId && this.mode.defaultConversation) {
+    } else if (agentId && this.cloudMode.defaultConversation) {
       conversationId = "default";
     }
 
@@ -775,7 +760,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     const environment = this.effectiveEnvironment();
     if (environment === undefined) {
       throw new Error(
-        "Cloud backend requires an environment target until managed Cloud sandboxes land. Specify client or session environment; managed sandbox support is blocked on letta-cloud#12516.",
+        "Cloud backend requires an environment target until managed Cloud sandboxes land. Specify client or session environment.",
       );
     }
     return environment;

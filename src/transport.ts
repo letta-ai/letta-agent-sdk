@@ -182,11 +182,6 @@ export function buildCliArgs(options: InternalSessionOptions): string[] {
     args.push("--memfs");
   }
 
-  // Memory filesystem startup policy
-  if (options.memfsStartup !== undefined) {
-    args.push("--memfs-startup", options.memfsStartup);
-  }
-
   // Skills sources
   if (options.skillSources !== undefined) {
     const sources = [...new Set(options.skillSources)];

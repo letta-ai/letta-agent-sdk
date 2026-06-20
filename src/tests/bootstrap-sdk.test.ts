@@ -1,59 +1,13 @@
 /**
- * SDK tests for the bootstrap_session_state API (B2) and memfsStartup transport arg (B1).
+ * SDK tests for the bootstrap_session_state API.
  *
  * Tests:
- * 1. buildCliArgs: --memfs-startup flag forwarding for all three values
- * 2. bootstrapState: request/response handling via mock transport
- * 3. bootstrapState: error envelope propagation
- * 4. bootstrapState: requires initialization guard
+ * 1. bootstrapState: request/response handling via mock transport
+ * 2. bootstrapState: error envelope propagation
+ * 3. bootstrapState: requires initialization guard
  */
 import { describe, expect, mock, test } from "bun:test";
-import { buildCliArgs } from "../transport";
-import type { BootstrapStateResult, InternalSessionOptions } from "../types";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// B1: transport arg forwarding
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("buildCliArgs: memfsStartup", () => {
-  const baseOpts: InternalSessionOptions = { agentId: "agent-test" };
-
-  test("omits --memfs-startup when not set", () => {
-    const args = buildCliArgs(baseOpts);
-    expect(args).not.toContain("--memfs-startup");
-  });
-
-  test("emits --memfs-startup blocking", () => {
-    const args = buildCliArgs({ ...baseOpts, memfsStartup: "blocking" });
-    const idx = args.indexOf("--memfs-startup");
-    expect(idx).toBeGreaterThanOrEqual(0);
-    expect(args[idx + 1]).toBe("blocking");
-  });
-
-  test("emits --memfs-startup background", () => {
-    const args = buildCliArgs({ ...baseOpts, memfsStartup: "background" });
-    const idx = args.indexOf("--memfs-startup");
-    expect(idx).toBeGreaterThanOrEqual(0);
-    expect(args[idx + 1]).toBe("background");
-  });
-
-  test("emits --memfs-startup skip", () => {
-    const args = buildCliArgs({ ...baseOpts, memfsStartup: "skip" });
-    const idx = args.indexOf("--memfs-startup");
-    expect(idx).toBeGreaterThanOrEqual(0);
-    expect(args[idx + 1]).toBe("skip");
-  });
-
-  test("memfsStartup can be paired with createOnly forced memfs", () => {
-    const args = buildCliArgs({
-      createOnly: true,
-      memfsStartup: "background",
-    });
-    expect(args).toContain("--memfs");
-    expect(args).toContain("--memfs-startup");
-    expect(args[args.indexOf("--memfs-startup") + 1]).toBe("background");
-  });
-});
+import type { BootstrapStateResult } from "../types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // B2: bootstrapState mock transport tests
@@ -101,24 +55,6 @@ describe("bootstrapState: protocol logic via mock", () => {
     expect(subtypeUsed).toBe("bootstrap_session_state");
   });
 
-  test("buildCliArgs: prefetch sessions can use --memfs-startup skip", () => {
-    // App-server listMessagesDirect does not use CLI args; this verifies the
-    // stdio transport arg builder for read-only prefetch sessions.
-    const opts: InternalSessionOptions = {
-      agentId: "agent-test",
-      defaultConversation: true,
-      permissionMode: "bypassPermissions",
-      memfsStartup: "skip",
-      skillSources: [],
-      systemInfoReminder: false,
-    };
-    const args = buildCliArgs(opts);
-    expect(args).toContain("--memfs-startup");
-    expect(args[args.indexOf("--memfs-startup") + 1]).toBe("skip");
-    expect(args).toContain("--yolo");
-    expect(args).toContain("--no-skills");
-    expect(args).toContain("--no-system-info-reminder");
-  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

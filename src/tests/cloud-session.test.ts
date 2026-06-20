@@ -556,10 +556,7 @@ describe("CloudEnvironmentSession", () => {
       type: "update_model",
       payload: { model_handle: "anthropic/claude-sonnet-4" },
     }));
-    expect(controlSocket.sent).toContainEqual(expect.objectContaining({
-      type: "change_device_state",
-      payload: { cwd: "/repo", mode: "unrestricted" },
-    }));
+    expect(controlSocket.sent.some((command) => command.type === "change_device_state")).toBe(false);
 
     await session.updateToolset("developer");
     expect(controlSocket.sent).toContainEqual(expect.objectContaining({

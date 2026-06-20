@@ -171,7 +171,7 @@ export function assertRemoteSessionOptionsSupported(
   if (options.sleeptime?.behavior !== undefined) {
     throw new Error(`App-server ${action}() does not yet support sleeptime.behavior overrides.`);
   }
-  if (options.memfsStartup !== undefined) {
+  if ((options as { memfsStartup?: unknown }).memfsStartup !== undefined) {
     throw new Error(`App-server ${action}() does not use memfsStartup; app-server owns its startup synchronization.`);
   }
   if (options.includePartialMessages !== undefined) {
@@ -579,7 +579,7 @@ export class AppServerSession extends RemoteClientSessionCore {
       label: "app-server",
       requestTimeoutMs: remoteOptions.requestTimeoutMs,
     });
-    const tools = mode.kind === "create-agent" ? mode.options.tools : mode.options.tools;
+    const tools = mode.options.tools;
     for (const tool of tools ?? []) {
       this.externalTools.set(tool.name, tool);
     }
@@ -673,7 +673,7 @@ export class AppServerSession extends RemoteClientSessionCore {
   }
 
   private async buildRuntimeStartCommand(client: AppServerClient): Promise<RuntimeStartCommand> {
-    const options = this.mode.kind === "create-agent" ? this.mode.options : this.mode.options;
+    const options = this.mode.options;
     const command: Record<string, unknown> = {
       client_info: {
         name: "@letta-ai/letta-code-sdk",

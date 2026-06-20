@@ -282,4 +282,13 @@ describe("buildCliArgs — memfs", () => {
     const args = buildCliArgs({ createOnly: true });
     expect(args).toContain("--memfs");
   });
+
+  test("stale memfsStartup input is not forwarded", () => {
+    const args = buildCliArgs({
+      createOnly: true,
+      memfsStartup: "skip",
+    } as Parameters<typeof buildCliArgs>[0] & { memfsStartup: string });
+    expect(args).toContain("--memfs");
+    expect(args).not.toContain("--memfs-startup");
+  });
 });
