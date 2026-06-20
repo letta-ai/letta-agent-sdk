@@ -17,7 +17,9 @@ Already fixed in the current working tree:
 - Direct Cloud sessions require an explicit `environment` until SDK-managed Cloud sandboxes land.
 - Direct Cloud sessions fail fast on missing `environment` before Cloud REST conversation create/retrieve or websocket side effects.
 - SDK-managed sandbox lifecycle options/CRUD were removed from this PR's public and runtime path; passing sandbox options fails fast instead of silently depending on unfinished Cloud listener registration.
+- SDK-created agents force MemFS; the public MemFS disable surface and related SDK plumbing were removed.
 - `environment` is Cloud-only; remote app-server clients reject it.
+- The old fire-and-forget remote-environment dispatch API/docs/examples were removed; SDK turns use app-server/runtime protocol surfaces.
 - Direct Cloud status sessions now open an `AppServerClient` over `/v1/environments/{connectionId}/status/ws` and issue `runtime_start` for the resolved `{agent_id, conversation_id}`.
 - The large duplicate `CloudStatusRuntimeController` turn state machine was removed. Cloud now reuses `AppServerRuntimeController` / `AppServerClient.runTurn()` for turn input, terminality, request correlation, `sync`, and external tool responses.
 - Cloud transport reliability remains a narrow gateway socket adapter: auth URL/header construction, split control/stream channels, Cloud gateway fanout de-dupe, ACKs, event-sequence gap `sync`, idempotency de-dupe, and heartbeat pings.

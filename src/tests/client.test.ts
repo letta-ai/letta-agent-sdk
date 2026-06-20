@@ -888,7 +888,7 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("app-server sessions apply model memfs sleeptime and list messages", async () => {
+  test("app-server sessions apply model sleeptime and list messages", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaCodeClient({
       backend: "remote",
@@ -898,7 +898,6 @@ describe("LettaCodeClient", () => {
 
     const session = client.resumeSession("agent-123", {
       model: "anthropic/claude-opus-4",
-      memfs: true,
       sleeptime: { trigger: "step-count", stepCount: 3 },
     });
 
@@ -906,10 +905,6 @@ describe("LettaCodeClient", () => {
       await session.initialize();
       expect(fakeControlSocket().sent).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({
-            type: "enable_memfs",
-            agent_id: "agent-123",
-          }),
           expect.objectContaining({
             type: "set_reflection_settings",
             settings: { trigger: "step-count", step_count: 3 },
@@ -960,9 +955,6 @@ describe("LettaCodeClient", () => {
       WebSocket: FakeAppServerSocket,
     });
 
-    expect(() => client.resumeSession("agent-123", { memfs: false })).toThrow(
-      "does not yet support disabling memfs",
-    );
     expect(() =>
       client.resumeSession("agent-123", { sleeptime: { behavior: "auto-launch" } }),
     ).toThrow("does not yet support sleeptime.behavior");

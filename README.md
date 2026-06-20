@@ -25,12 +25,6 @@ import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
 // spawns/manages the app-server process for you.
 const localClient = new LettaCodeClient({ backend: "local" });
 
-// Legacy local stdio transport remains available as an explicit fallback.
-const legacyLocalClient = new LettaCodeClient({
-  backend: "local",
-  transport: "stdio",
-});
-
 // Remote: connect to a user-managed Letta Code app-server over websockets.
 const remoteClient = new LettaCodeClient({
   backend: "remote",
@@ -60,8 +54,7 @@ const agentId = await client.createAgent({
   persona: "You are a helpful coding assistant for TypeScript projects.",
 });
 
-// SDK-created agents have MemFS enabled by default and include the
-// origin:letta-code tag. Set memfs: false to explicitly opt out.
+// SDK-created agents always use MemFS and include the origin:letta-code tag.
 await using session = client.resumeSession(agentId);
 
 await session.send("Find and fix the bug in auth.ts");
@@ -87,9 +80,7 @@ await using session = client.resumeSession(agentId, {
 ```
 
 The top-level helpers (`createAgent`, `createSession`, `resumeSession`, and
-`prompt`) remain available. They use the local app-server path when an agent id
-is present; `createSession()`/`prompt()` without an agent id keep the historical
-default/LRU-agent behavior through the legacy local stdio fallback.
+`prompt`) remain available for local app-server sessions.
 
 ### User-managed app-server backend
 
@@ -170,60 +161,30 @@ By default, websocket authentication uses `Authorization` headers. Set
 `webSocketAuth: "query"` for browser-style websocket clients that cannot send
 custom upgrade headers.
 
-
-### Remote environments (ACK-only dispatch)
-
-The SDK can also address a Letta Code remote environment through the Cloud
-remote-environment API. Treat the agent and conversation as the stable actor;
-treat the remote as an execution target that may be online or offline.
-
-```ts
-import { createRemoteAgent } from "@letta-ai/letta-code-sdk";
-
-const agent = createRemoteAgent({
-  apiKey: process.env.LETTA_API_KEY,
-  agentId: "agent-123",
-  conversationId: "conv-456",
-  target: { deviceId: "work-laptop" },
-  fallback: "fail_if_unavailable",
-});
-
-const dispatch = await agent.tell("Pull main, run tests, and summarize failures.");
-console.log(dispatch.connectionId, dispatch.clientMessageId);
-```
-
-Remote dispatch currently acknowledges that the message reached the selected
-Letta Code environment. It does **not** yet stream the final answer through this
-SDK surface. The API is intentionally shaped around stable targets (`deviceId`,
-`environmentId`, `lastUsed`) instead of making application code depend on the
-current ephemeral `connectionId`.
-
 ## Session configuration
 
 App-server and Cloud sessions use the remote/listener protocol for runtime
 controls that can be applied to an existing agent, including `model`,
-`memfs: true`, sleeptime trigger settings, `cwd`, and `permissionMode`.
-Stdio-only CLI flags such as `skillSources`, `systemInfoReminder`,
-`sleeptime.behavior`, `memfs: false`, and partial-message toggles are rejected
-on app-server/Cloud sessions until those controls are wired through the remote
+toolset preference, sleeptime trigger settings, `cwd`, and `permissionMode`.
+MemFS is enabled for SDK-created agents and is not configurable through SDK options.
+CLI-only flags such as `skillSources`, `systemInfoReminder`,
+`sleeptime.behavior`, and partial-message toggles are rejected on
+app-server/Cloud sessions until those controls are wired through the remote
 protocol.
-
-If you need the legacy CLI flag surface, opt into the local stdio transport:
 
 ```ts
 import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
 
-const client = new LettaCodeClient({ backend: "local", transport: "stdio" });
+const client = new LettaCodeClient({ backend: "local" });
 
 const session = client.resumeSession("agent-123", {
-  skillSources: ["project", "global"], // [] disables all skills (--no-skills)
-  systemInfoReminder: false, // maps to --no-system-info-reminder
+  model: "anthropic/claude-sonnet-4",
+  cwd: process.cwd(),
+  permissionMode: "bypassPermissions",
   sleeptime: {
     trigger: "step-count", // off | step-count | compaction-event
-    behavior: "reminder", // reminder | auto-launch
     stepCount: 8,
   },
-  memfs: true, // true -> --memfs, false -> --no-memfs
 });
 ```
 

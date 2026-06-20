@@ -393,9 +393,6 @@ export interface InternalSessionOptions {
   // Tags (only for new agents)
   tags?: string[];
 
-  // Memory filesystem (only for new agents)
-  memfs?: boolean;
-
   // Skills/reminders
   skillSources?: SkillSource[];
   systemInfoReminder?: boolean;
@@ -462,12 +459,6 @@ export interface CreateSessionOptions {
 
   /** Working directory for the CLI process */
   cwd?: string;
-
-  /**
-   * Enable/disable memory filesystem for this agent before running.
-   * true -> `--memfs`, false -> `--no-memfs`, undefined -> leave unchanged.
-   */
-  memfs?: boolean;
 
   /**
    * Restrict available skills by source.
@@ -610,12 +601,6 @@ export interface CreateAgentOptions {
    * SDK-created agents are also tagged with `origin:letta-code` if missing.
    */
   tags?: string[];
-
-  /**
-   * Enable git-backed memory filesystem for this newly created agent.
-   * Defaults to enabled; set false to explicitly opt out during creation.
-   */
-  memfs?: boolean;
 
   /**
    * Restrict available skills by source.

@@ -46,11 +46,11 @@ That means Cloud `createAgent()` should preserve, not suppress:
 - MemFS/default setup semantics;
 - any other app-server/CLI create-agent defaults.
 
-The PR's current pattern — using the harness but setting `includeSdkOriginTag: false`, `enableMemfsAfterInitialize: false`, rejecting caller `tags`, and adding tests that expect those omissions — is the slop. It is not acceptable to turn a transient Cloud tag/MemFS/backend bug into durable SDK behavior. Fix Cloud or hide the bug behind a narrow verified workaround; do not weaken the SDK contract.
+The pre-fix PR pattern — using the harness but setting Cloud-specific create-agent escape hatches, rejecting caller `tags`, and adding tests that expected those omissions — was the slop. It is not acceptable to turn a transient Cloud tag/MemFS/backend bug into durable SDK behavior. Fix Cloud or hide the bug behind a narrow verified workaround; do not weaken the SDK contract.
 
 ### Reflection/sleeptime should not be a Cloud-only capability fork
 
-The confusing audit phrase “Cloud capabilities disable reflection settings” refers to the SDK adapter’s internal boolean capability table, not to a desired product concept. The branch currently accepts parts of `sleeptime` on Cloud while the Cloud session does not enable the shared `set_reflection_settings` path, so those options can become silent no-ops.
+The confusing audit phrase “Cloud capabilities disable reflection settings” referred to the SDK adapter’s internal boolean capability table, not to a desired product concept. The pre-fix branch accepted parts of `sleeptime` on Cloud while the Cloud session did not enable the shared `set_reflection_settings` path, so those options could become silent no-ops.
 
 Correct framing:
 
@@ -85,12 +85,10 @@ Tests should assert Cloud parity with local/remote listener semantics. They shou
 
 ### Concrete PR code-smell map
 
-If context is polluted, start by checking these symbols/files. They are where the architectural drift is encoded:
+If context is polluted while reviewing the historical pre-fix state, these symbols/files were where the architectural drift was encoded:
 
 - `src/cloud-session.ts` / `cloudHarnessAppServerOptions()`:
-  - forces `includeSdkOriginTag: false`;
-  - forces `enableMemfsAfterInitialize: false`;
-  - configures a Cloud-specific harness path instead of preserving app-server create-agent semantics unchanged.
+  - forced Cloud-specific create-agent behavior instead of preserving app-server create-agent semantics unchanged.
 - `src/cloud-session.ts` / `createCloudAgent()`:
   - rejects caller `tags`;
   - treats a Cloud tag/backend bug as an SDK contract change.
@@ -243,7 +241,7 @@ Open questions:
 ### 5. Adapter capability matrix / error messages are too broad and may ossify temporary gaps
 
 Evidence:
-- Cloud rejects `systemPrompt`, allowed/disallowed tools, SDK tools, skillSources, systemInfoReminder, sleeptime.behavior, memfs=false, memfsStartup, includePartialMessages.
+- Cloud rejected `systemPrompt`, allowed/disallowed tools, SDK tools, skillSources, systemInfoReminder, sleeptime.behavior, MemFS disable requests, memfsStartup, includePartialMessages.
 - Remote/app-server rejects a similar but not identical set.
 - `RemoteClientSessionCore` has capability flags for `enableMemfs`, `reflectionSettings`, `updateModel`, `changeDeviceState`, `updateToolset`; Cloud enables only `enableMemfs`, `updateModel`, `changeDeviceState`.
 
@@ -322,8 +320,8 @@ These are the starting points external stateless agents must receive so they do 
   - `assertSessionBackend()` cloud/remote option gating.
   - `stripEnvironment()` and `hasCreateAgentEnvironment()`.
 - `src/cloud-session.ts`
-  - `createCloudAgent()` currently rejects `agentOptions.tags`.
-  - `cloudHarnessAppServerOptions()` sets `includeSdkOriginTag: false`, `pinGlobalAgent: false`, `enableMemfsAfterInitialize: false`.
+  - `createCloudAgent()` rejected `agentOptions.tags`.
+  - `cloudHarnessAppServerOptions()` set Cloud-specific create-agent escape hatches.
   - `assertCloudSessionOptionsSupported()` rejects many SDK options.
   - `listCloudMessages()` returns raw API payloads as `unknown[]`.
   - `CloudStatusRuntimeController` duplicates websocket send/request/ack/sync/turn terminal logic.
@@ -508,7 +506,14 @@ Key additions / confirmations:
 
 ## Manual audit log — pass 2 (Cloud/runtime/API seams)
 
-### Finding: `environment` is documented and typed for remote, but remote backend ignores it (high confidence, P1)
+### Resolved finding: `environment` was documented and typed for remote, but remote backend ignored it (was P1)
+
+Current branch status:
+- `environment` is Cloud-only in the public client/session contract.
+- Remote app-server clients reject `environment` because the app-server URL selects the runtime.
+- The separate fire-and-forget remote-environment dispatch API and examples were removed rather than documented as a second SDK surface.
+
+Historical evidence from the pre-fix branch:
 
 Evidence:
 - `src/types.ts:336-348` includes `environment?: LettaCodeEnvironment` on `LettaCodeRemoteClientOptions`.
@@ -523,9 +528,7 @@ Why it is SLOP:
 - It weakens the intended backend model and will create confusing product behavior if published.
 
 De-slop direction:
-- Remove `environment` from `LettaCodeRemoteClientOptions` docs/types if remote app-server URLs are the selector, and reject `options.environment` for `backend: "remote"` with a clear error.
-- Or, if remote app-server is intended to proxy Cloud environments later, wire it through `runtime_start` explicitly and add app-server protocol support/tests. Do not keep a silent no-op.
-- Update README line 80 to say `environment` applies to Cloud (and to the separate ACK-only remote-environment API), not `backend: "remote"`, unless the protocol is actually implemented.
+- Completed by making `environment` Cloud-only and removing the fire-and-forget remote-environment SDK dispatch surface.
 
 Tests to add/change:
 - `new LettaCodeClient({ backend: "remote", url, environment })` rejects, or remote `resumeSession(..., { environment })` rejects.
@@ -606,11 +609,16 @@ De-slop direction:
 - Until then, do not hardcode `hasMore: false`; either omit/undefined when unknown or mark the API as backend-limited.
 - Add cross-backend tests that page through more than one page.
 
-### Finding: Cloud `createAgent()` uses a local app-server harness but suppresses key harness defaults (high confidence, P1)
+### Resolved finding: Cloud `createAgent()` used a local app-server harness but suppressed key harness defaults (was P1)
+
+Current branch status:
+- Cloud `createAgent()` goes through the app-server harness without suppressing caller tags, `origin:letta-code`, global pinning, or created-agent MemFS enablement.
+
+Historical evidence from the pre-fix branch:
 
 Evidence:
 - `createCloudAgent()` constructs an `AppServerSession` through `cloudHarnessAppServerOptions()` (`src/cloud-session.ts:536-548`).
-- `cloudHarnessAppServerOptions()` forces `pinGlobalAgent: false`, `includeSdkOriginTag: false`, and `enableMemfsAfterInitialize: false` (`src/cloud-session.ts:517-523`).
+- `cloudHarnessAppServerOptions()` forced `pinGlobalAgent: false`, omitted the SDK origin tag, and suppressed post-initialize MemFS enablement (`src/cloud-session.ts:517-523`).
 - `src/tests/cloud-session.test.ts:552-566` asserts the app-server harness path sends no direct REST requests, sets `pin_global: false`, omits `tags`, and does not send `enable_memfs`.
 - `CreateAgentOptions.tags` docs still promise SDK-created agents receive `origin:letta-code` if missing (`src/types.ts:635-638`), and README also states this (`README.md:63-64`).
 
@@ -621,7 +629,7 @@ Why it is SLOP:
 De-slop direction:
 - Preserve origin tag and caller tags through the same harness semantics as local/remote. If Cloud create-time tags are broken, backfill/verify after creation as a narrow Cloud workaround.
 - Do not suppress harness defaults as a broad Cloud behavior. If `pin_global: false` is required for Cloud routing, document that narrow routing reason; otherwise use the shared default.
-- Do not turn `enableMemfsAfterInitialize: false` into a Cloud contract. If Cloud creates hosted MemFS by default, verify/document that; if not, ensure Cloud-created SDK agents still satisfy the MemFS-by-default promise.
+- Do not turn a Cloud-specific MemFS suppression into a Cloud contract. If Cloud creates hosted MemFS by default, verify/document that; if not, ensure Cloud-created SDK agents still satisfy the MemFS promise.
 
 ### Finding: Cloud sandbox lifecycle API is plausible, but the SDK currently encodes route/response details as durable public API before Ari's route lands (medium confidence, P2)
 
@@ -745,23 +753,28 @@ Key independent confirmations from Codex architecture audit:
   5. What tag persistence contract can SDK rely on, including current "400 but persisted" hosted-MemFS bug?
   6. Where should message pagination metadata live for app-server path if `listMessages()` is durable?
 
-### Finding: Cloud createAgent disables default MemFS enablement without public-contract clarity (high confidence, P1/P2)
+### Resolved finding: Cloud createAgent disabled default MemFS enablement without public-contract clarity (was P1/P2)
+
+Current branch status:
+- SDK-created agents force MemFS; there is no public MemFS disable surface.
+- Stdio create-only always passes `--memfs`; app-server-backed create-agent sessions send `enable_memfs`.
+- README and public types no longer document a MemFS disable surface.
+
+Historical evidence from the pre-fix branch:
 
 Evidence:
-- `cloudHarnessAppServerOptions()` sets `enableMemfsAfterInitialize: false` (`src/cloud-session.ts:520-523`).
-- `AppServerSession.shouldEnableMemfs()` enables MemFS for create-agent mode unless `memfs === false` (`src/app-server-session.ts:400-402`).
+- `cloudHarnessAppServerOptions()` suppressed post-initialize MemFS enablement (`src/cloud-session.ts:520-523`).
+- `AppServerSession.shouldEnableMemfs()` enabled MemFS for create-agent mode unless a public disable request was provided (`src/app-server-session.ts:400-402`).
 - `RemoteClientSessionCore.applyPostInitializeOptions()` sends `enable_memfs` when `capabilities.enableMemfs` and `shouldEnableMemfs(options)` are true (`src/remote-client-session-core.ts:580-592`).
 - Cloud tests assert no `enable_memfs` command is sent during Cloud createAgent (`src/tests/cloud-session.test.ts:561-566`).
-- Public types document created-agent MemFS behavior (`src/types.ts:641-645` per architecture report) and README session options show `memfs: true/false` (`README.md:220`).
+- Public types documented created-agent MemFS behavior (`src/types.ts:641-645` per architecture report) and README session options showed a MemFS toggle (`README.md:220`).
 
 Why it is SLOP:
 - This is another case where the Cloud harness path is used but harness defaults are selectively disabled.
 - It may be intentional if Cloud-hosted agents already have hosted MemFS by default or Cloud tag/memfs update is currently broken, but the PR codifies the disabled behavior without explaining the product contract.
 
 De-slop direction:
-- Preserve the same MemFS/default harness contract as local/remote create-agent unless Cloud already provides an equivalent hosted MemFS outcome.
-- If disabling `enable_memfs` is only a workaround for the hosted-MemFS 400 bug, add a narrow temporary workaround with verification/removal plan, not a permanent Cloud default.
-- Change tests from "no enable_memfs is sent" to "Cloud-created agent satisfies the shared MemFS/default harness contract" once the desired behavior is clear.
+- Completed by hard-cutting the public disable surface and preserving created-agent MemFS behavior as the SDK contract.
 
 
 ## External cloud-behavior-agent report imported

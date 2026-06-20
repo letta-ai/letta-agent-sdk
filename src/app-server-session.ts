@@ -97,8 +97,6 @@ export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
   pinGlobalAgent?: boolean;
   /** Whether SDK create-agent payloads should add the origin tag automatically. */
   includeSdkOriginTag?: boolean;
-  /** Whether to run the post-initialize MemFS enable command when requested by SDK options. */
-  enableMemfsAfterInitialize?: boolean;
 };
 
 export type AppServerSessionMode = RuntimeSessionMode;
@@ -169,9 +167,6 @@ export function assertRemoteSessionOptionsSupported(
   }
   if (options.systemInfoReminder !== undefined) {
     throw new Error(`App-server ${action}() does not yet support systemInfoReminder overrides.`);
-  }
-  if (options.memfs === false) {
-    throw new Error(`App-server ${action}() does not yet support disabling memfs through the SDK.`);
   }
   if (options.sleeptime?.behavior !== undefined) {
     throw new Error(`App-server ${action}() does not yet support sleeptime.behavior overrides.`);
@@ -591,8 +586,8 @@ export class AppServerSession extends RemoteClientSessionCore {
   }
 
   protected override shouldEnableMemfs(options: LettaCodeClientSessionOptions | CreateAgentOptions): boolean {
-    if (this.remoteOptions.enableMemfsAfterInitialize === false) return false;
-    return options.memfs === true || (this.mode.kind === "create-agent" && options.memfs !== false);
+    void options;
+    return this.mode.kind === "create-agent";
   }
 
   protected override async initializeRuntimeController(): Promise<RuntimeSessionInit> {

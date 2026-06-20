@@ -933,7 +933,6 @@ describe("CloudEnvironmentSession", () => {
       systemPrompt: "You are a repo assistant.",
       memory: [{ label: "project", value: "Use Bun." }],
       tags: ["team:sdk"],
-      memfs: true,
     })).resolves.toBe("agent-created");
 
     expect(requests).toHaveLength(0);

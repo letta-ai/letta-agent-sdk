@@ -44,10 +44,9 @@ describe("buildCliArgs: memfsStartup", () => {
     expect(args[idx + 1]).toBe("skip");
   });
 
-  test("memfsStartup does not conflict with --memfs / --no-memfs flags", () => {
+  test("memfsStartup can be paired with createOnly forced memfs", () => {
     const args = buildCliArgs({
-      ...baseOpts,
-      memfs: true,
+      createOnly: true,
       memfsStartup: "background",
     });
     expect(args).toContain("--memfs");
@@ -102,9 +101,9 @@ describe("bootstrapState: protocol logic via mock", () => {
     expect(subtypeUsed).toBe("bootstrap_session_state");
   });
 
-  test("buildCliArgs: legacy stdio prefetch can use --memfs-startup skip", () => {
-    // The legacy stdio path still supports read-only prefetch sessions that skip
-    // MemFS startup. App-server listMessagesDirect does not use CLI args.
+  test("buildCliArgs: prefetch sessions can use --memfs-startup skip", () => {
+    // App-server listMessagesDirect does not use CLI args; this verifies the
+    // stdio transport arg builder for read-only prefetch sessions.
     const opts: InternalSessionOptions = {
       agentId: "agent-test",
       defaultConversation: true,

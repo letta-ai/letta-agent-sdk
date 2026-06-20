@@ -32,7 +32,6 @@ describe("transport args", () => {
     disallowedTools?: string[];
     createOnly?: boolean;
     tags?: string[];
-    memfs?: boolean;
     skillSources?: Array<"bundled" | "global" | "agent" | "project">;
     systemInfoReminder?: boolean;
     sleeptime?: {
@@ -77,32 +76,13 @@ describe("transport args", () => {
     expect(args).toContain("EnterPlanMode,ExitPlanMode");
   });
 
-  test("memfs true forwards --memfs", () => {
-    const args = buildArgsFor({ memfs: true });
-    expect(args).toContain("--memfs");
-  });
-
-  test("memfs false forwards --no-memfs", () => {
-    const args = buildArgsFor({ memfs: false });
-    expect(args).toContain("--no-memfs");
-    expect(args).not.toContain("--memfs");
-  });
-
-  test("memfs undefined does not forward memfs flags when not creating", () => {
+  test("non-create sessions do not forward memfs flags", () => {
     expect(buildArgsFor({})).not.toContain("--memfs");
-    expect(buildArgsFor({})).not.toContain("--no-memfs");
   });
 
-  test("createOnly defaults memfs to enabled", () => {
+  test("createOnly forces memfs enabled", () => {
     const args = buildArgsFor({ createOnly: true });
     expect(args).toContain("--memfs");
-    expect(args).not.toContain("--no-memfs");
-  });
-
-  test("createOnly preserves explicit memfs opt-out", () => {
-    const args = buildArgsFor({ createOnly: true, memfs: false });
-    expect(args).toContain("--no-memfs");
-    expect(args).not.toContain("--memfs");
   });
 
   test("createOnly adds origin tag without dropping user tags", () => {

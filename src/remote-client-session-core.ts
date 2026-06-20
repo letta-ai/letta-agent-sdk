@@ -448,9 +448,6 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     if (this.toolNames !== undefined) {
       state.tools = this.toolNames;
     }
-    if (this.currentOptions().memfs === true) {
-      state.memfsEnabled = true;
-    }
     if (page.nextBefore !== undefined) {
       state.nextBefore = page.nextBefore;
     }
@@ -552,7 +549,8 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   }
 
   protected shouldEnableMemfs(options: LettaCodeClientSessionOptions | CreateAgentOptions): boolean {
-    return options.memfs === true;
+    void options;
+    return false;
   }
 
   protected enableMemfsBody(): Record<string, unknown> {

@@ -548,9 +548,6 @@ export function assertCloudSessionOptionsSupported(
   if (options.sleeptime?.behavior !== undefined) {
     throw new Error(`Cloud backend ${action}() has not wired sleeptime.behavior to the remote device protocol yet.`);
   }
-  if (options.memfs === false) {
-    throw new Error(`Cloud backend ${action}() can enable MemFS, but disabling it is not wired through the remote device protocol yet.`);
-  }
   if (options.memfsStartup !== undefined) {
     throw new Error(`Cloud backend ${action}() does not use memfsStartup; remote device startup owns synchronization.`);
   }
