@@ -63,6 +63,10 @@ function looksLikeConversationId(id: string): boolean {
   return id.startsWith("conv-") || id.startsWith("local-conv-");
 }
 
+type TurnSession = LettaCodeSession & {
+  runTurn(message: SendMessage): Promise<SDKResultMessage>;
+};
+
 /**
  * Top-level Letta Code SDK client.
  *
@@ -325,7 +329,7 @@ export class LettaCodeClient {
       : this.createSession(options);
 
     try {
-      return await session.runTurn(message);
+      return await (session as TurnSession).runTurn(message);
     } finally {
       session.close();
     }

@@ -102,9 +102,12 @@ const agentId = await client.createAgent({
   persona: "You are a helpful coding assistant.",
 });
 
-await using session = client.createSession(agentId, { cwd: process.cwd() });
-const result = await session.runTurn("Summarize this repository.");
-console.log(result.result);
+await using session = client.createSession(agentId);
+
+await session.send("Summarize this repository.");
+for await (const msg of session.stream()) {
+  if (msg.type === "assistant") console.log(msg.content);
+}
 ```
 
 
@@ -132,12 +135,15 @@ const agentId = await client.createAgent({
 });
 
 await using session = client.resumeSession(agentId, {
-  cwd: process.cwd(),
+  // Paths are resolved inside the remote environment, not on the caller machine.
+  cwd: "/workspace/project",
   permissionMode: "bypassPermissions",
 });
 
-const result = await session.runTurn("Summarize this repository.");
-console.log(result.result);
+await session.send("Summarize this repository.");
+for await (const msg of session.stream()) {
+  if (msg.type === "assistant") console.log(msg.content);
+}
 ```
 
 You can set a default `environment` on the client or override it per session:
@@ -164,9 +170,11 @@ custom upgrade headers.
 ## Session configuration
 
 App-server and Cloud sessions use the remote/listener protocol for runtime
-controls that can be applied to an existing agent, including `model`,
-toolset preference, sleeptime trigger settings, `cwd`, and `permissionMode`.
-MemFS is enabled for SDK-created agents and is not configurable through SDK options.
+settings that are applied when the session starts, including `model`,
+sleeptime trigger settings, `cwd`, and `permissionMode`. A broader runtime
+controls surface for changing settings on an active session is intentionally
+left to a later typed design. MemFS is enabled for SDK-created agents and is
+not configurable through SDK options.
 CLI-only flags such as `skillSources`, `systemInfoReminder`,
 `sleeptime.behavior`, and partial-message toggles are rejected on
 app-server/Cloud sessions until those controls are wired through the remote
@@ -179,7 +187,9 @@ const client = new LettaCodeClient({ backend: "local" });
 
 const session = client.resumeSession("agent-123", {
   model: "anthropic/claude-sonnet-4",
-  cwd: process.cwd(),
+  // For local sessions this may be a local path; for remote/Cloud sessions,
+  // use a path inside the selected runtime environment.
+  cwd: "/workspace/project",
   permissionMode: "bypassPermissions",
   sleeptime: {
     trigger: "step-count", // off | step-count | compaction-event

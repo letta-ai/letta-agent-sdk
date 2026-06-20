@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { createSession, resumeSession } from "../index.js";
+import { asAdvanced } from "./advanced-session.js";
 import type {
   SDKMessage,
   SDKResultMessage,
@@ -305,7 +306,7 @@ describeLive("live integration: letta-code-sdk", () => {
       });
       openedSessions.push(session);
 
-      const init = await session.initialize();
+      const init = await asAdvanced(session).initialize();
       seededConversationId = init.conversationId;
 
       expect(init.type).toBe("init");
@@ -335,7 +336,7 @@ describeLive("live integration: letta-code-sdk", () => {
       });
       openedSessions.push(session);
 
-      const init = await session.initialize();
+      const init = await asAdvanced(session).initialize();
       expect(init.conversationId).toBe(conversationId);
 
       await writeFixture("resume_conversation_init", init);
@@ -353,7 +354,7 @@ describeLive("live integration: letta-code-sdk", () => {
       });
       openedSessions.push(session);
 
-      const init = await session.initialize();
+      const init = await asAdvanced(session).initialize();
       const nonce = Math.random().toString(36).slice(2, 8);
       const prompt = `Reply with exactly this text and nothing else: SDK_LIVE_OK_${nonce}`;
 
@@ -383,7 +384,7 @@ describeLive("live integration: letta-code-sdk", () => {
       });
       openedSessions.push(session);
 
-      const init = await session.initialize();
+      const init = await asAdvanced(session).initialize();
       const prompt =
         "Produce 40 short bullet points about test observability. One bullet per line.";
 
@@ -428,7 +429,7 @@ describeLive("live integration: letta-code-sdk", () => {
       });
       openedSessions.push(session);
 
-      const init = await session.initialize();
+      const init = await asAdvanced(session).initialize();
 
       await collectTurn(
         session,
@@ -495,7 +496,7 @@ describeLive("live integration: letta-code-sdk", () => {
       });
       openedSessions.push(session);
 
-      const init = await session.initialize();
+      const init = await asAdvanced(session).initialize();
       const prompt =
         "Write a medium-length response with at least 30 numbered lines describing integration test anti-patterns.";
 
@@ -549,7 +550,7 @@ describeLive("live integration: letta-code-sdk", () => {
       });
       openedSessions.push(session);
 
-      await session.initialize();
+      await asAdvanced(session).initialize();
 
       const attempts: Array<{ prompt: string; messages: SDKMessage[] }> = [];
       const prompts = [
@@ -616,12 +617,12 @@ describeLive("live integration: letta-code-sdk", () => {
         });
         openedSessions.push(session);
 
-        const init = await session.initialize();
+        const init = await asAdvanced(session).initialize();
         expect(init.agentId).toBe(stuckAgentId);
         log(`Session initialized for stuck agent, conversationId: ${init.conversationId}`);
 
         // Attempt recovery - the agent has a pending approval from a Bash tool call
-        const recovery = await session.recoverPendingApprovals({ timeoutMs: 30000 });
+        const recovery = await asAdvanced(session).recoverPendingApprovals({ timeoutMs: 30000 });
         log("Recovery result:", recovery);
 
         // The recovery should either succeed (recovered=true) or report that
@@ -650,7 +651,7 @@ describeLive("live integration: letta-code-sdk", () => {
               stopReason: result.stopReason,
               errorCode: result.errorCode,
             });
-            const followupRecovery = await session.recoverPendingApprovals({ timeoutMs: 30000 });
+            const followupRecovery = await asAdvanced(session).recoverPendingApprovals({ timeoutMs: 30000 });
             log("Post-recovery approval cleanup result", followupRecovery);
           } else if (result.success) {
             log("Post-recovery turn succeeded");

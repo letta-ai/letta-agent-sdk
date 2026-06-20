@@ -510,17 +510,9 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
 }
 
 export interface LettaCodeSession extends AsyncDisposable {
-  initialize(): Promise<SDKInitMessage>;
   send(message: SendMessage): Promise<void>;
-  runTurn(message: SendMessage, options?: RunTurnOptions): Promise<SDKResultMessage>;
   stream(): AsyncGenerator<SDKMessage>;
-  recoverPendingApprovals(
-    options?: RecoverPendingApprovalsOptions,
-  ): Promise<RecoverPendingApprovalsResult>;
-  /** Update the active remote/listener toolset preference for this session. */
-  updateToolset(toolsetPreference: string): Promise<void>;
   listMessages(options?: ListMessagesOptions): Promise<ListMessagesResult>;
-  bootstrapState(options?: BootstrapStateOptions): Promise<BootstrapStateResult>;
   close(): void;
   readonly agentId: string | null;
   readonly sessionId: string | null;

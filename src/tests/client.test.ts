@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { LettaCodeClient, Session } from "../index.js";
+import { asAdvanced } from "./advanced-session.js";
 
 type Listener = (event: unknown) => void;
 type FetchInput = Parameters<typeof fetch>[0];
@@ -384,7 +385,7 @@ describe("LettaCodeClient", () => {
 
     try {
       expect(session).toBeInstanceOf(Session);
-      await expect(session.updateToolset("developer")).rejects.toThrow(
+      await expect(asAdvanced(session).updateToolset("developer")).rejects.toThrow(
         "Local stdio sessions do not support updateToolset",
       );
     } finally {
@@ -427,7 +428,7 @@ describe("LettaCodeClient", () => {
 
     const session = client.createSession("agent-123", { cwd: "/tmp/project" });
     try {
-      const init = await session.initialize();
+      const init = await asAdvanced(session).initialize();
       expect(init.agentId).toBe("agent-123");
       expect(init.conversationId).toBe("conv-created");
 
@@ -463,7 +464,7 @@ describe("LettaCodeClient", () => {
       ],
     });
     try {
-      const init = await session.initialize();
+      const init = await asAdvanced(session).initialize();
       expect(init.tools).toEqual(["Bash", "Read"]);
       expect(fakeControlSocket().sent[0]).toMatchObject({
         type: "runtime_start",
@@ -505,7 +506,7 @@ describe("LettaCodeClient", () => {
 
     const session = client.createSession("agent-123");
     try {
-      await session.initialize();
+      await asAdvanced(session).initialize();
 
       expect(fakeControlSocket().options).toEqual({
         headers: { Authorization: "Bearer super-secret-token" },
@@ -540,11 +541,11 @@ describe("LettaCodeClient", () => {
 
     const session = client.createSession("agent-123", { cwd: "/tmp/project" });
     try {
-      const init = await session.initialize();
+      const init = await asAdvanced(session).initialize();
       expect(init.agentId).toBe("agent-123");
       expect(init.conversationId).toBe("conv-created");
 
-      const result = await session.runTurn("hello");
+      const result = await asAdvanced(session).runTurn("hello");
       expect(result.success).toBe(true);
       expect(result.result).toBe("hello from app-server");
       expect(result.runIds).toEqual(["run-1"]);
@@ -594,7 +595,7 @@ describe("LettaCodeClient", () => {
     });
 
     try {
-      await session.initialize();
+      await asAdvanced(session).initialize();
       fakeControlSocket().serverMessage({
         type: "control_request",
         request_id: "approval-1",
@@ -648,7 +649,7 @@ describe("LettaCodeClient", () => {
 
     const session = client.createSession("agent-123");
     try {
-      await session.initialize();
+      await asAdvanced(session).initialize();
       await session.send("this will time out");
       const messages: unknown[] = [];
       for await (const message of session.stream()) {
@@ -681,7 +682,7 @@ describe("LettaCodeClient", () => {
 
     const session = client.createSession("agent-123");
     try {
-      await session.initialize();
+      await asAdvanced(session).initialize();
       const messages: unknown[] = [];
       await session.send("use a tool");
       for await (const message of session.stream()) {
@@ -722,8 +723,8 @@ describe("LettaCodeClient", () => {
 
     const session = client.createSession("agent-123");
     try {
-      await session.initialize();
-      const result = await session.runTurn("use a tool");
+      await asAdvanced(session).initialize();
+      const result = await asAdvanced(session).runTurn("use a tool");
 
       expect(result).toMatchObject({
         type: "result",
@@ -776,7 +777,7 @@ describe("LettaCodeClient", () => {
 
     const session = client.resumeSession("conv-abc");
     try {
-      const init = await session.initialize();
+      const init = await asAdvanced(session).initialize();
       expect(init.agentId).toBe("agent-from-conversation");
       expect(init.conversationId).toBe("conv-abc");
       expect(fakeControlSocket().sent[0]).toMatchObject({
@@ -803,7 +804,7 @@ describe("LettaCodeClient", () => {
 
     const session = client.resumeSession("local-conv-63");
     try {
-      const init = await session.initialize();
+      const init = await asAdvanced(session).initialize();
       expect(init.agentId).toBe("agent-from-conversation");
       expect(init.conversationId).toBe("local-conv-63");
       expect(fakeControlSocket().sent[0]).toMatchObject({
@@ -849,7 +850,7 @@ describe("LettaCodeClient", () => {
     });
 
     try {
-      await session.initialize();
+      await asAdvanced(session).initialize();
       expect(fakeControlSocket().sent[0]).toMatchObject({
         type: "runtime_start",
         external_tools: [
@@ -902,7 +903,7 @@ describe("LettaCodeClient", () => {
     });
 
     try {
-      await session.initialize();
+      await asAdvanced(session).initialize();
       expect(fakeControlSocket().sent).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -926,14 +927,14 @@ describe("LettaCodeClient", () => {
         query: { limit: 2, order: "desc" },
       });
 
-      await session.updateToolset("developer");
+      await asAdvanced(session).updateToolset("developer");
       expect(fakeControlSocket().sent.at(-1)).toMatchObject({
         type: "update_toolset",
         runtime: { agent_id: "agent-123", conversation_id: "default" },
         toolset_preference: "developer",
       });
 
-      await expect(session.recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
+      await expect(asAdvanced(session).recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
         recovered: true,
         unsupported: false,
       });
