@@ -1194,18 +1194,23 @@ export class Session implements AsyncDisposable {
       };
     } | undefined;
 
-    return {
+    const state: BootstrapStateResult = {
       agentId: payload?.agent_id ?? this._agentId ?? "",
       conversationId: payload?.conversation_id ?? this._conversationId ?? "",
       model: payload?.model,
-      tools: payload?.tools ?? [],
       memfsEnabled: payload?.memfs_enabled ?? false,
       messages: payload?.messages ?? [],
       nextBefore: payload?.next_before ?? null,
       hasMore: payload?.has_more ?? false,
       hasPendingApproval: payload?.has_pending_approval ?? false,
-      timings: payload?.timings,
     };
+    if (payload?.tools !== undefined) state.tools = payload.tools;
+    if (payload?.timings !== undefined) state.timings = payload.timings;
+    return state;
+  }
+
+  async updateToolset(_toolsetPreference: string): Promise<void> {
+    throw new Error("Local stdio sessions do not support updateToolset(). Use an app-server or Cloud session.");
   }
 
   /**

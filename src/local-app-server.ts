@@ -8,8 +8,10 @@ export interface LocalAppServerHandle {
 
 export interface StartLocalAppServerOptions {
   listen?: string;
+  backend?: string;
   startupTimeoutMs?: number;
   cliPath?: string;
+  env?: Record<string, string | undefined>;
 }
 
 const DEFAULT_LISTEN_URL = "ws://127.0.0.1:0";
@@ -23,6 +25,19 @@ function appendLine(buffer: string, chunk: unknown): string {
 function tryExtractListeningUrl(output: string): string | null {
   const match = output.match(LISTENING_RE);
   return match?.[1] ?? null;
+}
+
+export function buildLocalAppServerArgs(
+  cliPath: string,
+  options: Pick<StartLocalAppServerOptions, "backend" | "listen"> = {},
+): string[] {
+  return [
+    cliPath,
+    ...(options.backend !== undefined ? ["--backend", options.backend] : []),
+    "app-server",
+    "--listen",
+    options.listen ?? DEFAULT_LISTEN_URL,
+  ];
 }
 
 function terminateProcess(child: ChildProcess): void {
@@ -42,13 +57,13 @@ export function startLocalAppServer(
   options: StartLocalAppServerOptions = {},
 ): Promise<LocalAppServerHandle> {
   const cliPath = options.cliPath ?? findLettaCli();
-  const args = [cliPath, "app-server", "--listen", options.listen ?? DEFAULT_LISTEN_URL];
+  const args = buildLocalAppServerArgs(cliPath, options);
   const startupTimeoutMs = options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
 
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
+      env: { ...process.env, ...(options.env ?? {}) },
     });
 
     let settled = false;

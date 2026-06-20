@@ -273,33 +273,22 @@ describe("buildCliArgs — tools and tags", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("buildCliArgs — memfs", () => {
-  test("memfs=true → --memfs", () => {
-    const args = buildCliArgs({ memfs: true });
-    expect(args).toContain("--memfs");
-    expect(args).not.toContain("--no-memfs");
-  });
-
-  test("memfs=false → --no-memfs", () => {
-    const args = buildCliArgs({ memfs: false });
-    expect(args).toContain("--no-memfs");
-    expect(args).not.toContain("--memfs");
-  });
-
-  test("memfs undefined → neither flag when not creating an agent", () => {
+  test("non-create sessions do not pass memfs flags", () => {
     const args = buildCliArgs({});
     expect(args).not.toContain("--memfs");
-    expect(args).not.toContain("--no-memfs");
   });
 
-  test("createOnly defaults memfs to enabled", () => {
+  test("createOnly forces memfs enabled", () => {
     const args = buildCliArgs({ createOnly: true });
     expect(args).toContain("--memfs");
-    expect(args).not.toContain("--no-memfs");
   });
 
-  test("createOnly preserves explicit memfs opt-out", () => {
-    const args = buildCliArgs({ createOnly: true, memfs: false });
-    expect(args).toContain("--no-memfs");
-    expect(args).not.toContain("--memfs");
+  test("stale memfsStartup input is not forwarded", () => {
+    const args = buildCliArgs({
+      createOnly: true,
+      memfsStartup: "skip",
+    } as Parameters<typeof buildCliArgs>[0] & { memfsStartup: string });
+    expect(args).toContain("--memfs");
+    expect(args).not.toContain("--memfs-startup");
   });
 });

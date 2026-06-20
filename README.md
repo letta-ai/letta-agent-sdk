@@ -25,12 +25,6 @@ import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
 // spawns/manages the app-server process for you.
 const localClient = new LettaCodeClient({ backend: "local" });
 
-// Legacy local stdio transport remains available as an explicit fallback.
-const legacyLocalClient = new LettaCodeClient({
-  backend: "local",
-  transport: "stdio",
-});
-
 // Remote: connect to a user-managed Letta Code app-server over websockets.
 const remoteClient = new LettaCodeClient({
   backend: "remote",
@@ -40,11 +34,12 @@ const remoteClient = new LettaCodeClient({
   authToken: process.env.LETTA_APP_SERVER_TOKEN,
 });
 
-// Cloud remains a typed placeholder in this release. Construction succeeds,
-// but using it will throw until the transport is implemented.
+// Cloud: control an explicit Letta Cloud remote environment over the
+// Remote Client websocket protocol. SDK-managed sandboxes are a fast follow.
 const client = new LettaCodeClient({
   backend: "cloud",
-  environment: { name: "Cameron's MacMini" }, // optional default
+  apiKey: process.env.LETTA_API_KEY,
+  environment: { connectionId: process.env.LETTA_ENVIRONMENT_CONNECTION_ID! },
 });
 ```
 
@@ -59,8 +54,7 @@ const agentId = await client.createAgent({
   persona: "You are a helpful coding assistant for TypeScript projects.",
 });
 
-// SDK-created agents have MemFS enabled by default and include the
-// origin:letta-code tag. Set memfs: false to explicitly opt out.
+// SDK-created agents always use MemFS and include the origin:letta-code tag.
 await using session = client.resumeSession(agentId);
 
 await session.send("Find and fix the bug in auth.ts");
@@ -76,8 +70,8 @@ for await (const msg of session.stream()) {
 
 By default, `resumeSession(agentId)` continues the agent’s default conversation. To start a fresh thread, use `createSession(agentId)` (see docs). App-server sessions require an explicit agent id; default/LRU local-agent selection (`createSession()` with no agent id) remains available through the legacy local stdio fallback.
 
-For remote/cloud backends, `environment` is session-scoped and can override the
-client's default execution target once those backends are implemented:
+For cloud backends, `environment` is session-scoped and can override the
+client default. Remote app-server URLs already select their runtime:
 
 ```ts
 await using session = client.resumeSession(agentId, {
@@ -86,9 +80,7 @@ await using session = client.resumeSession(agentId, {
 ```
 
 The top-level helpers (`createAgent`, `createSession`, `resumeSession`, and
-`prompt`) remain available. They use the local app-server path when an agent id
-is present; `createSession()`/`prompt()` without an agent id keep the historical
-default/LRU-agent behavior through the legacy local stdio fallback.
+`prompt`) remain available for local app-server sessions.
 
 ### User-managed app-server backend
 
@@ -118,53 +110,81 @@ console.log(result.result);
 
 ### Letta Cloud backend
 
-`backend: "cloud"` remains a typed placeholder until the Cloud / Constellation
-transport is implemented.
-
-
-### Remote environments (ACK-only dispatch)
-
-The SDK can also address a Letta Code remote environment through the Cloud
-remote-environment API. Treat the agent and conversation as the stable actor;
-treat the remote as an execution target that may be online or offline.
+Use `backend: "cloud"` to create or resume Cloud-hosted agents while running
+turns in an explicit Letta Cloud remote environment. The current SDK requires
+callers to supply `environment`; SDK-managed Cloud sandbox lifecycle is not yet
+available. Once connected, the SDK uses the Remote Client
+websocket protocol for
+`sync`, `input/create_message`, streaming deltas, approval responses, model
+updates, toolset updates, cwd/mode device-state updates, and heartbeats.
 
 ```ts
-import { createRemoteAgent } from "@letta-ai/letta-code-sdk";
-
-const agent = createRemoteAgent({
+const client = new LettaCodeClient({
+  backend: "cloud",
   apiKey: process.env.LETTA_API_KEY,
-  agentId: "agent-123",
-  conversationId: "conv-456",
-  target: { deviceId: "work-laptop" },
-  fallback: "fail_if_unavailable",
+  // Required until SDK-managed Cloud sandboxes land.
+  environment: { connectionId: process.env.LETTA_ENVIRONMENT_CONNECTION_ID! },
 });
 
-const dispatch = await agent.tell("Pull main, run tests, and summarize failures.");
-console.log(dispatch.connectionId, dispatch.clientMessageId);
+const agentId = await client.createAgent({
+  model: "anthropic/claude-sonnet-4",
+  persona: "You are a helpful coding assistant.",
+});
+
+await using session = client.resumeSession(agentId, {
+  cwd: process.cwd(),
+  permissionMode: "bypassPermissions",
+});
+
+const result = await session.runTurn("Summarize this repository.");
+console.log(result.result);
 ```
 
-Remote dispatch currently acknowledges that the message reached the selected
-Letta Code environment. It does **not** yet stream the final answer through this
-SDK surface. The API is intentionally shaped around stable targets (`deviceId`,
-`environmentId`, `lastUsed`) instead of making application code depend on the
-current ephemeral `connectionId`.
+You can set a default `environment` on the client or override it per session:
+
+```ts
+const client = new LettaCodeClient({
+  backend: "cloud",
+  apiKey: process.env.LETTA_API_KEY,
+  environment: { connectionId: "conn-default" },
+});
+
+await using session = client.resumeSession(agentId, {
+  environment: { connectionId: "conn-123" },
+});
+```
+
+SDK-managed Cloud sandbox lifecycle is not yet exposed by this SDK path. Passing
+legacy `sandbox` options fails fast; pass an explicit `environment` instead.
+
+By default, websocket authentication uses `Authorization` headers. Set
+`webSocketAuth: "query"` for browser-style websocket clients that cannot send
+custom upgrade headers.
 
 ## Session configuration
 
-The SDK surfaces the same runtime controls as Letta Code CLI for skills, reminders, and sleeptime:
+App-server and Cloud sessions use the remote/listener protocol for runtime
+controls that can be applied to an existing agent, including `model`,
+toolset preference, sleeptime trigger settings, `cwd`, and `permissionMode`.
+MemFS is enabled for SDK-created agents and is not configurable through SDK options.
+CLI-only flags such as `skillSources`, `systemInfoReminder`,
+`sleeptime.behavior`, and partial-message toggles are rejected on
+app-server/Cloud sessions until those controls are wired through the remote
+protocol.
 
 ```ts
-import { createSession } from "@letta-ai/letta-code-sdk";
+import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
 
-const session = createSession("agent-123", {
-  skillSources: ["project", "global"], // [] disables all skills (--no-skills)
-  systemInfoReminder: false, // maps to --no-system-info-reminder
+const client = new LettaCodeClient({ backend: "local" });
+
+const session = client.resumeSession("agent-123", {
+  model: "anthropic/claude-sonnet-4",
+  cwd: process.cwd(),
+  permissionMode: "bypassPermissions",
   sleeptime: {
     trigger: "step-count", // off | step-count | compaction-event
-    behavior: "reminder", // reminder | auto-launch
     stepCount: 8,
   },
-  memfs: true, // true -> --memfs, false -> --no-memfs
 });
 ```
 

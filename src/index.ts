@@ -107,26 +107,6 @@ export type {
 export { Session } from "./session.js";
 export { LettaCodeClient } from "./client.js";
 
-export {
-  RemoteAgent,
-  RemoteEnvironmentClient,
-  createRemoteAgent,
-} from "./remote.js";
-
-export type {
-  RemoteAgentOptions,
-  RemoteEnvironmentClientOptions,
-  RemoteEnvironmentConnection,
-  RemoteEnvironmentFallback,
-  RemoteEnvironmentListResult,
-  RemoteEnvironmentTarget,
-  RemoteMessageDispatchResult,
-  RemoteRuntimeLastEnvironment,
-  ResolvedRemoteEnvironment,
-  ResolveRemoteEnvironmentOptions,
-  SendRemoteMessageOptions,
-} from "./remote.js";
-
 export { extractStreamTextDelta } from "./stream-events.js";
 
 // Tool helpers
@@ -155,9 +135,6 @@ export {
  *   model: 'claude-sonnet-4',
  *   tags: ['project:docs'] // origin:letta-code is added automatically
  * });
- *
- * // Explicitly opt out of MemFS
- * const agentId = await createAgent({ memfs: false });
  *
  * // Then resume the default conversation:
  * const session = resumeSession(agentId);

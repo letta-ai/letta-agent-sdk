@@ -56,6 +56,14 @@ function validateApprovalRecoveryOptions(options: CreateSessionOptions): void {
   }
 }
 
+function validateRemovedSessionOptions(options: CreateSessionOptions): void {
+  if ((options as { memfsStartup?: unknown }).memfsStartup !== undefined) {
+    throw new Error(
+      "memfsStartup is not supported by the SDK. SDK-managed agents use the harness default MemFS behavior.",
+    );
+  }
+}
+
 /**
  * Validate systemPrompt preset value.
  */
@@ -136,6 +144,7 @@ export function validateCreateSessionOptions(options: CreateSessionOptions): voi
   validateSkillSources(options.skillSources);
   validateSleeptimeOptions(options.sleeptime);
   validateApprovalRecoveryOptions(options);
+  validateRemovedSessionOptions(options);
 }
 
 /**

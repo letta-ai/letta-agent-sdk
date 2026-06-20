@@ -69,6 +69,14 @@ describe("validation", () => {
     ).toThrow("Invalid approvalRecoveryTimeoutMs");
   });
 
+  test("rejects removed memfsStartup option", () => {
+    expect(() =>
+      validateCreateSessionOptions({
+        memfsStartup: "skip",
+      } as Parameters<typeof validateCreateSessionOptions>[0] & { memfsStartup: string }),
+    ).toThrow("memfsStartup is not supported");
+  });
+
   test("rejects invalid agent skill source", () => {
     expect(() =>
       validateCreateAgentOptions({

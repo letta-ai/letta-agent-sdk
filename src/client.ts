@@ -3,6 +3,12 @@ import {
   AppServerSession,
   assertRemoteSessionOptionsSupported,
 } from "./app-server-session.js";
+import {
+  CloudEnvironmentSession,
+  assertCloudSessionOptionsSupported,
+  createCloudAgent,
+  validateCloudClientOptions,
+} from "./cloud-session.js";
 import type {
   CreateAgentOptions,
   CreateSessionOptions,
@@ -12,6 +18,7 @@ import type {
   LettaCodeEnvironment,
   LettaCodeRemoteClientOptions,
   LettaCodeLocalClientOptions,
+  LettaCodeCloudClientOptions,
   LettaCodeSession,
   SDKResultMessage,
   SendMessage,
@@ -63,8 +70,8 @@ function looksLikeConversationId(id: string): boolean {
  * `local` spawns an SDK-owned Letta Code app-server and speaks the websocket
  * protocol by default, with an explicit stdio fallback for legacy flows.
  * `remote` connects to a user-managed Letta Code app-server websocket endpoint.
- * `cloud` remains a typed placeholder for the upcoming Letta Cloud /
- * Constellation transport.
+ * `cloud` connects to an explicit Letta Cloud remote environment and controls
+ * it over the Remote Client websocket protocol.
  */
 export class LettaCodeClient {
   readonly backend: LettaCodeBackend;
@@ -85,7 +92,12 @@ export class LettaCodeClient {
 
     if (this.backend === "local" && this.environment !== undefined) {
       throw new Error(
-        "LettaCodeClient environment is only valid for remote/cloud backends.",
+        "LettaCodeClient environment is only valid for cloud backends.",
+      );
+    }
+    if (this.backend === "remote" && this.environment !== undefined) {
+      throw new Error(
+        "LettaCodeClient environment is only valid for the cloud backend; remote url selects the app-server runtime.",
       );
     }
 
@@ -125,6 +137,10 @@ export class LettaCodeClient {
         throw new Error("Invalid requestTimeoutMs. Expected a positive integer.");
       }
     }
+
+    if (this.backend === "cloud") {
+      validateCloudClientOptions(options as LettaCodeCloudClientOptions);
+    }
   }
 
   /**
@@ -150,6 +166,9 @@ export class LettaCodeClient {
       const initMsg = await session.initialize();
       session.close();
       return initMsg.agentId;
+    }
+    if (this.backend === "cloud") {
+      return createCloudAgent(this.cloudOptions(), options);
     }
     this.assertLocalBackend("createAgent");
     if (!this.useLegacyLocalStdio()) {
@@ -199,6 +218,19 @@ export class LettaCodeClient {
         options: resolvedOptions,
       });
     }
+    if (this.backend === "cloud") {
+      if (!agentId) {
+        throw new Error(
+          "Cloud backend createSession() requires an agent id. Call createAgent() first or pass an agent id.",
+        );
+      }
+      return new CloudEnvironmentSession(this.cloudOptions(), {
+        kind: "session",
+        agentId,
+        newConversation: true,
+        options: resolvedOptions,
+      });
+    }
     if (!this.useLegacyLocalStdio() && agentId) {
       return new AppServerSession(this.localAppServerOptions(), {
         kind: "session",
@@ -217,7 +249,7 @@ export class LettaCodeClient {
    * Resume an existing agent default conversation or a specific conversation.
    *
    * `options.environment` overrides the client's default execution target for
-   * remote/cloud backends.
+   * cloud backends. Remote app-server URLs already select the runtime.
    */
   resumeSession(
     id: string,
@@ -236,6 +268,21 @@ export class LettaCodeClient {
         });
       }
       return new AppServerSession(this.remoteOptions(), {
+        kind: "session",
+        agentId: id,
+        defaultConversation: true,
+        options,
+      });
+    }
+    if (this.backend === "cloud") {
+      if (looksLikeConversationId(id)) {
+        return new CloudEnvironmentSession(this.cloudOptions(), {
+          kind: "session",
+          conversationId: id,
+          options,
+        });
+      }
+      return new CloudEnvironmentSession(this.cloudOptions(), {
         kind: "session",
         agentId: id,
         defaultConversation: true,
@@ -302,7 +349,7 @@ export class LettaCodeClient {
     if (this.backend === "local") {
       if (effectiveEnvironment !== undefined) {
         throw new Error(
-          `${action}() environment overrides are only valid for remote/cloud backends.`,
+          `${action}() environment overrides are only valid for cloud backends.`,
         );
       }
       if (!this.useLegacyLocalStdio()) {
@@ -312,7 +359,16 @@ export class LettaCodeClient {
     }
 
     if (this.backend === "remote") {
+      if (options.environment !== undefined) {
+        throw new Error(
+          `${action}() environment overrides are only valid for cloud backends; remote url selects the app-server runtime.`,
+        );
+      }
       assertRemoteSessionOptionsSupported(action, options);
+      return;
+    }
+    if (this.backend === "cloud") {
+      assertCloudSessionOptionsSupported(action, options);
       return;
     }
     throw new Error(
@@ -346,5 +402,12 @@ export class LettaCodeClient {
       throw new Error("Remote options requested for non-remote backend.");
     }
     return this.options as LettaCodeRemoteClientOptions;
+  }
+
+  private cloudOptions(): LettaCodeCloudClientOptions {
+    if (this.backend !== "cloud") {
+      throw new Error("Cloud options requested for non-cloud backend.");
+    }
+    return this.options as LettaCodeCloudClientOptions;
   }
 }

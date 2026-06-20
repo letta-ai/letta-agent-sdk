@@ -67,7 +67,7 @@ export interface RunTurnOptions {
   maxApprovalRecoveryAttempts?: number;
 
   /**
-   * Timeout in milliseconds for each recover_pending_approvals request.
+   * Timeout in milliseconds for each approval recovery request.
    * Overrides session-level approvalRecoveryTimeoutMs when provided.
    */
   recoveryTimeoutMs?: number;
@@ -263,7 +263,7 @@ export type AnyAgentTool = AgentTool<any, unknown>;
  *
  * - local: spawn/manage a local Letta Code app-server over loopback websockets.
  * - remote: connect to a user-managed app-server over websockets.
- * - cloud: connect through Letta Cloud/Constellation. Placeholder for now.
+ * - cloud: connect to an explicit Letta Cloud remote environment over the Remote Client websocket.
  */
 export type LettaCodeBackend = "local" | "remote" | "cloud";
 
@@ -271,10 +271,14 @@ export type LettaCodeBackend = "local" | "remote" | "cloud";
  * Stable execution target for remote/cloud runtimes.
  *
  * Strings are treated as human-readable environment names. Object forms allow
- * callers to avoid relying on names as unique identifiers once backend support
- * is implemented.
+ * callers to avoid relying on names as unique identifiers.
  */
-export type LettaCodeEnvironment = string | { name: string } | { id: string };
+export type LettaCodeEnvironment =
+  | string
+  | { name: string }
+  | { id: string }
+  | { connectionId: string }
+  | { deviceId: string };
 
 export interface LettaCodeLocalAppServerOptions {
   /**
@@ -313,8 +317,6 @@ export interface LettaCodeRemoteClientOptions {
   WebSocket?: LettaCodeSocketConstructor;
   /** Timeout for app-server request/turn correlation. Defaults to app-server client default. */
   requestTimeoutMs?: number;
-  /** Optional default execution target, overridable at session creation. */
-  environment?: LettaCodeEnvironment;
 }
 
 export interface LettaCodeCloudClientOptions {
@@ -323,7 +325,27 @@ export interface LettaCodeCloudClientOptions {
   apiKey?: string;
   /** Optional API base URL override. Defaults to Letta Cloud. */
   apiBaseUrl?: string;
-  /** Optional default execution target, overridable at session creation. */
+  /** Optional extra HTTP headers for Cloud API requests. */
+  headers?: Record<string, string>;
+  /** Optional fetch implementation for tests/non-standard runtimes. */
+  fetch?: typeof fetch;
+  /** Optional WebSocket constructor for non-browser runtimes and tests. */
+  WebSocket?: LettaCodeSocketConstructor;
+  /** Timeout for cloud websocket request/turn correlation. */
+  requestTimeoutMs?: number;
+  /**
+   * WebSocket authentication style. Defaults to Authorization headers; set to
+   * query for browser-style clients that cannot send WebSocket headers.
+   */
+  webSocketAuth?: "header" | "query";
+  /** Heartbeat interval for the Cloud status websocket. Defaults to 30s. */
+  pingIntervalMs?: number;
+  /**
+   * Advanced local app-server overrides used by cloud createAgent().
+   * Omit to let the SDK spawn a bundled local app-server authenticated to Cloud.
+   */
+  appServer?: LettaCodeLocalAppServerOptions;
+  /** Execution target for direct Cloud sessions; required here or per session. */
   environment?: LettaCodeEnvironment;
 }
 
@@ -370,9 +392,6 @@ export interface InternalSessionOptions {
   // Tags (only for new agents)
   tags?: string[];
 
-  // Memory filesystem (only for new agents)
-  memfs?: boolean;
-
   // Skills/reminders
   skillSources?: SkillSource[];
   systemInfoReminder?: boolean;
@@ -400,15 +419,10 @@ export interface InternalSessionOptions {
   maxApprovalRecoveryAttempts?: number;
 
   /**
-   * Timeout in milliseconds for a single recover_pending_approvals control request.
+   * Timeout in milliseconds for a single approval recovery request.
    */
   approvalRecoveryTimeoutMs?: number;
 
-  /**
-   * Controls how the git-backed memory pull runs at session startup.
-   * Maps to --memfs-startup <blocking|background|skip> CLI flag.
-   */
-  memfsStartup?: "blocking" | "background" | "skip";
 }
 
 export type PermissionMode =
@@ -439,12 +453,6 @@ export interface CreateSessionOptions {
 
   /** Working directory for the CLI process */
   cwd?: string;
-
-  /**
-   * Enable/disable memory filesystem for this agent before running.
-   * true -> `--memfs`, false -> `--no-memfs`, undefined -> leave unchanged.
-   */
-  memfs?: boolean;
 
   /**
    * Restrict available skills by source.
@@ -485,26 +493,16 @@ export interface CreateSessionOptions {
   maxApprovalRecoveryAttempts?: number;
 
   /**
-   * Timeout in milliseconds for a single recover_pending_approvals control request.
+   * Timeout in milliseconds for a single approval recovery request.
    */
   approvalRecoveryTimeoutMs?: number;
 
-  /**
-   * Controls how the git-backed memory pull runs at session startup.
-   *
-   * - "blocking"  (default): await pull before emitting init; exit on conflict.
-   * - "background": fire pull async; session init proceeds immediately.
-   * - "skip": skip the pull entirely this session (fastest cold-open).
-   *
-   * Maps to the CLI --memfs-startup flag.
-   */
-  memfsStartup?: "blocking" | "background" | "skip";
 }
 
 /**
  * Session options accepted by LettaCodeClient methods.
  *
- * `environment` is a remote/cloud execution-target override. It is deliberately
+ * `environment` is a cloud execution-target override. It is deliberately
  * session-scoped rather than part of createAgent() options.
  */
 export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
@@ -519,6 +517,8 @@ export interface LettaCodeSession extends AsyncDisposable {
   recoverPendingApprovals(
     options?: RecoverPendingApprovalsOptions,
   ): Promise<RecoverPendingApprovalsResult>;
+  /** Update the active remote/listener toolset preference for this session. */
+  updateToolset(toolsetPreference: string): Promise<void>;
   listMessages(options?: ListMessagesOptions): Promise<ListMessagesResult>;
   bootstrapState(options?: BootstrapStateOptions): Promise<BootstrapStateResult>;
   close(): void;
@@ -587,12 +587,6 @@ export interface CreateAgentOptions {
   tags?: string[];
 
   /**
-   * Enable git-backed memory filesystem for this newly created agent.
-   * Defaults to enabled; set false to explicitly opt out during creation.
-   */
-  memfs?: boolean;
-
-  /**
    * Restrict available skills by source.
    * Empty array disables all skills (`--no-skills`).
    */
@@ -623,7 +617,8 @@ export interface SDKInitMessage {
   sessionId: string;
   conversationId: string;
   model: string;
-  tools: string[];
+  /** Backend-reported tool names, when the transport exposes an authoritative list. */
+  tools?: string[];
   memfsEnabled?: boolean;
   skillSources?: SkillSource[];
   systemInfoReminderEnabled?: boolean;
@@ -820,13 +815,15 @@ export interface ListMessagesOptions {
 
 /**
  * Result from session.listMessages().
- * `messages` are raw Letta API message objects in the requested order.
+ * `messages` are raw Letta API message objects in the requested order. Cursor
+ * metadata is backend-supplied and omitted when the backend does not expose an
+ * authoritative pagination answer.
  */
 export interface ListMessagesResult {
   messages: unknown[];
-  /** ID of the oldest message in this page; use as `before` for the next page. */
+  /** ID of the oldest message in this page; use as `before` for the next page when present. */
   nextBefore?: string | null;
-  /** Whether more pages exist in the requested direction. */
+  /** Whether more pages exist in the requested direction, when known. */
   hasMore?: boolean;
 }
 
@@ -847,8 +844,9 @@ export interface BootstrapStateOptions {
 /**
  * Result from session.bootstrapState().
  *
- * Contains all data needed to render the initial conversation view
- * without additional round-trips.
+ * Contains best-effort data needed to render the initial conversation view
+ * without additional round-trips. Backend-derived booleans/cursors are omitted
+ * when the remote/app-server backend does not expose an authoritative value.
  */
 export interface BootstrapStateResult {
   /** Resolved agent ID for this session. */
@@ -857,18 +855,18 @@ export interface BootstrapStateResult {
   conversationId: string;
   /** LLM model handle. */
   model: string | undefined;
-  /** Tool names registered on the agent. */
-  tools: string[];
-  /** Whether memfs (git-backed memory) is enabled. */
-  memfsEnabled: boolean;
+  /** Backend-reported tool names, when the transport exposes an authoritative list. */
+  tools?: string[];
+  /** Whether memfs (git-backed memory) is enabled, when known. */
+  memfsEnabled?: boolean;
   /** Initial history page (same shape as listMessages.messages). */
   messages: unknown[];
-  /** Cursor to fetch older messages. Null when no more pages. */
-  nextBefore: string | null;
-  /** Whether more history pages exist. */
-  hasMore: boolean;
-  /** Whether there is a pending approval waiting for a response. */
-  hasPendingApproval: boolean;
+  /** Cursor to fetch older messages. Null when the backend knows there are no more pages. */
+  nextBefore?: string | null;
+  /** Whether more history pages exist, when known. */
+  hasMore?: boolean;
+  /** Whether there is a pending approval waiting for a response, when known. */
+  hasPendingApproval?: boolean;
   /** Wall-clock timing breakdown in milliseconds (if provided by CLI). */
   timings?: {
     resolve_ms: number;
