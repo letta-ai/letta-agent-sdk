@@ -38,7 +38,9 @@ import type {
   CreateSessionOptions,
   CreateAgentOptions,
   LettaCodeSession,
+  SDKInitMessage,
   SDKResultMessage,
+  SendMessage,
 } from "./types.js";
 import { validateCreateSessionOptions, validateCreateAgentOptions } from "./validation.js";
 
@@ -204,8 +206,7 @@ export function resumeSession(
  *
  * - Without agentId: uses default agent (like `letta -p`), new conversation
  * - With agentId: uses specific agent, new conversation
- * - Uses `session.runTurn()` under the hood, including bounded SDK-managed
- *   approval-conflict recovery (default 1 attempt)
+ * - Uses a short-lived session and returns the final turn result.
  *
  * @example
  * ```typescript
@@ -213,6 +214,14 @@ export function resumeSession(
  * const result = await prompt('What is the capital of France?', agentId);  // specific agent
  * ```
  */
+type TurnSession = LettaCodeSession & {
+  runTurn(message: SendMessage): Promise<SDKResultMessage>;
+};
+
+type InitializableSession = LettaCodeSession & {
+  initialize(): Promise<SDKInitMessage>;
+};
+
 export async function prompt(
   message: string,
   agentId?: string
@@ -223,7 +232,7 @@ export async function prompt(
     : createSession();
 
   try {
-    return await session.runTurn(message);
+    return await (session as TurnSession).runTurn(message);
   } finally {
     session.close();
   }
@@ -242,7 +251,7 @@ import type { ListMessagesOptions, ListMessagesResult } from "./types.js";
  * closes the subprocess.  Useful for prefetching conversation histories before
  * opening a full session (e.g. desktop sidebar warm-up).
  *
- * Routing follows the same semantics as session.listMessages():
+ * Routing follows the same agent/conversation semantics as session history:
  * - Pass a conv-xxx conversationId to read a specific conversation.
  * - Omit conversationId to read the agent's default conversation.
  *
@@ -271,7 +280,7 @@ export async function listMessagesDirect(
   const session = new LettaCodeClient().resumeSession(agentId, {
     permissionMode: "bypassPermissions",
   });
-  await session.initialize();
+  await (session as InitializableSession).initialize();
   try {
     return await session.listMessages(options);
   } finally {

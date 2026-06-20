@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { LettaCodeClient } from "../index.js";
+import { asAdvanced } from "./advanced-session.js";
 
 type Listener = (event: unknown) => void;
 type FetchInput = Parameters<typeof fetch>[0];
@@ -483,14 +484,14 @@ describe("CloudEnvironmentSession", () => {
     });
 
     const session = client.resumeSession("agent-1");
-    await expect(session.initialize()).rejects.toThrow(
+    await expect(asAdvanced(session).initialize()).rejects.toThrow(
       "Cloud backend requires an environment target until managed Cloud sandboxes land",
     );
 
-    await expect(client.createSession("agent-1").initialize()).rejects.toThrow(
+    await expect(asAdvanced(client.createSession("agent-1")).initialize()).rejects.toThrow(
       "Cloud backend requires an environment target until managed Cloud sandboxes land",
     );
-    await expect(client.resumeSession("conv-1").initialize()).rejects.toThrow(
+    await expect(asAdvanced(client.resumeSession("conv-1")).initialize()).rejects.toThrow(
       "Cloud backend requires an environment target until managed Cloud sandboxes land",
     );
 
@@ -517,7 +518,7 @@ describe("CloudEnvironmentSession", () => {
       permissionMode: "bypassPermissions",
       sleeptime: { trigger: "step-count", stepCount: 3 },
     });
-    const init = await session.initialize();
+    const init = await asAdvanced(session).initialize();
 
     expect(init).toMatchObject({
       type: "init",
@@ -558,14 +559,14 @@ describe("CloudEnvironmentSession", () => {
     }));
     expect(controlSocket.sent.some((command) => command.type === "change_device_state")).toBe(false);
 
-    await session.updateToolset("developer");
+    await asAdvanced(session).updateToolset("developer");
     expect(controlSocket.sent).toContainEqual(expect.objectContaining({
       type: "update_toolset",
       runtime: { agent_id: "agent-1", conversation_id: "default" },
       toolset_preference: "developer",
     }));
 
-    await expect(session.recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
+    await expect(asAdvanced(session).recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
       recovered: true,
       unsupported: false,
     });
@@ -577,7 +578,7 @@ describe("CloudEnvironmentSession", () => {
       request_id: expect.any(String),
     }));
 
-    const result = await session.runTurn("hello");
+    const result = await asAdvanced(session).runTurn("hello");
     expect(result).toMatchObject({
       type: "result",
       success: true,
@@ -616,7 +617,7 @@ describe("CloudEnvironmentSession", () => {
     });
 
     const session = client.resumeSession("agent-1");
-    await session.initialize();
+    await asAdvanced(session).initialize();
 
     expect(requests.some((request) => new URL(request.url).pathname.includes("/sandboxes"))).toBe(false);
     const socketUrl = new URL(FakeCloudSocket.instances[0]!.url);
@@ -646,7 +647,7 @@ describe("CloudEnvironmentSession", () => {
 
     const session = client.resumeSession("agent-1");
     try {
-      const result = await session.runTurn("hello");
+      const result = await asAdvanced(session).runTurn("hello");
       expect(result).toMatchObject({
         success: true,
         result: "hello once",
@@ -676,8 +677,8 @@ describe("CloudEnvironmentSession", () => {
 
     const session = client.resumeSession("agent-1");
     try {
-      await session.initialize();
-      await expect(session.recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
+      await asAdvanced(session).initialize();
+      await expect(asAdvanced(session).recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
         recovered: false,
         unsupported: false,
         detail: "sync failed",
@@ -702,7 +703,7 @@ describe("CloudEnvironmentSession", () => {
 
     const session = client.resumeSession("agent-1");
     try {
-      await session.initialize();
+      await asAdvanced(session).initialize();
       const controlSocket = FakeCloudSocket.socket("control")!;
       const streamSocket = FakeCloudSocket.socket("stream")!;
       const syncCount = controlSocket.sent.filter((command) => command.type === "sync").length;
@@ -849,7 +850,7 @@ describe("CloudEnvironmentSession", () => {
 
     const session = client.resumeSession("conv-1");
     try {
-      const state = await session.bootstrapState({ limit: 3 });
+      const state = await asAdvanced(session).bootstrapState({ limit: 3 });
       expect(state).toMatchObject({
         agentId: "agent-from-conv",
         conversationId: "conv-1",
@@ -890,7 +891,7 @@ describe("CloudEnvironmentSession", () => {
     });
 
     const session = client.resumeSession("agent-1");
-    await session.initialize();
+    await asAdvanced(session).initialize();
 
     const environmentRequest = requests.find((request) => new URL(request.url).pathname === "/v1/environments");
     expect(requests.some((request) => new URL(request.url).pathname.includes("/sandboxes"))).toBe(false);
@@ -978,7 +979,7 @@ describe("CloudEnvironmentSession", () => {
       },
     });
 
-    const result = await session.runTurn("run pwd");
+    const result = await asAdvanced(session).runTurn("run pwd");
 
     expect(result).toMatchObject({ success: true, result: "approved" });
     expect(decisions).toEqual([{ toolName: "Bash", input: { command: "pwd" } }]);
@@ -1044,7 +1045,7 @@ describe("CloudEnvironmentSession", () => {
     });
 
     try {
-      const init = await session.initialize();
+      const init = await asAdvanced(session).initialize();
       expect(init.tools).toBeUndefined();
 
       const controlSocket = FakeCloudSocket.socket("control")!;
@@ -1169,7 +1170,7 @@ describe("CloudEnvironmentSession", () => {
     });
 
     const session = client.resumeSession("agent-1");
-    const result = await session.runTurn("trigger failure");
+    const result = await asAdvanced(session).runTurn("trigger failure");
 
     expect(result).toMatchObject({
       type: "result",
@@ -1200,7 +1201,7 @@ describe("CloudEnvironmentSession", () => {
     });
 
     const session = client.resumeSession("agent-1");
-    const result = await session.runTurn("trigger delayed failure");
+    const result = await asAdvanced(session).runTurn("trigger delayed failure");
 
     expect(result).toMatchObject({
       type: "result",
