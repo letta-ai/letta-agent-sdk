@@ -263,7 +263,8 @@ export type AnyAgentTool = AgentTool<any, unknown>;
  *
  * - local: spawn/manage a local Letta Code app-server over loopback websockets.
  * - remote: connect to a user-managed app-server over websockets.
- * - cloud: connect to an explicit Letta Cloud remote environment over the Remote Client websocket.
+ * - cloud: use agents hosted on Constellation, with an explicit remote
+ *   environment or SDK-managed sandbox.
  */
 export type LettaCodeBackend = "local" | "remote" | "cloud";
 
@@ -321,7 +322,7 @@ export interface LettaCodeRemoteClientOptions {
 
 export interface LettaCodeCloudSandboxOptions {
   /**
-   * TTL to request when refreshing an SDK-managed Cloud sandbox. Defaults to 5
+   * TTL to request when refreshing an SDK-managed sandbox. Defaults to 5
    * minutes, matching the Cloud API default. Valid range: 1-60.
    */
   ttlMinutes?: number;
@@ -342,7 +343,7 @@ export interface LettaCodeCloudClientOptions {
   backend: "cloud";
   /** Optional API key override. Defaults to LETTA_API_KEY / existing auth. */
   apiKey?: string;
-  /** Optional API base URL override. Defaults to Letta Cloud. */
+  /** Optional API base URL override. Defaults to the Letta API. */
   apiBaseUrl?: string;
   /** Optional extra HTTP headers for Cloud API requests. */
   headers?: Record<string, string>;
@@ -365,11 +366,11 @@ export interface LettaCodeCloudClientOptions {
    */
   appServer?: LettaCodeLocalAppServerOptions;
   /**
-   * Execution target for direct Cloud sessions. If omitted, the SDK creates and
-   * owns a Cloud sandbox for the session.
+   * Execution target for Constellation sessions. If omitted, the SDK creates
+   * and owns a sandbox for the session.
    */
   environment?: LettaCodeEnvironment;
-  /** Options for SDK-managed Cloud sandboxes when environment is omitted. */
+  /** Options for SDK-managed sandboxes when environment is omitted. */
   sandbox?: LettaCodeCloudSandboxOptions;
 }
 
@@ -531,7 +532,7 @@ export interface CreateSessionOptions {
  */
 export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
   environment?: LettaCodeEnvironment;
-  /** Per-session SDK-managed Cloud sandbox options when environment is omitted. */
+  /** Per-session SDK-managed sandbox options when environment is omitted. */
   sandbox?: LettaCodeCloudSandboxOptions;
 }
 

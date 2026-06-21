@@ -258,7 +258,7 @@ export function validateCloudClientOptions(options: LettaCodeCloudClientOptions)
   validatePositiveInteger(options.appServer?.startupTimeoutMs, "appServer.startupTimeoutMs");
   validateCloudSandboxOptions(options.sandbox, "sandbox");
   if (options.environment !== undefined && options.sandbox !== undefined) {
-    throw new Error("Cloud backend cannot specify both environment and sandbox options.");
+    throw new Error("Constellation sessions cannot specify both environment and sandbox options.");
   }
   if (
     options.webSocketAuth !== undefined &&
@@ -461,7 +461,7 @@ function createCloudStatusWebSocketConstructor(params: {
 
       this.ackIfSequenced(message);
 
-      // Cloud's status gateway can mirror device stream frames to the control
+      // The status gateway can mirror device stream frames to the control
       // subscriber. Drop them at the Cloud transport boundary instead of making
       // shared app-server session code understand Cloud fanout quirks. Do this
       // before idempotency/event tracking so the canonical stream-channel frame
@@ -636,28 +636,28 @@ export function assertCloudSessionOptionsSupported(
 ): void {
   validateCloudSandboxOptions(options.sandbox, "sandbox");
   if (options.environment !== undefined && options.sandbox !== undefined) {
-    throw new Error(`Cloud backend ${action}() cannot specify both environment and sandbox options.`);
+    throw new Error(`Constellation ${action}() cannot specify both environment and sandbox options.`);
   }
   if (options.systemPrompt !== undefined) {
-    throw new Error(`Cloud backend ${action}() cannot rewrite an existing agent's systemPrompt from the SDK adapter yet.`);
+    throw new Error(`Constellation ${action}() cannot rewrite an existing agent's systemPrompt from the SDK adapter yet.`);
   }
   if (options.allowedTools !== undefined || options.disallowedTools !== undefined) {
-    throw new Error(`Cloud backend ${action}() has not wired allowedTools/disallowedTools to the remote device protocol yet.`);
+    throw new Error(`Constellation ${action}() has not wired allowedTools/disallowedTools to the remote device protocol yet.`);
   }
   if (options.skillSources !== undefined) {
-    throw new Error(`Cloud backend ${action}() has not wired skillSources to the remote device protocol yet.`);
+    throw new Error(`Constellation ${action}() has not wired skillSources to the remote device protocol yet.`);
   }
   if (options.systemInfoReminder !== undefined) {
-    throw new Error(`Cloud backend ${action}() has not wired systemInfoReminder to the remote device protocol yet.`);
+    throw new Error(`Constellation ${action}() has not wired systemInfoReminder to the remote device protocol yet.`);
   }
   if (options.sleeptime?.behavior !== undefined) {
-    throw new Error(`Cloud backend ${action}() has not wired sleeptime.behavior to the remote device protocol yet.`);
+    throw new Error(`Constellation ${action}() has not wired sleeptime.behavior to the remote device protocol yet.`);
   }
   if ((options as { memfsStartup?: unknown }).memfsStartup !== undefined) {
-    throw new Error(`Cloud backend ${action}() does not support memfsStartup.`);
+    throw new Error(`Constellation ${action}() does not support memfsStartup.`);
   }
   if (options.includePartialMessages !== undefined) {
-    throw new Error(`Cloud backend ${action}() streams Remote Client deltas directly; includePartialMessages is not a separate toggle.`);
+    throw new Error(`Constellation ${action}() streams Remote Client deltas directly; includePartialMessages is not a separate toggle.`);
   }
 }
 
@@ -816,7 +816,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
 
     if (!agentId || !conversationId) {
       throw new Error(
-        "Cloud backend createSession()/resumeSession() requires an agent id or conversation id.",
+        "Constellation createSession()/resumeSession() requires an agent id or conversation id.",
       );
     }
 
@@ -863,7 +863,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     const sandboxOptions = this.effectiveSandboxOptions();
     if (environment !== undefined) {
       if (sandboxOptions !== undefined) {
-        throw new Error("Cloud backend cannot specify both environment and sandbox options.");
+        throw new Error("Constellation sessions cannot specify both environment and sandbox options.");
       }
       return this.resolveExplicitConnection(environment);
     }

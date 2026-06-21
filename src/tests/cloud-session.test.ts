@@ -1273,7 +1273,7 @@ describe("CloudEnvironmentSession", () => {
       backend: "remote",
       url: "ws://app-server.test/ws",
       sandbox: { ttlMinutes: 5 },
-    } as never)).toThrow("sandbox options are only valid for cloud backends");
+    } as never)).toThrow('sandbox options are only valid with backend: "cloud"');
   });
 
   test("reports terminal Cloud loop errors instead of idle success", async () => {
