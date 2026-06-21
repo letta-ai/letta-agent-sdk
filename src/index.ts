@@ -126,8 +126,7 @@ export {
  *
  * @example
  * ```typescript
- * // Create agent with default settings. SDK-created agents get MemFS
- * // enabled by default and are tagged with origin:letta-code.
+ * // Create agent with default settings.
  * const agentId = await createAgent();
  *
  * // Create agent with custom memory
@@ -135,7 +134,7 @@ export {
  *   memory: ['persona', 'project'],
  *   persona: 'You are a helpful coding assistant',
  *   model: 'claude-sonnet-4',
- *   tags: ['project:docs'] // origin:letta-code is added automatically
+ *   tags: ['project:docs']
  * });
  *
  * // Then resume the default conversation:

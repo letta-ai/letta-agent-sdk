@@ -53,7 +53,6 @@ const agentId = await client.createAgent({
   persona: "You are a helpful coding assistant for TypeScript projects.",
 });
 
-// SDK-created agents always use MemFS and include the origin:letta-code tag.
 await using session = client.resumeSession(agentId);
 
 await session.send("Find and fix the bug in auth.ts");
@@ -67,7 +66,8 @@ for await (const msg of session.stream()) {
 }
 ```
 
-By default, `resumeSession(agentId)` continues the agent’s default conversation. To start a fresh thread, use `createSession(agentId)` (see docs). App-server sessions require an explicit agent id; default/LRU local-agent selection (`createSession()` with no agent id) remains available through the legacy local stdio fallback.
+By default, `resumeSession(agentId)` continues the agent’s default conversation.
+Use `createSession(agentId)` when you want to start a fresh thread.
 
 For cloud backends, omitting `environment` lets the SDK create and manage a
 Cloud sandbox for the session. `environment` is still session-scoped and can
@@ -115,12 +115,8 @@ for await (const msg of session.stream()) {
 
 Use `backend: "cloud"` to create or resume Cloud-hosted agents while running
 turns through the Remote Client websocket protocol. If no `environment` is
-provided, the SDK creates an agent-scoped Cloud sandbox, waits for its remote
-environment connection, refreshes its TTL while the session is active, and
-best-effort terminates it on close. Once connected, the SDK uses the Remote
-Client protocol for `sync`, `input/create_message`, streaming deltas, approval
-responses, model updates, toolset updates, cwd/mode device-state updates, and
-heartbeats.
+provided, the SDK creates an agent-scoped Cloud sandbox, waits for it to come
+online, refreshes it while the session is active, and cleans it up on close.
 
 ```ts
 const client = new LettaCodeClient({
@@ -180,16 +176,9 @@ custom upgrade headers.
 
 ## Session configuration
 
-App-server and Cloud sessions use the remote/listener protocol for runtime
-settings that are applied when the session starts, including `model`,
-sleeptime trigger settings, `cwd`, and `permissionMode`. A broader runtime
-controls surface for changing settings on an active session is intentionally
-left to a later typed design. MemFS is enabled for SDK-created agents and is
-not configurable through SDK options.
-CLI-only flags such as `skillSources`, `systemInfoReminder`,
-`sleeptime.behavior`, and partial-message toggles are rejected on
-app-server/Cloud sessions until those controls are wired through the remote
-protocol.
+Session options let you set runtime defaults before a session starts, including
+`model`, `cwd`, `permissionMode`, and sleeptime triggers. For remote and Cloud
+sessions, `cwd` must be a path inside the selected runtime environment.
 
 ```ts
 import { LettaCodeClient } from "@letta-ai/letta-code-sdk";

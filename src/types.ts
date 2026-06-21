@@ -598,10 +598,7 @@ export interface CreateAgentOptions {
    */
   tools?: AnyAgentTool[];
 
-  /**
-   * Tags to organize and categorize the agent.
-   * SDK-created agents are also tagged with `origin:letta-code` if missing.
-   */
+  /** Tags to organize and categorize the agent. */
   tags?: string[];
 
   /**

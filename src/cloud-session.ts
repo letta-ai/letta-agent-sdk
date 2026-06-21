@@ -654,7 +654,7 @@ export function assertCloudSessionOptionsSupported(
     throw new Error(`Cloud backend ${action}() has not wired sleeptime.behavior to the remote device protocol yet.`);
   }
   if ((options as { memfsStartup?: unknown }).memfsStartup !== undefined) {
-    throw new Error(`Cloud backend ${action}() does not use memfsStartup; remote device startup owns synchronization.`);
+    throw new Error(`Cloud backend ${action}() does not support memfsStartup.`);
   }
   if (options.includePartialMessages !== undefined) {
     throw new Error(`Cloud backend ${action}() streams Remote Client deltas directly; includePartialMessages is not a separate toggle.`);
