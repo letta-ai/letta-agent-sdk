@@ -126,7 +126,7 @@ async function main() {
   
   console.log('Try it yourself:\n');
   console.log('   // In your own code:');
-  console.log('   import { resumeSession } from "@letta-ai/letta-code-sdk";');
+  console.log('   import { resumeSession } from "@letta-ai/letta-agent-sdk";');
   console.log(`   const agent = resumeSession("${teamState.agentIds.researcher}");`);
   console.log('   await agent.send("Your question here");');
   console.log('');

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * Build script for Letta Code SDK
+ * Build script for Letta Agent SDK
  * Bundles TypeScript source and generates declarations
  */
 
@@ -16,7 +16,7 @@ const __dirname = dirname(__filename);
 const pkg = JSON.parse(readFileSync(join(__dirname, "package.json"), "utf-8"));
 const version = pkg.version;
 
-console.log(`📦 Building Letta Code SDK v${version}...`);
+console.log(`📦 Building Letta Agent SDK v${version}...`);
 
 // Bundle with Bun
 await Bun.build({

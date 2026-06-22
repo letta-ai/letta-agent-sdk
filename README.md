@@ -1,13 +1,13 @@
 # Letta Agent SDK
 
-[![npm](https://img.shields.io/npm/v/@letta-ai/letta-code-sdk.svg?style=flat-square)](https://www.npmjs.com/package/@letta-ai/letta-code-sdk) [![Discord](https://img.shields.io/badge/discord-join-blue?style=flat-square&logo=discord)](https://discord.gg/letta)
+[![npm](https://img.shields.io/npm/v/@letta-ai/letta-agent-sdk.svg?style=flat-square)](https://www.npmjs.com/package/@letta-ai/letta-agent-sdk) [![Discord](https://img.shields.io/badge/discord-join-blue?style=flat-square&logo=discord)](https://discord.gg/letta)
 
 The SDK interface to [**Letta Code**](https://github.com/letta-ai/letta-code). Build agents with persistent memory that learn over time. 
 
 ## Installation
 
 ```bash
-npm install @letta-ai/letta-code-sdk
+npm install @letta-ai/letta-agent-sdk
 ```
 
 ## Quick start
@@ -15,7 +15,7 @@ npm install @letta-ai/letta-code-sdk
 ### Client creation
 
 ```ts
-import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
+import { LettaCodeClient } from "@letta-ai/letta-agent-sdk";
 
 // Local: SDK-owned Letta Code app-server over loopback websockets. The SDK
 // spawns/manages the app-server process for you.
@@ -41,7 +41,7 @@ const client = new LettaCodeClient({
 ### Persistent agent with multi-turn conversations
 
 ```ts
-import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
+import { LettaCodeClient } from "@letta-ai/letta-agent-sdk";
 
 const client = new LettaCodeClient({ backend: "local" });
 
@@ -183,7 +183,7 @@ remote and Constellation sessions, `cwd` must be a path inside the selected
 runtime environment.
 
 ```ts
-import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
+import { LettaCodeClient } from "@letta-ai/letta-agent-sdk";
 
 const client = new LettaCodeClient({ backend: "local" });
 
@@ -232,7 +232,7 @@ const sync = await session.sendCommand(
 
 ## Links
 
-- Docs: https://docs.letta.com/letta-code-sdk
+- Docs: https://docs.letta.com/letta-agent-sdk
 - Examples: [`./examples`](./examples)
 
 ---

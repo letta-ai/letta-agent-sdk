@@ -134,7 +134,7 @@ export function buildCliArgs(options: InternalSessionOptions): string[] {
         args.push("--memory-blocks", JSON.stringify(memoryBlocksJson));
         if (presetNames.length > 0) {
           console.warn(
-            "[letta-code-sdk] Using custom memory blocks. " +
+            "[letta-agent-sdk] Using custom memory blocks. " +
             `Preset blocks are ignored when custom blocks are provided: ${presetNames.join(", ")}`
           );
         }
@@ -275,7 +275,7 @@ export class SubprocessTransport {
       this.process.stderr.on("data", (data: Buffer) => {
         const msg = data.toString().trim();
         if (msg) {
-          console.error("[letta-code-sdk] CLI stderr:", msg);
+          console.error("[letta-agent-sdk] CLI stderr:", msg);
           this.stderrLines.push(msg);
         }
       });
@@ -291,7 +291,7 @@ export class SubprocessTransport {
     // process exit lets messages() break out of its loop cleanly.
     this.process.on("close", (code, signal) => {
       if (code !== 0 && code !== null) {
-        console.error(`[letta-code-sdk] CLI process exited with code ${code}`);
+        console.error(`[letta-agent-sdk] CLI process exited with code ${code}`);
       }
       sdkLog("close", `CLI process exited: pid=${pid} code=${code} signal=${signal} wireMessages=${this.wireMessageCount} msSinceLastMsg=${this.lastMessageAt ? Date.now() - this.lastMessageAt : 0} pendingResolvers=${this.messageResolvers.length} queueLen=${this.messageQueue.length}`);
       this.closed = true;
@@ -303,7 +303,7 @@ export class SubprocessTransport {
     });
 
     this.process.on("error", (err) => {
-      console.error("[letta-code-sdk] CLI process error:", err);
+      console.error("[letta-agent-sdk] CLI process error:", err);
       this.closed = true;
     });
   }

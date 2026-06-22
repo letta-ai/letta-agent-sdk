@@ -69,7 +69,7 @@ type TurnSession = LettaCodeSession & {
 };
 
 /**
- * Top-level Letta Code SDK client.
+ * Top-level Letta Agent SDK client.
  *
  * `backend` selects how the SDK reaches or runs the Letta Code harness.
  * `local` spawns an SDK-owned Letta Code app-server and speaks the websocket

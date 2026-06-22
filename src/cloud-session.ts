@@ -45,7 +45,7 @@ const MIN_SANDBOX_TTL_MINUTES = 1;
 const MAX_SANDBOX_TTL_MINUTES = 60;
 const DEFAULT_SANDBOX_READY_TIMEOUT_MS = 120_000;
 const DEFAULT_SANDBOX_READY_POLL_INTERVAL_MS = 1_000;
-const SDK_AGENT_ORIGIN = "@letta-ai/letta-code-sdk";
+const SDK_AGENT_ORIGIN = "@letta-ai/letta-agent-sdk";
 
 type FetchLike = typeof fetch;
 
@@ -757,7 +757,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     const command: Record<string, unknown> = {
       client_info: {
         name: SDK_AGENT_ORIGIN,
-        title: "Letta Code SDK",
+        title: "Letta Agent SDK",
       },
       agent_id: runtime.agent_id,
       conversation_id: runtime.conversation_id,

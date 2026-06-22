@@ -801,8 +801,8 @@ export class AppServerSession extends RemoteClientSessionCore {
     const options = this.mode.options;
     const command: Record<string, unknown> = {
       client_info: {
-        name: "@letta-ai/letta-code-sdk",
-        title: "Letta Code SDK",
+        name: "@letta-ai/letta-agent-sdk",
+        title: "Letta Agent SDK",
       },
       recover_approvals: false,
       force_device_status: true,
