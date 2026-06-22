@@ -1050,7 +1050,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     }
 
     // Initial cwd and permission mode are part of runtime_start for
-    // app-server/listener sessions. Reserve change_device_state for explicit
+    // websocket protocol sessions. Reserve change_device_state for explicit
     // post-init mutations via changeDeviceState().
   }
 

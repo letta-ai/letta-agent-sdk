@@ -289,7 +289,7 @@ export interface LettaCodeLocalAppServerOptions {
   url?: string;
   /** Optional WebSocket constructor for tests/non-standard runtimes. */
   WebSocket?: LettaCodeSocketConstructor;
-  /** Timeout for app-server request/turn correlation. */
+  /** Timeout for websocket protocol request/turn correlation. */
   requestTimeoutMs?: number;
   /** Local app-server listen URL when the SDK spawns it. Defaults to ws://127.0.0.1:0. */
   listen?: string;
@@ -316,7 +316,7 @@ export interface LettaCodeRemoteClientOptions {
   authToken?: string;
   /** Optional WebSocket constructor for non-browser runtimes and tests. */
   WebSocket?: LettaCodeSocketConstructor;
-  /** Timeout for app-server request/turn correlation. Defaults to app-server client default. */
+  /** Timeout for websocket protocol request/turn correlation. */
   requestTimeoutMs?: number;
 }
 
@@ -351,7 +351,7 @@ export interface LettaCodeCloudClientOptions {
   fetch?: typeof fetch;
   /** Optional WebSocket constructor for non-browser runtimes and tests. */
   WebSocket?: LettaCodeSocketConstructor;
-  /** Timeout for cloud websocket request/turn correlation. */
+  /** Timeout for websocket protocol request/turn correlation. */
   requestTimeoutMs?: number;
   /**
    * WebSocket authentication style. Defaults to Authorization headers; set to
@@ -512,7 +512,7 @@ export type SDKProtocolCommand<TType extends string = string> = SDKProtocolMessa
 export interface SendCommandOptions<TResponseType extends string = string> {
   /** Wait for a response with this protocol message type. Omit for fire-and-forget commands. */
   responseType?: TResponseType;
-  /** Override the app-server request timeout for this command. */
+  /** Override the websocket protocol request timeout for this command. */
   timeoutMs?: number;
   /** Optional custom matcher for advanced protocol responses. */
   predicate?: (message: SDKProtocolMessage) => boolean;
@@ -526,7 +526,7 @@ export interface CreateSessionOptions {
   /** Model to use (e.g., "claude-sonnet-4-20250514") - updates the agent's LLM config */
   model?: string;
 
-  /** Reasoning effort tier to use with the selected/current model. */
+  /** Reasoning effort tier to use with the selected/current model on websocket protocol sessions. */
   reasoningEffort?: ReasoningEffort;
 
   /** System prompt preset (only presets, no custom strings or append) - updates the agent */

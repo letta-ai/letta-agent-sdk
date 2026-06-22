@@ -149,7 +149,7 @@ export class Session implements AsyncDisposable {
     // Note: Validation happens in public API functions (createSession, createAgent, etc.)
     if (options.reasoningEffort !== undefined) {
       throw new Error(
-        "reasoningEffort requires the app-server transport. Use LettaCodeClient({ transport: 'app-server' }) or a remote/cloud backend.",
+        "reasoningEffort requires a Letta Code websocket protocol session (remote/cloud, or a local agent session using the app-server transport). It is not supported by legacy local stdio sessions.",
       );
     }
     this.transport = new SubprocessTransport(options);
@@ -1156,7 +1156,7 @@ export class Session implements AsyncDisposable {
 
   async listModels(): Promise<ListModelsResult> {
     throw new Error(
-      "listModels() requires the app-server transport. Use LettaCodeClient({ transport: 'app-server' }) or a remote/cloud backend.",
+      "listModels() requires a Letta Code websocket protocol session (remote/cloud, or a local agent session using the app-server transport). It is not supported by legacy local stdio sessions.",
     );
   }
 
@@ -1170,13 +1170,13 @@ export class Session implements AsyncDisposable {
     _options?: SendCommandOptions,
   ): Promise<void> {
     throw new Error(
-      "sendCommand() requires the app-server transport. Use LettaCodeClient({ transport: 'app-server' }) or a remote/cloud backend.",
+      "sendCommand() requires a Letta Code websocket protocol session (remote/cloud, or a local agent session using the app-server transport). It is not supported by legacy local stdio sessions.",
     );
   }
 
   async updateModel(_update: string | UpdateModelOptions): Promise<UpdateModelResult> {
     throw new Error(
-      "updateModel() requires the app-server transport. Use LettaCodeClient({ transport: 'app-server' }) or a remote/cloud backend.",
+      "updateModel() requires a Letta Code websocket protocol session (remote/cloud, or a local agent session using the app-server transport). It is not supported by legacy local stdio sessions.",
     );
   }
 
@@ -1248,7 +1248,7 @@ export class Session implements AsyncDisposable {
   }
 
   async updateToolset(_toolsetPreference: string): Promise<void> {
-    throw new Error("Local stdio sessions do not support updateToolset(). Use an app-server or Cloud session.");
+    throw new Error("Local stdio sessions do not support updateToolset(). Use a Letta Code websocket protocol session.");
   }
 
   /**

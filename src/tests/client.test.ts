@@ -675,7 +675,7 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("app-server sessions respond to can_use_tool control requests through the shared approval bridge", async () => {
+  test("websocket protocol sessions respond to can_use_tool control requests through the shared approval bridge", async () => {
     FakeAppServerSocket.instances = [];
     const approvals: Array<{ toolName: string; input: Record<string, unknown> }> = [];
     const client = new LettaCodeClient({
@@ -739,7 +739,7 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("app-server transport failures emit streamed error before failed result", async () => {
+  test("websocket protocol transport failures emit streamed error before failed result", async () => {
     FakeAppServerSocket.instances = [];
     FakeAppServerSocket.inputScenario = "hang";
     const client = new LettaCodeClient({
@@ -773,7 +773,7 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("app-server sessions wait through auto-handled requires_approval stops", async () => {
+  test("websocket protocol sessions wait through auto-handled requires_approval stops", async () => {
     FakeAppServerSocket.instances = [];
     FakeAppServerSocket.inputScenario = "autoApprovalContinuation";
     const client = new LettaCodeClient({
@@ -814,7 +814,7 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("app-server sessions terminalize only genuine pending approvals", async () => {
+  test("websocket protocol sessions terminalize only genuine pending approvals", async () => {
     FakeAppServerSocket.instances = [];
     FakeAppServerSocket.inputScenario = "manualApprovalWait";
     const client = new LettaCodeClient({
@@ -840,7 +840,7 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("app-server sessions let listener queue sends during an active turn", async () => {
+  test("websocket protocol sessions let the listener queue sends during an active turn", async () => {
     FakeAppServerSocket.instances = [];
     FakeAppServerSocket.inputScenario = "queuedSecond";
     const client = new LettaCodeClient({
@@ -1095,7 +1095,7 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("app-server sessions apply model sleeptime and list messages", async () => {
+  test("websocket protocol sessions apply model sleeptime and list messages", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaCodeClient({
       backend: "remote",
@@ -1176,7 +1176,7 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("app-server sessions list models, apply reasoning effort, and abort", async () => {
+  test("websocket protocol sessions list models, apply reasoning effort, and abort", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaCodeClient({
       backend: "remote",
@@ -1241,7 +1241,7 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("app-server sessions reject unsupported stdio-only options", () => {
+  test("websocket protocol sessions reject unsupported stdio-only options", () => {
     const client = new LettaCodeClient({
       backend: "remote",
       url: "ws://127.0.0.1:4500/ws",
