@@ -306,13 +306,13 @@ function isApprovalConflictSignal(params: {
   );
 }
 
-function resolveReflectionSettings(
-  sleeptime: LettaCodeClientSessionOptions["sleeptime"],
+function resolveDreamingSettings(
+  dreaming: LettaCodeClientSessionOptions["dreaming"],
 ): ReflectionSettings | null {
-  if (!sleeptime) return null;
+  if (!dreaming) return null;
   return {
-    trigger: sleeptime.trigger ?? "step-count",
-    step_count: sleeptime.stepCount ?? 5,
+    trigger: dreaming.trigger ?? "step-count",
+    step_count: dreaming.stepCount ?? 5,
   };
 }
 
@@ -1021,18 +1021,18 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       ensureSuccess(response, "Failed to enable memfs");
     }
 
-    const sleeptimeSettings = resolveReflectionSettings(options.sleeptime);
-    if (sleeptimeSettings) {
+    const dreamingSettings = resolveDreamingSettings(options.dreaming);
+    if (dreamingSettings) {
       const response = await this.controller.request(
         "set_reflection_settings",
         {
           runtime: this.runtime,
-          settings: sleeptimeSettings,
+          settings: dreamingSettings,
           scope: "both",
         },
         { predicate: (message) => message.type === "set_reflection_settings_response" },
       );
-      ensureSuccess(response, "Failed to update sleeptime settings");
+      ensureSuccess(response, "Failed to update dreaming settings");
     }
 
     if (this.mode.kind !== "session") return;

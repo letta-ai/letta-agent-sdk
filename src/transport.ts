@@ -197,15 +197,15 @@ export function buildCliArgs(options: InternalSessionOptions): string[] {
     args.push("--no-system-info-reminder");
   }
 
-  // Sleeptime / reflection settings
-  if (options.sleeptime?.trigger !== undefined) {
-    args.push("--reflection-trigger", options.sleeptime.trigger);
+  // Dreaming settings (forwarded to the CLI's underlying reflection flags)
+  if (options.dreaming?.trigger !== undefined) {
+    args.push("--reflection-trigger", options.dreaming.trigger);
   }
-  if (options.sleeptime?.behavior !== undefined) {
-    args.push("--reflection-behavior", options.sleeptime.behavior);
+  if (options.dreaming?.behavior !== undefined) {
+    args.push("--reflection-behavior", options.dreaming.behavior);
   }
-  if (options.sleeptime?.stepCount !== undefined) {
-    args.push("--reflection-step-count", String(options.sleeptime.stepCount));
+  if (options.dreaming?.stepCount !== undefined) {
+    args.push("--reflection-step-count", String(options.dreaming.stepCount));
   }
 
   return args;

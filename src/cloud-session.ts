@@ -654,8 +654,8 @@ export function assertCloudSessionOptionsSupported(
   if (options.systemInfoReminder !== undefined) {
     throw new Error(`Constellation ${action}() has not wired systemInfoReminder to the remote device protocol yet.`);
   }
-  if (options.sleeptime?.behavior !== undefined) {
-    throw new Error(`Constellation ${action}() has not wired sleeptime.behavior to the remote device protocol yet.`);
+  if (options.dreaming?.behavior !== undefined) {
+    throw new Error(`Constellation ${action}() does not yet support dreaming.behavior overrides.`);
   }
   if ((options as { memfsStartup?: unknown }).memfsStartup !== undefined) {
     throw new Error(`Constellation ${action}() does not support memfsStartup.`);

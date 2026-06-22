@@ -114,31 +114,31 @@ export type MessageContentItem = TextContent | ImageContent;
 export type SendMessage = string | MessageContentItem[];
 
 // ═══════════════════════════════════════════════════════════════
-// SKILLS / REMINDER / SLEEPTIME TYPES
+// SKILLS / REMINDER / DREAMING TYPES
 // ═══════════════════════════════════════════════════════════════
 
 export type SkillSource = "bundled" | "global" | "agent" | "project";
 
-export type SleeptimeTrigger = "off" | "step-count" | "compaction-event";
+export type DreamingTrigger = "off" | "step-count" | "compaction-event";
 
-export type SleeptimeBehavior = "reminder" | "auto-launch";
+export type DreamingBehavior = "reminder" | "auto-launch";
 
 /**
- * Sleeptime settings exposed through SDK options.
+ * Dreaming settings exposed through SDK options.
  * Any omitted fields preserve server/CLI defaults.
  */
-export interface SleeptimeOptions {
-  trigger?: SleeptimeTrigger;
-  behavior?: SleeptimeBehavior;
+export interface DreamingOptions {
+  trigger?: DreamingTrigger;
+  behavior?: DreamingBehavior;
   stepCount?: number;
 }
 
 /**
- * Fully-resolved sleeptime settings emitted by init messages.
+ * Fully-resolved dreaming settings emitted by init messages.
  */
-export interface EffectiveSleeptimeSettings {
-  trigger: SleeptimeTrigger;
-  behavior: SleeptimeBehavior;
+export interface EffectiveDreamingSettings {
+  trigger: DreamingTrigger;
+  behavior: DreamingBehavior;
   stepCount: number;
 }
 
@@ -299,10 +299,7 @@ export interface LettaCodeLocalAppServerOptions {
 
 export interface LettaCodeLocalClientOptions {
   backend?: "local";
-  /**
-   * Local transport. Defaults to app-server. Set to "stdio" for the legacy
-   * subprocess JSON transport fallback.
-   */
+  /** Advanced local transport override. Defaults to app-server. */
   transport?: "app-server" | "stdio";
   /** Advanced app-server overrides for local transport. */
   appServer?: LettaCodeLocalAppServerOptions;
@@ -421,7 +418,7 @@ export interface InternalSessionOptions {
   // Skills/reminders
   skillSources?: SkillSource[];
   systemInfoReminder?: boolean;
-  sleeptime?: SleeptimeOptions;
+  dreaming?: DreamingOptions;
 
   // Permissions
   allowedTools?: string[];
@@ -557,9 +554,9 @@ export interface CreateSessionOptions {
   systemInfoReminder?: boolean;
 
   /**
-   * Configure sleeptime (reflection) settings, equivalent to `/sleeptime`.
+   * Configure dreaming settings.
    */
-  sleeptime?: SleeptimeOptions;
+  dreaming?: DreamingOptions;
 
   /** Custom permission callback - called when tool needs approval */
   canUseTool?: CanUseToolCallback;
@@ -688,9 +685,9 @@ export interface CreateAgentOptions {
   systemInfoReminder?: boolean;
 
   /**
-   * Configure sleeptime (reflection) settings, equivalent to `/sleeptime`.
+   * Configure dreaming settings.
    */
-  sleeptime?: SleeptimeOptions;
+  dreaming?: DreamingOptions;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -711,7 +708,7 @@ export interface SDKInitMessage {
   memfsEnabled?: boolean;
   skillSources?: SkillSource[];
   systemInfoReminderEnabled?: boolean;
-  sleeptime?: EffectiveSleeptimeSettings;
+  dreaming?: EffectiveDreamingSettings;
 }
 
 export interface SDKAssistantMessage {

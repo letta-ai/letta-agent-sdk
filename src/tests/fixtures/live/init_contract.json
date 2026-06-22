@@ -30,7 +30,7 @@
       "project"
     ],
     "systemInfoReminderEnabled": true,
-    "sleeptime": {
+    "dreaming": {
       "trigger": "step-count",
       "behavior": "reminder",
       "stepCount": 25

@@ -62,11 +62,10 @@ for await (const msg of session.stream()) {
 }
 ```
 
-When a session uses the Letta Code websocket protocol — `remote`/`cloud`
-sessions and local agent sessions that do not opt into legacy stdio — you may
-also call `send()` while another turn is streaming. The SDK sends the same
-`input` frame used by Letta Desktop and the listener owns queueing; `stream()`
-may surface `queue_update` events before the current turn's `result`.
+Cloud, remote, and local agent sessions can accept another `send()` while a
+turn is streaming. The SDK sends the same `input` frame used by Letta Desktop
+and the listener owns queueing; `stream()` may surface `queue_update` events
+before the current turn's `result`.
 
 By default, `resumeSession(agentId)` continues the agent’s default conversation.
 Use `createSession(agentId)` when you want to start a fresh thread.
@@ -82,9 +81,8 @@ await using session = client.resumeSession(agentId, {
 ```
 
 The top-level helpers (`createAgent`, `createSession`, `resumeSession`, and
-`prompt`) remain available. For local agent sessions, passing an agent ID uses
-the app-server transport by default; the no-agent `createSession()` and
-`prompt()` helpers keep their historical legacy stdio fallback.
+`prompt`) remain available. Local helper calls use Letta Code's default agent
+selection when you do not pass an agent ID.
 
 ### User-managed app-server backend
 
@@ -180,10 +178,9 @@ custom upgrade headers.
 ## Session configuration
 
 Session options let you set runtime defaults before a session starts, including
-`model`, `cwd`, `permissionMode`, and sleeptime triggers. On sessions that use
-the websocket protocol, you may also set `reasoningEffort`. For remote and
-Constellation sessions, `cwd` must be a path inside the selected runtime
-environment.
+`model`, `reasoningEffort`, `cwd`, `permissionMode`, and dreaming triggers. For
+remote and Constellation sessions, `cwd` must be a path inside the selected
+runtime environment.
 
 ```ts
 import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
@@ -197,15 +194,14 @@ const session = client.resumeSession("agent-123", {
   // sessions, use a path inside the selected runtime environment.
   cwd: "/workspace/project",
   permissionMode: "bypassPermissions",
-  sleeptime: {
+  dreaming: {
     trigger: "step-count", // off | step-count | compaction-event
     stepCount: 8,
   },
 });
 ```
 
-You can also inspect and change models after startup on sessions that use the
-websocket protocol:
+You can also inspect and change models after startup:
 
 ```ts
 const catalog = await session.listModels();

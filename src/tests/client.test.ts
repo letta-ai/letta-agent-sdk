@@ -488,7 +488,7 @@ describe("LettaCodeClient", () => {
     try {
       expect(session).toBeInstanceOf(Session);
       await expect(asAdvanced(session).updateToolset("developer")).rejects.toThrow(
-        "Local stdio sessions do not support updateToolset",
+        "updateToolset() is not supported by this session",
       );
     } finally {
       session.close();
@@ -1095,7 +1095,7 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("websocket protocol sessions apply model sleeptime and list messages", async () => {
+  test("websocket protocol sessions apply model dreaming and list messages", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaCodeClient({
       backend: "remote",
@@ -1105,7 +1105,7 @@ describe("LettaCodeClient", () => {
 
     const session = client.resumeSession("agent-123", {
       model: "anthropic/claude-opus-4",
-      sleeptime: { trigger: "step-count", stepCount: 3 },
+      dreaming: { trigger: "step-count", stepCount: 3 },
     });
 
     try {
@@ -1249,8 +1249,8 @@ describe("LettaCodeClient", () => {
     });
 
     expect(() =>
-      client.resumeSession("agent-123", { sleeptime: { behavior: "auto-launch" } }),
-    ).toThrow("does not yet support sleeptime.behavior");
+      client.resumeSession("agent-123", { dreaming: { behavior: "auto-launch" } }),
+    ).toThrow("does not yet support dreaming.behavior");
   });
 
 
