@@ -31,6 +31,7 @@ import type {
   CreateAgentOptions,
   LettaCodeClientSessionOptions,
   LettaCodeCloudClientOptions,
+  LettaCodeCloudSandboxOptions,
   LettaCodeEnvironment,
   LettaCodeSocketConstructor,
   LettaCodeSocketLike,
@@ -39,6 +40,11 @@ import type {
 const DEFAULT_CLOUD_API_BASE_URL = "https://api.letta.com";
 const DEFAULT_TURN_TIMEOUT_MS = 120_000;
 const DEFAULT_PING_INTERVAL_MS = 30_000;
+const DEFAULT_SANDBOX_TTL_MINUTES = 5;
+const MIN_SANDBOX_TTL_MINUTES = 1;
+const MAX_SANDBOX_TTL_MINUTES = 60;
+const DEFAULT_SANDBOX_READY_TIMEOUT_MS = 120_000;
+const DEFAULT_SANDBOX_READY_POLL_INTERVAL_MS = 1_000;
 const SDK_AGENT_ORIGIN = "@letta-ai/letta-code-sdk";
 
 type FetchLike = typeof fetch;
@@ -74,6 +80,36 @@ type CloudConversation = Record<string, unknown> & {
   id?: string;
   agent_id?: string;
 };
+
+type CloudAgentSandbox = Record<string, unknown> & {
+  sandboxId?: string;
+  deviceId?: string;
+  connectionName?: string;
+};
+
+type CloudAgentSandboxRefresh = Record<string, unknown> & {
+  success?: boolean;
+  sandboxId?: string;
+  ttlMinutes?: number;
+};
+
+type ManagedCloudSandbox = {
+  agentId: string;
+  sandboxId: string;
+  deviceId: string;
+  connectionName: string;
+  ttlMinutes: number;
+  readyTimeoutMs: number;
+  readyPollIntervalMs: number;
+  refreshIntervalMs: number;
+  terminateOnClose: boolean;
+};
+
+type ResolvedCloudConnection = {
+  connectionId: string;
+};
+
+class CloudManagedSandboxOwnershipError extends Error {}
 
 type CloudSessionMode = Extract<RuntimeSessionMode, { kind: "session" }>;
 
@@ -179,14 +215,50 @@ function validatePositiveInteger(value: number | undefined, name: string): void 
   }
 }
 
+function validateIntegerRange(
+  value: number | undefined,
+  name: string,
+  min: number,
+  max: number,
+): void {
+  if (value === undefined) return;
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`Invalid ${name}. Expected an integer between ${min} and ${max}.`);
+  }
+}
+
+function validateCloudSandboxOptions(
+  options: LettaCodeCloudSandboxOptions | undefined,
+  name: string,
+): void {
+  if (options === undefined) return;
+  if (options === null || typeof options !== "object" || Array.isArray(options)) {
+    throw new Error(`Invalid ${name}. Expected an object.`);
+  }
+  validateIntegerRange(
+    options.ttlMinutes,
+    `${name}.ttlMinutes`,
+    MIN_SANDBOX_TTL_MINUTES,
+    MAX_SANDBOX_TTL_MINUTES,
+  );
+  validatePositiveInteger(options.readyTimeoutMs, `${name}.readyTimeoutMs`);
+  validatePositiveInteger(options.readyPollIntervalMs, `${name}.readyPollIntervalMs`);
+  validatePositiveInteger(options.refreshIntervalMs, `${name}.refreshIntervalMs`);
+  if (
+    options.terminateOnClose !== undefined &&
+    typeof options.terminateOnClose !== "boolean"
+  ) {
+    throw new Error(`Invalid ${name}.terminateOnClose. Expected a boolean.`);
+  }
+}
+
 export function validateCloudClientOptions(options: LettaCodeCloudClientOptions): void {
   validatePositiveInteger(options.requestTimeoutMs, "requestTimeoutMs");
   validatePositiveInteger(options.appServer?.requestTimeoutMs, "appServer.requestTimeoutMs");
   validatePositiveInteger(options.appServer?.startupTimeoutMs, "appServer.startupTimeoutMs");
-  if ((options as { sandbox?: unknown }).sandbox !== undefined) {
-    throw new Error(
-      "Cloud backend SDK-managed sandboxes are not available yet. Specify environment.",
-    );
+  validateCloudSandboxOptions(options.sandbox, "sandbox");
+  if (options.environment !== undefined && options.sandbox !== undefined) {
+    throw new Error("Constellation sessions cannot specify both environment and sandbox options.");
   }
   if (
     options.webSocketAuth !== undefined &&
@@ -389,7 +461,7 @@ function createCloudStatusWebSocketConstructor(params: {
 
       this.ackIfSequenced(message);
 
-      // Cloud's status gateway can mirror device stream frames to the control
+      // The status gateway can mirror device stream frames to the control
       // subscriber. Drop them at the Cloud transport boundary instead of making
       // shared app-server session code understand Cloud fanout quirks. Do this
       // before idempotency/event tracking so the canonical stream-channel frame
@@ -473,6 +545,43 @@ function isCloudConversation(value: unknown): value is CloudConversation & { id:
   return Boolean(value && typeof value === "object" && typeof (value as CloudConversation).id === "string");
 }
 
+function isCloudAgentSandbox(
+  value: unknown,
+): value is CloudAgentSandbox & { sandboxId: string; deviceId: string; connectionName: string } {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as CloudAgentSandbox).sandboxId === "string" &&
+      typeof (value as CloudAgentSandbox).deviceId === "string" &&
+      typeof (value as CloudAgentSandbox).connectionName === "string",
+  );
+}
+
+function isCloudAgentSandboxRefresh(
+  value: unknown,
+): value is CloudAgentSandboxRefresh & { success: boolean; sandboxId: string; ttlMinutes: number } {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as CloudAgentSandboxRefresh).success === "boolean" &&
+      typeof (value as CloudAgentSandboxRefresh).sandboxId === "string" &&
+      typeof (value as CloudAgentSandboxRefresh).ttlMinutes === "number",
+  );
+}
+
+function isRetryableManagedSandboxResolveError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("Remote environment is offline") ||
+    message.toLowerCase().includes("not found") ||
+    message.includes("(404)")
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function externalToolsByName(tools: AnyAgentTool[] | undefined): Map<string, AnyAgentTool> {
   const result = new Map<string, AnyAgentTool>();
   for (const tool of tools ?? []) {
@@ -525,31 +634,30 @@ export function assertCloudSessionOptionsSupported(
   action: string,
   options: LettaCodeClientSessionOptions,
 ): void {
-  if ((options as { sandbox?: unknown }).sandbox !== undefined) {
-    throw new Error(
-      `Cloud backend ${action}() does not accept SDK-managed sandbox options yet. Specify environment.`,
-    );
+  validateCloudSandboxOptions(options.sandbox, "sandbox");
+  if (options.environment !== undefined && options.sandbox !== undefined) {
+    throw new Error(`Constellation ${action}() cannot specify both environment and sandbox options.`);
   }
   if (options.systemPrompt !== undefined) {
-    throw new Error(`Cloud backend ${action}() cannot rewrite an existing agent's systemPrompt from the SDK adapter yet.`);
+    throw new Error(`Constellation ${action}() cannot rewrite an existing agent's systemPrompt from the SDK adapter yet.`);
   }
   if (options.allowedTools !== undefined || options.disallowedTools !== undefined) {
-    throw new Error(`Cloud backend ${action}() has not wired allowedTools/disallowedTools to the remote device protocol yet.`);
+    throw new Error(`Constellation ${action}() has not wired allowedTools/disallowedTools to the remote device protocol yet.`);
   }
   if (options.skillSources !== undefined) {
-    throw new Error(`Cloud backend ${action}() has not wired skillSources to the remote device protocol yet.`);
+    throw new Error(`Constellation ${action}() has not wired skillSources to the remote device protocol yet.`);
   }
   if (options.systemInfoReminder !== undefined) {
-    throw new Error(`Cloud backend ${action}() has not wired systemInfoReminder to the remote device protocol yet.`);
+    throw new Error(`Constellation ${action}() has not wired systemInfoReminder to the remote device protocol yet.`);
   }
   if (options.sleeptime?.behavior !== undefined) {
-    throw new Error(`Cloud backend ${action}() has not wired sleeptime.behavior to the remote device protocol yet.`);
+    throw new Error(`Constellation ${action}() has not wired sleeptime.behavior to the remote device protocol yet.`);
   }
   if ((options as { memfsStartup?: unknown }).memfsStartup !== undefined) {
-    throw new Error(`Cloud backend ${action}() does not use memfsStartup; remote device startup owns synchronization.`);
+    throw new Error(`Constellation ${action}() does not support memfsStartup.`);
   }
   if (options.includePartialMessages !== undefined) {
-    throw new Error(`Cloud backend ${action}() streams Remote Client deltas directly; includePartialMessages is not a separate toggle.`);
+    throw new Error(`Constellation ${action}() streams Remote Client deltas directly; includePartialMessages is not a separate toggle.`);
   }
 }
 
@@ -558,6 +666,9 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   private removeExternalToolHandler: (() => void) | null = null;
   private removeControlRequestHandler: (() => void) | null = null;
   private externalTools = new Map<string, AnyAgentTool>();
+  private managedSandbox: ManagedCloudSandbox | null = null;
+  private sandboxRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  private sandboxRefreshInFlight: Promise<void> | null = null;
   private readonly cloudMode: CloudSessionMode;
 
   constructor(
@@ -574,9 +685,8 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   protected override async initializeRuntimeController(): Promise<RuntimeSessionInit> {
-    const environment = this.requireEnvironment();
     const resolved = await this.resolveRuntime();
-    const connection = await this.resolveConnection(resolved.runtime, environment);
+    const connection = await this.resolveConnectionForRuntime(resolved.runtime);
     this.connectionId = connection.connectionId;
 
     const apiKey = getCloudApiKey(this.cloudOptions);
@@ -629,6 +739,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       this.removeControlRequestHandler?.();
       this.removeControlRequestHandler = null;
       client.close();
+      await this.cleanupManagedSandbox();
       throw error;
     }
   }
@@ -670,11 +781,18 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     });
   }
 
+  protected override async beforeTurn(): Promise<void> {
+    const sandbox = this.managedSandbox;
+    if (!sandbox) return;
+    await this.refreshManagedSandbox(sandbox);
+  }
+
   protected override onCoreClose(): void {
     this.removeExternalToolHandler?.();
     this.removeExternalToolHandler = null;
     this.removeControlRequestHandler?.();
     this.removeControlRequestHandler = null;
+    void this.cleanupManagedSandbox();
   }
 
   private async resolveRuntime(): Promise<{ runtime: RuntimeScope }> {
@@ -698,7 +816,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
 
     if (!agentId || !conversationId) {
       throw new Error(
-        "Cloud backend createSession()/resumeSession() requires an agent id or conversation id.",
+        "Constellation createSession()/resumeSession() requires an agent id or conversation id.",
       );
     }
 
@@ -738,29 +856,205 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     return { id: body.id, agent_id: body.agent_id };
   }
 
-  private async resolveConnection(
+  private async resolveConnectionForRuntime(
     runtime: RuntimeScope,
+  ): Promise<ResolvedCloudConnection> {
+    const environment = this.effectiveEnvironment();
+    const sandboxOptions = this.effectiveSandboxOptions();
+    if (environment !== undefined) {
+      if (sandboxOptions !== undefined) {
+        throw new Error("Constellation sessions cannot specify both environment and sandbox options.");
+      }
+      return this.resolveExplicitConnection(environment);
+    }
+    return this.createManagedSandboxConnection(runtime);
+  }
+
+  private async resolveExplicitConnection(
     environment: LettaCodeEnvironment,
   ): Promise<{ connectionId: string }> {
     const target = environmentToRemoteTarget(environment);
-    const client = new RemoteEnvironmentClient({
+    const resolved = await this.remoteEnvironmentClient().resolveEnvironment(target);
+    return { connectionId: resolved.connectionId };
+  }
+
+  private async createManagedSandboxConnection(
+    runtime: RuntimeScope,
+  ): Promise<ResolvedCloudConnection> {
+    const sandbox = await this.createManagedSandbox(runtime.agent_id);
+    this.managedSandbox = sandbox;
+
+    try {
+      await this.refreshManagedSandbox(sandbox);
+      const connection = await this.waitForManagedSandboxConnection(sandbox);
+      this.startManagedSandboxRefresh(sandbox);
+      return { connectionId: connection.connectionId };
+    } catch (error) {
+      await this.cleanupManagedSandbox();
+      throw error;
+    }
+  }
+
+  private async createManagedSandbox(agentId: string): Promise<ManagedCloudSandbox> {
+    const fetchImpl = getFetch(this.cloudOptions.fetch);
+    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
+    const response = await fetchImpl(
+      `${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/sandboxes`,
+      {
+        method: "POST",
+        headers: cloudHeaders(this.cloudOptions),
+        body: JSON.stringify({}),
+      },
+    );
+    const body = await parseJsonResponse(response);
+    assertOkResponse(response, body, "Cloud create managed sandbox");
+    if (!isCloudAgentSandbox(body)) {
+      throw new Error("Cloud create managed sandbox response did not include sandbox connection details.");
+    }
+
+    const sandboxOptions = this.resolvedSandboxOptions();
+    const ttlMinutes = sandboxOptions.ttlMinutes ?? DEFAULT_SANDBOX_TTL_MINUTES;
+    const readyTimeoutMs = sandboxOptions.readyTimeoutMs
+      ?? DEFAULT_SANDBOX_READY_TIMEOUT_MS;
+    const readyPollIntervalMs = sandboxOptions.readyPollIntervalMs
+      ?? DEFAULT_SANDBOX_READY_POLL_INTERVAL_MS;
+    const defaultRefreshIntervalMs = Math.max(
+      1_000,
+      Math.floor(ttlMinutes * 60_000 * 0.8),
+    );
+
+    return {
+      agentId,
+      sandboxId: body.sandboxId,
+      deviceId: body.deviceId,
+      connectionName: body.connectionName,
+      ttlMinutes,
+      readyTimeoutMs,
+      readyPollIntervalMs,
+      refreshIntervalMs: sandboxOptions.refreshIntervalMs ?? defaultRefreshIntervalMs,
+      terminateOnClose: sandboxOptions.terminateOnClose ?? true,
+    };
+  }
+
+  private async refreshManagedSandbox(sandbox: ManagedCloudSandbox): Promise<void> {
+    if (this.sandboxRefreshInFlight) {
+      await this.sandboxRefreshInFlight;
+      return;
+    }
+
+    this.sandboxRefreshInFlight = this.refreshManagedSandboxOnce(sandbox);
+    try {
+      await this.sandboxRefreshInFlight;
+    } finally {
+      this.sandboxRefreshInFlight = null;
+    }
+  }
+
+  private async refreshManagedSandboxOnce(sandbox: ManagedCloudSandbox): Promise<void> {
+    const fetchImpl = getFetch(this.cloudOptions.fetch);
+    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
+    const response = await fetchImpl(
+      `${baseUrl}/v1/agents/${encodeURIComponent(sandbox.agentId)}/sandboxes/refresh`,
+      {
+        method: "POST",
+        headers: cloudHeaders(this.cloudOptions),
+        body: JSON.stringify({ ttlMinutes: sandbox.ttlMinutes }),
+      },
+    );
+    const body = await parseJsonResponse(response);
+    assertOkResponse(response, body, "Cloud refresh managed sandbox");
+    if (!isCloudAgentSandboxRefresh(body) || !body.success) {
+      throw new Error("Cloud refresh managed sandbox response did not confirm refresh.");
+    }
+    if (body.sandboxId !== sandbox.sandboxId) {
+      throw new CloudManagedSandboxOwnershipError(
+        `Cloud managed sandbox ownership changed for agent ${sandbox.agentId}: expected ${sandbox.sandboxId}, got ${body.sandboxId}.`,
+      );
+    }
+  }
+
+  private async terminateManagedSandbox(sandbox: ManagedCloudSandbox): Promise<void> {
+    await this.refreshManagedSandbox(sandbox);
+
+    const fetchImpl = getFetch(this.cloudOptions.fetch);
+    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
+    const response = await fetchImpl(
+      `${baseUrl}/v1/agents/${encodeURIComponent(sandbox.agentId)}/sandboxes`,
+      {
+        method: "DELETE",
+        headers: cloudHeaders(this.cloudOptions),
+      },
+    );
+    const body = await parseJsonResponse(response);
+    if (response.status === 404) return;
+    assertOkResponse(response, body, "Cloud terminate managed sandbox");
+  }
+
+  private async waitForManagedSandboxConnection(
+    sandbox: ManagedCloudSandbox,
+  ): Promise<{ connectionId: string }> {
+    const deadline = Date.now() + sandbox.readyTimeoutMs;
+    let lastError: unknown;
+
+    while (true) {
+      try {
+        const resolved = await this.remoteEnvironmentClient().resolveEnvironment({
+          deviceId: sandbox.deviceId,
+        });
+        return { connectionId: resolved.connectionId };
+      } catch (error) {
+        lastError = error;
+        if (!isRetryableManagedSandboxResolveError(error) || Date.now() >= deadline) {
+          break;
+        }
+        const remainingMs = Math.max(0, deadline - Date.now());
+        await sleep(Math.min(sandbox.readyPollIntervalMs, remainingMs));
+      }
+    }
+
+    const detail = lastError instanceof Error ? lastError.message : String(lastError);
+    throw new Error(
+      `Cloud managed sandbox ${sandbox.sandboxId} did not come online within ${sandbox.readyTimeoutMs}ms: ${detail}`,
+    );
+  }
+
+  private startManagedSandboxRefresh(sandbox: ManagedCloudSandbox): void {
+    this.stopManagedSandboxRefresh();
+    this.sandboxRefreshTimer = setInterval(() => {
+      void this.refreshManagedSandbox(sandbox).catch((error) => {
+        if (error instanceof CloudManagedSandboxOwnershipError) {
+          this.stopManagedSandboxRefresh();
+        }
+      });
+    }, sandbox.refreshIntervalMs);
+    (this.sandboxRefreshTimer as { unref?: () => void }).unref?.();
+  }
+
+  private stopManagedSandboxRefresh(): void {
+    if (!this.sandboxRefreshTimer) return;
+    clearInterval(this.sandboxRefreshTimer);
+    this.sandboxRefreshTimer = null;
+  }
+
+  private async cleanupManagedSandbox(): Promise<void> {
+    this.stopManagedSandboxRefresh();
+    const sandbox = this.managedSandbox;
+    this.managedSandbox = null;
+    if (!sandbox || !sandbox.terminateOnClose) return;
+    try {
+      await this.terminateManagedSandbox(sandbox);
+    } catch {
+      // Best-effort cleanup: Cloud TTL still bounds leaked managed sandboxes.
+    }
+  }
+
+  private remoteEnvironmentClient(): RemoteEnvironmentClient {
+    return new RemoteEnvironmentClient({
       baseUrl: this.cloudOptions.apiBaseUrl,
       apiKey: getCloudApiKey(this.cloudOptions),
       headers: this.cloudOptions.headers,
       fetch: this.cloudOptions.fetch,
     });
-    const resolved = await client.resolveEnvironment(target);
-    return { connectionId: resolved.connectionId };
-  }
-
-  private requireEnvironment(): LettaCodeEnvironment {
-    const environment = this.effectiveEnvironment();
-    if (environment === undefined) {
-      throw new Error(
-        "Cloud backend requires an environment target until managed Cloud sandboxes land. Specify client or session environment.",
-      );
-    }
-    return environment;
   }
 
   private effectiveEnvironment(): LettaCodeEnvironment | undefined {
@@ -768,5 +1062,16 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       ? this.mode.options.environment
       : undefined;
     return modeEnvironment ?? this.cloudOptions.environment;
+  }
+
+  private effectiveSandboxOptions(): LettaCodeCloudSandboxOptions | undefined {
+    const modeSandbox = this.mode.kind === "session"
+      ? this.mode.options.sandbox
+      : undefined;
+    return modeSandbox ?? this.cloudOptions.sandbox;
+  }
+
+  private resolvedSandboxOptions(): LettaCodeCloudSandboxOptions {
+    return this.effectiveSandboxOptions() ?? {};
   }
 }

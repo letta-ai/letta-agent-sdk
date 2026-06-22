@@ -47,11 +47,12 @@ function getOptionsEnvironment(
   return undefined;
 }
 
-function stripEnvironment(
+function stripCloudExecutionOptions(
   options: LettaCodeClientSessionOptions,
 ): CreateSessionOptions {
   const sessionOptions = { ...options };
   delete sessionOptions.environment;
+  delete sessionOptions.sandbox;
   return sessionOptions;
 }
 
@@ -74,8 +75,8 @@ type TurnSession = LettaCodeSession & {
  * `local` spawns an SDK-owned Letta Code app-server and speaks the websocket
  * protocol by default, with an explicit stdio fallback for legacy flows.
  * `remote` connects to a user-managed Letta Code app-server websocket endpoint.
- * `cloud` connects to an explicit Letta Cloud remote environment and controls
- * it over the Remote Client websocket protocol.
+ * `cloud` uses agents hosted on Constellation, with an explicit remote
+ * environment or SDK-managed sandbox.
  */
 export class LettaCodeClient {
   readonly backend: LettaCodeBackend;
@@ -96,13 +97,16 @@ export class LettaCodeClient {
 
     if (this.backend === "local" && this.environment !== undefined) {
       throw new Error(
-        "LettaCodeClient environment is only valid for cloud backends.",
+        'LettaCodeClient environment is only valid with backend: "cloud".',
       );
     }
     if (this.backend === "remote" && this.environment !== undefined) {
       throw new Error(
-        "LettaCodeClient environment is only valid for the cloud backend; remote url selects the app-server runtime.",
+        'LettaCodeClient environment is only valid with backend: "cloud"; remote url selects the app-server runtime.',
       );
+    }
+    if (this.backend !== "cloud" && (options as { sandbox?: unknown }).sandbox !== undefined) {
+      throw new Error('LettaCodeClient sandbox options are only valid with backend: "cloud".');
     }
 
     if (this.backend === "local") {
@@ -206,7 +210,7 @@ export class LettaCodeClient {
       typeof agentIdOrOptions === "string" ? options : (agentIdOrOptions ?? {});
 
     this.assertSessionBackend("createSession", resolvedOptions);
-    const sessionOptions = stripEnvironment(resolvedOptions);
+    const sessionOptions = stripCloudExecutionOptions(resolvedOptions);
     validateCreateSessionOptions(sessionOptions);
 
     if (this.backend === "remote") {
@@ -225,7 +229,7 @@ export class LettaCodeClient {
     if (this.backend === "cloud") {
       if (!agentId) {
         throw new Error(
-          "Cloud backend createSession() requires an agent id. Call createAgent() first or pass an agent id.",
+          "Constellation createSession() requires an agent id. Call createAgent() first or pass an agent id.",
         );
       }
       return new CloudEnvironmentSession(this.cloudOptions(), {
@@ -253,14 +257,14 @@ export class LettaCodeClient {
    * Resume an existing agent default conversation or a specific conversation.
    *
    * `options.environment` overrides the client's default execution target for
-   * cloud backends. Remote app-server URLs already select the runtime.
+   * Constellation sessions. Remote app-server URLs already select the runtime.
    */
   resumeSession(
     id: string,
     options: LettaCodeClientSessionOptions = {},
   ): LettaCodeSession {
     this.assertSessionBackend("resumeSession", options);
-    const sessionOptions = stripEnvironment(options);
+    const sessionOptions = stripCloudExecutionOptions(options);
     validateCreateSessionOptions(sessionOptions);
 
     if (this.backend === "remote") {
@@ -353,8 +357,11 @@ export class LettaCodeClient {
     if (this.backend === "local") {
       if (effectiveEnvironment !== undefined) {
         throw new Error(
-          `${action}() environment overrides are only valid for cloud backends.`,
+          `${action}() environment overrides are only valid with backend: "cloud".`,
         );
+      }
+      if (options.sandbox !== undefined) {
+        throw new Error(`${action}() sandbox options are only valid with backend: "cloud".`);
       }
       if (!this.useLegacyLocalStdio()) {
         assertRemoteSessionOptionsSupported(action, options);
@@ -365,13 +372,23 @@ export class LettaCodeClient {
     if (this.backend === "remote") {
       if (options.environment !== undefined) {
         throw new Error(
-          `${action}() environment overrides are only valid for cloud backends; remote url selects the app-server runtime.`,
+          `${action}() environment overrides are only valid with backend: "cloud"; remote url selects the app-server runtime.`,
         );
+      }
+      if (options.sandbox !== undefined) {
+        throw new Error(`${action}() sandbox options are only valid with backend: "cloud"; remote url selects the app-server runtime.`);
       }
       assertRemoteSessionOptionsSupported(action, options);
       return;
     }
     if (this.backend === "cloud") {
+      const cloudOptions = this.cloudOptions();
+      if (cloudOptions.environment !== undefined && options.sandbox !== undefined) {
+        throw new Error(`Constellation ${action}() cannot specify sandbox options when the client has a default environment.`);
+      }
+      if (cloudOptions.sandbox !== undefined && options.environment !== undefined) {
+        throw new Error(`Constellation ${action}() cannot specify an environment when the client has default sandbox options.`);
+      }
       assertCloudSessionOptionsSupported(action, options);
       return;
     }
@@ -410,7 +427,7 @@ export class LettaCodeClient {
 
   private cloudOptions(): LettaCodeCloudClientOptions {
     if (this.backend !== "cloud") {
-      throw new Error("Cloud options requested for non-cloud backend.");
+      throw new Error('Constellation options requested for non-"cloud" backend.');
     }
     return this.options as LettaCodeCloudClientOptions;
   }

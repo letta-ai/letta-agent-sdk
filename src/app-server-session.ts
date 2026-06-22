@@ -172,7 +172,7 @@ export function assertRemoteSessionOptionsSupported(
     throw new Error(`App-server ${action}() does not yet support sleeptime.behavior overrides.`);
   }
   if ((options as { memfsStartup?: unknown }).memfsStartup !== undefined) {
-    throw new Error(`App-server ${action}() does not use memfsStartup; app-server owns its startup synchronization.`);
+    throw new Error(`App-server ${action}() does not support memfsStartup.`);
   }
   if (options.includePartialMessages !== undefined) {
     throw new Error(`App-server ${action}() streams app-server deltas directly and does not support includePartialMessages.`);

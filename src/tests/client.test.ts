@@ -398,7 +398,7 @@ describe("LettaCodeClient", () => {
 
     expect(() =>
       client.resumeSession("agent-123", { environment: "work-laptop" }),
-    ).toThrow("environment overrides are only valid for cloud backends");
+    ).toThrow('environment overrides are only valid with backend: "cloud"');
   });
 
   test("rejects environment on remote app-server clients", () => {

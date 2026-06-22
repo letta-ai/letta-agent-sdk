@@ -263,7 +263,8 @@ export type AnyAgentTool = AgentTool<any, unknown>;
  *
  * - local: spawn/manage a local Letta Code app-server over loopback websockets.
  * - remote: connect to a user-managed app-server over websockets.
- * - cloud: connect to an explicit Letta Cloud remote environment over the Remote Client websocket.
+ * - cloud: use agents hosted on Constellation, with an explicit remote
+ *   environment or SDK-managed sandbox.
  */
 export type LettaCodeBackend = "local" | "remote" | "cloud";
 
@@ -319,11 +320,30 @@ export interface LettaCodeRemoteClientOptions {
   requestTimeoutMs?: number;
 }
 
+export interface LettaCodeCloudSandboxOptions {
+  /**
+   * TTL to request when refreshing an SDK-managed sandbox. Defaults to 5
+   * minutes, matching the Cloud API default. Valid range: 1-60.
+   */
+  ttlMinutes?: number;
+  /** Timeout waiting for a newly created sandbox environment to come online. */
+  readyTimeoutMs?: number;
+  /** Poll interval while waiting for a newly created sandbox environment. */
+  readyPollIntervalMs?: number;
+  /** Interval for proactive TTL refreshes while the session is open. */
+  refreshIntervalMs?: number;
+  /**
+   * Best-effort terminate the SDK-managed sandbox on session close. Defaults to
+   * true. Set false when multiple SDK sessions may race on the same agent.
+   */
+  terminateOnClose?: boolean;
+}
+
 export interface LettaCodeCloudClientOptions {
   backend: "cloud";
   /** Optional API key override. Defaults to LETTA_API_KEY / existing auth. */
   apiKey?: string;
-  /** Optional API base URL override. Defaults to Letta Cloud. */
+  /** Optional API base URL override. Defaults to the Letta API. */
   apiBaseUrl?: string;
   /** Optional extra HTTP headers for Cloud API requests. */
   headers?: Record<string, string>;
@@ -345,8 +365,13 @@ export interface LettaCodeCloudClientOptions {
    * Omit to let the SDK spawn a bundled local app-server authenticated to Cloud.
    */
   appServer?: LettaCodeLocalAppServerOptions;
-  /** Execution target for direct Cloud sessions; required here or per session. */
+  /**
+   * Execution target for Constellation sessions. If omitted, the SDK creates
+   * and owns a sandbox for the session.
+   */
   environment?: LettaCodeEnvironment;
+  /** Options for SDK-managed sandboxes when environment is omitted. */
+  sandbox?: LettaCodeCloudSandboxOptions;
 }
 
 export type LettaCodeClientOptions =
@@ -507,6 +532,8 @@ export interface CreateSessionOptions {
  */
 export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
   environment?: LettaCodeEnvironment;
+  /** Per-session SDK-managed sandbox options when environment is omitted. */
+  sandbox?: LettaCodeCloudSandboxOptions;
 }
 
 export interface LettaCodeSession extends AsyncDisposable {
@@ -572,10 +599,7 @@ export interface CreateAgentOptions {
    */
   tools?: AnyAgentTool[];
 
-  /**
-   * Tags to organize and categorize the agent.
-   * SDK-created agents are also tagged with `origin:letta-code` if missing.
-   */
+  /** Tags to organize and categorize the agent. */
   tags?: string[];
 
   /**

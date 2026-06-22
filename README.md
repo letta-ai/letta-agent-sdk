@@ -34,12 +34,11 @@ const remoteClient = new LettaCodeClient({
   authToken: process.env.LETTA_APP_SERVER_TOKEN,
 });
 
-// Cloud: control an explicit Letta Cloud remote environment over the
-// Remote Client websocket protocol. SDK-managed sandboxes are a fast follow.
+// Constellation: create or resume agents whose state lives in Letta's
+// agent cloud, with an SDK-managed sandbox by default.
 const client = new LettaCodeClient({
   backend: "cloud",
   apiKey: process.env.LETTA_API_KEY,
-  environment: { connectionId: process.env.LETTA_ENVIRONMENT_CONNECTION_ID! },
 });
 ```
 
@@ -54,7 +53,6 @@ const agentId = await client.createAgent({
   persona: "You are a helpful coding assistant for TypeScript projects.",
 });
 
-// SDK-created agents always use MemFS and include the origin:letta-code tag.
 await using session = client.resumeSession(agentId);
 
 await session.send("Find and fix the bug in auth.ts");
@@ -68,10 +66,12 @@ for await (const msg of session.stream()) {
 }
 ```
 
-By default, `resumeSession(agentId)` continues the agent’s default conversation. To start a fresh thread, use `createSession(agentId)` (see docs). App-server sessions require an explicit agent id; default/LRU local-agent selection (`createSession()` with no agent id) remains available through the legacy local stdio fallback.
+By default, `resumeSession(agentId)` continues the agent’s default conversation.
+Use `createSession(agentId)` when you want to start a fresh thread.
 
-For cloud backends, `environment` is session-scoped and can override the
-client default. Remote app-server URLs already select their runtime:
+For Constellation agents, omitting `environment` lets the SDK create and manage
+a sandbox for the session. `environment` is still session-scoped and can
+override the client default when you want to use a specific remote runtime:
 
 ```ts
 await using session = client.resumeSession(agentId, {
@@ -111,22 +111,23 @@ for await (const msg of session.stream()) {
 ```
 
 
-### Letta Cloud backend
+### Constellation
 
-Use `backend: "cloud"` to create or resume Cloud-hosted agents while running
-turns in an explicit Letta Cloud remote environment. The current SDK requires
-callers to supply `environment`; SDK-managed Cloud sandbox lifecycle is not yet
-available. Once connected, the SDK uses the Remote Client
-websocket protocol for
-`sync`, `input/create_message`, streaming deltas, approval responses, model
-updates, toolset updates, cwd/mode device-state updates, and heartbeats.
+Use `backend: "cloud"` to create or resume agents hosted on Constellation. If
+no `environment` is provided, the SDK creates an agent-scoped sandbox, waits for
+it to come online, refreshes it while the session is active, and cleans it up on
+close.
 
 ```ts
 const client = new LettaCodeClient({
   backend: "cloud",
   apiKey: process.env.LETTA_API_KEY,
-  // Required until SDK-managed Cloud sandboxes land.
-  environment: { connectionId: process.env.LETTA_ENVIRONMENT_CONNECTION_ID! },
+  sandbox: {
+    // Optional: defaults to a 5-minute refresh TTL.
+    ttlMinutes: 5,
+    // Optional: defaults true. Set false for concurrent same-agent sessions.
+    terminateOnClose: true,
+  },
 });
 
 const agentId = await client.createAgent({
@@ -135,8 +136,6 @@ const agentId = await client.createAgent({
 });
 
 await using session = client.resumeSession(agentId, {
-  // Paths are resolved inside the remote environment, not on the caller machine.
-  cwd: "/workspace/project",
   permissionMode: "bypassPermissions",
 });
 
@@ -146,7 +145,12 @@ for await (const msg of session.stream()) {
 }
 ```
 
-You can set a default `environment` on the client or override it per session:
+If you pass `cwd` for a Constellation session, use a path that exists inside the
+selected remote environment or managed sandbox. Local paths such as
+`process.cwd()` are not mapped into managed sandboxes automatically.
+
+You can still set a default `environment` on the client or override it per
+session to use an existing remote runtime instead of an SDK-managed sandbox:
 
 ```ts
 const client = new LettaCodeClient({
@@ -160,8 +164,10 @@ await using session = client.resumeSession(agentId, {
 });
 ```
 
-SDK-managed Cloud sandbox lifecycle is not yet exposed by this SDK path. Passing
-legacy `sandbox` options fails fast; pass an explicit `environment` instead.
+`environment` and `sandbox` are mutually exclusive. Managed sandbox refresh and
+termination operate on the latest active sandbox for an agent; set
+`sandbox.terminateOnClose: false` when multiple SDK sessions may run
+concurrently against the same agent and rely on TTL cleanup instead.
 
 By default, websocket authentication uses `Authorization` headers. Set
 `webSocketAuth: "query"` for browser-style websocket clients that cannot send
@@ -169,16 +175,10 @@ custom upgrade headers.
 
 ## Session configuration
 
-App-server and Cloud sessions use the remote/listener protocol for runtime
-settings that are applied when the session starts, including `model`,
-sleeptime trigger settings, `cwd`, and `permissionMode`. A broader runtime
-controls surface for changing settings on an active session is intentionally
-left to a later typed design. MemFS is enabled for SDK-created agents and is
-not configurable through SDK options.
-CLI-only flags such as `skillSources`, `systemInfoReminder`,
-`sleeptime.behavior`, and partial-message toggles are rejected on
-app-server/Cloud sessions until those controls are wired through the remote
-protocol.
+Session options let you set runtime defaults before a session starts, including
+`model`, `cwd`, `permissionMode`, and sleeptime triggers. For remote and
+Constellation sessions, `cwd` must be a path inside the selected runtime
+environment.
 
 ```ts
 import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
@@ -187,8 +187,8 @@ const client = new LettaCodeClient({ backend: "local" });
 
 const session = client.resumeSession("agent-123", {
   model: "anthropic/claude-sonnet-4",
-  // For local sessions this may be a local path; for remote/Cloud sessions,
-  // use a path inside the selected runtime environment.
+  // For local sessions this may be a local path; for remote/Constellation
+  // sessions, use a path inside the selected runtime environment.
   cwd: "/workspace/project",
   permissionMode: "bypassPermissions",
   sleeptime: {
