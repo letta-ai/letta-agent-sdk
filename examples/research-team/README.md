@@ -1,6 +1,6 @@
 # Research Team Demo
 
-A multi-agent academic research system built on the Letta Code SDK. Demonstrates persistent memory and collaborative agents that learn and improve over time.
+A multi-agent academic research system built on the Letta Agent SDK. Demonstrates persistent memory and collaborative agents that learn and improve over time.
 
 ## Overview
 
@@ -201,7 +201,7 @@ The research team agents you create here can be "teleported" into any context:
 ### How It Works
 
 ```typescript
-import { resumeSession } from '@letta-ai/letta-code-sdk';
+import { resumeSession } from '@letta-ai/letta-agent-sdk';
 
 // Get agent ID from team-state.json or --status
 const researcherAgentId = 'agent-xxx-yyy-zzz';
@@ -224,7 +224,7 @@ await researcher.send('Find recent papers on quantum error correction');
 ```typescript
 // server.ts - Turn your research team into an API
 import express from 'express';
-import { resumeSession } from '@letta-ai/letta-code-sdk';
+import { resumeSession } from '@letta-ai/letta-agent-sdk';
 import { loadTeamState } from './tools/file-store';
 
 const app = express();
@@ -268,7 +268,7 @@ After running the demo, check `--status` for agent IDs, then click the links to:
 
 ### Why This Matters
 
-| Claude Agent SDK | Letta Code SDK |
+| Claude Agent SDK | Letta Agent SDK |
 |------------------|----------------|
 | Agents are ephemeral processes | Agents are persistent entities |
 | Memory via local files | Memory on Letta server |
@@ -348,4 +348,4 @@ Modify the system prompts in each agent file to change behavior:
 
 ## License
 
-Apache-2.0 (same as letta-code-sdk)
+Apache-2.0 (same as letta-agent-sdk)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * Letta Code SDK V2 Examples
+ * Letta Agent SDK V2 Examples
  * 
  * Comprehensive tests for all SDK features.
  * 

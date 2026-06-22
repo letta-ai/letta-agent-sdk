@@ -1,11 +1,11 @@
 /**
- * Letta Code SDK
+ * Letta Agent SDK
  *
  * Programmatic control of Letta Code CLI with persistent agent memory.
  *
  * @example
  * ```typescript
- * import { LettaCodeClient, createAgent, createSession, resumeSession, prompt } from '@letta-ai/letta-code-sdk';
+ * import { LettaCodeClient, createAgent, createSession, resumeSession, prompt } from '@letta-ai/letta-agent-sdk';
  *
  * const client = new LettaCodeClient({ backend: 'local' });
  * const agentId = await client.createAgent();

@@ -288,7 +288,7 @@ function assertRawMessageShape(page: ListMessagesResult): void {
   }
 }
 
-describeLive("live integration: letta-code-sdk", () => {
+describeLive("live integration: letta-agent-sdk", () => {
   afterAll(() => {
     for (const session of openedSessions) {
       session.close();

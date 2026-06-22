@@ -1,6 +1,6 @@
 # Economics Seminar
 
-A multi-agent academic seminar simulation built on the Letta Code SDK.
+A multi-agent academic seminar simulation built on the Letta Agent SDK.
 
 An economist agent researches and presents findings, then defends their work against a faculty panel of specialists. Each agent has persistent memory and learns from each seminar.
 
@@ -115,7 +115,7 @@ Each agent maintains memory blocks that persist across seminars:
 After running a seminar, the agents can be "teleported" into other contexts:
 
 ```typescript
-import { resumeSession } from '@letta-ai/letta-code-sdk';
+import { resumeSession } from '@letta-ai/letta-agent-sdk';
 
 // Get agent ID from --status
 const drChen = resumeSession('agent-xxx', { permissionMode: 'bypassPermissions' });
