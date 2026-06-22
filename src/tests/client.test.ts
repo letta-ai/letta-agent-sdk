@@ -32,6 +32,7 @@ class FakeAppServerSocket {
     | "normal"
     | "autoApprovalContinuation"
     | "manualApprovalWait"
+    | "queuedSecond"
     | "hang" = "normal";
   readyState = 0;
   sent: unknown[] = [];
@@ -107,6 +108,30 @@ function fakeStreamSocket(): FakeAppServerSocket {
   return socket;
 }
 
+const FAKE_MODEL_ENTRIES = [
+  {
+    id: "sonnet-low",
+    handle: "anthropic/claude-sonnet-4",
+    label: "Claude Sonnet 4",
+    description: "Sonnet low reasoning",
+    isDefault: true,
+    updateArgs: { reasoning_effort: "low", context_window: 200_000 },
+  },
+  {
+    id: "sonnet-high",
+    handle: "anthropic/claude-sonnet-4",
+    label: "Claude Sonnet 4",
+    description: "Sonnet high reasoning",
+    updateArgs: { reasoning_effort: "high", context_window: 200_000 },
+  },
+  {
+    id: "opus",
+    handle: "anthropic/claude-opus-4",
+    label: "Claude Opus 4",
+    description: "Opus",
+  },
+];
+
 function fakeAppServerHandle(command: Record<string, unknown>): void {
   if (command.type === "conversation_retrieve") {
     const conversationId = command.conversation_id as string;
@@ -140,13 +165,43 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
     return;
   }
 
+  if (command.type === "list_models") {
+    fakeControlSocket().serverMessage({
+      type: "list_models_response",
+      request_id: command.request_id,
+      success: true,
+      entries: FAKE_MODEL_ENTRIES,
+      available_handles: ["anthropic/claude-sonnet-4", "anthropic/claude-opus-4"],
+      byok_provider_aliases: { "lc-anthropic": "anthropic" },
+    });
+    return;
+  }
+
   if (command.type === "update_model") {
+    const payload = command.payload as Record<string, unknown> | undefined;
+    const byId = FAKE_MODEL_ENTRIES.find((entry) => entry.id === payload?.model_id);
+    const byHandle = FAKE_MODEL_ENTRIES.find((entry) => entry.handle === payload?.model_handle);
+    const modelHandle =
+      (typeof payload?.model_handle === "string" ? payload.model_handle : undefined) ??
+      byId?.handle;
     fakeControlSocket().serverMessage({
       type: "update_model_response",
       request_id: command.request_id,
       success: true,
       runtime: command.runtime,
-      model_handle: (command.payload as Record<string, unknown>)?.model_handle,
+      applied_to: "conversation",
+      model_id:
+        (typeof payload?.model_id === "string" ? payload.model_id : undefined) ??
+        byHandle?.id,
+      model_handle: modelHandle,
+      model_settings: {
+        model: modelHandle,
+        context_window:
+          typeof byId?.updateArgs?.context_window === "number"
+            ? byId.updateArgs.context_window
+            : undefined,
+        reasoning: { reasoning_effort: byId?.updateArgs?.reasoning_effort },
+      },
     });
     return;
   }
@@ -167,6 +222,17 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
       type: "sync_response",
       request_id: command.request_id,
       runtime: command.runtime,
+      success: true,
+    });
+    return;
+  }
+
+  if (command.type === "abort_message" && typeof command.request_id === "string") {
+    fakeControlSocket().serverMessage({
+      type: "abort_message_response",
+      request_id: command.request_id,
+      runtime: command.runtime,
+      aborted: true,
       success: true,
     });
     return;
@@ -221,6 +287,42 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
       }
       fakeStreamSocket().serverMessage(message);
     };
+
+    if (FakeAppServerSocket.inputScenario === "queuedSecond") {
+      const inputCount = fakeControlSocket().sent.filter(
+        (sent) => (sent as { type?: string }).type === "input",
+      ).length;
+      const payload = command.payload as { messages?: Array<Record<string, unknown>> };
+      const clientMessageId = payload.messages?.[0]?.client_message_id;
+      if (inputCount === 1) {
+        emitStream({
+          type: "stream_delta",
+          runtime,
+          delta: {
+            id: "msg-first",
+            message_type: "assistant_message",
+            content: "first response",
+            run_id: "run-first",
+          },
+        });
+      } else {
+        emitStream({
+          type: "update_queue",
+          runtime,
+          queue: [
+            {
+              id: "queue-1",
+              client_message_id: clientMessageId,
+              kind: "message",
+              source: "user",
+              content: "second message",
+              enqueued_at: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        });
+      }
+      return;
+    }
 
     if (FakeAppServerSocket.inputScenario === "autoApprovalContinuation") {
       emitStream({
@@ -386,7 +488,7 @@ describe("LettaCodeClient", () => {
     try {
       expect(session).toBeInstanceOf(Session);
       await expect(asAdvanced(session).updateToolset("developer")).rejects.toThrow(
-        "Local stdio sessions do not support updateToolset",
+        "updateToolset() is not supported by this session",
       );
     } finally {
       session.close();
@@ -573,7 +675,7 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("app-server sessions respond to can_use_tool control requests through the shared approval bridge", async () => {
+  test("websocket protocol sessions respond to can_use_tool control requests through the shared approval bridge", async () => {
     FakeAppServerSocket.instances = [];
     const approvals: Array<{ toolName: string; input: Record<string, unknown> }> = [];
     const client = new LettaCodeClient({
@@ -637,7 +739,7 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("app-server transport failures emit streamed error before failed result", async () => {
+  test("websocket protocol transport failures emit streamed error before failed result", async () => {
     FakeAppServerSocket.instances = [];
     FakeAppServerSocket.inputScenario = "hang";
     const client = new LettaCodeClient({
@@ -671,7 +773,7 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("app-server sessions wait through auto-handled requires_approval stops", async () => {
+  test("websocket protocol sessions wait through auto-handled requires_approval stops", async () => {
     FakeAppServerSocket.instances = [];
     FakeAppServerSocket.inputScenario = "autoApprovalContinuation";
     const client = new LettaCodeClient({
@@ -712,7 +814,7 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("app-server sessions terminalize only genuine pending approvals", async () => {
+  test("websocket protocol sessions terminalize only genuine pending approvals", async () => {
     FakeAppServerSocket.instances = [];
     FakeAppServerSocket.inputScenario = "manualApprovalWait";
     const client = new LettaCodeClient({
@@ -731,6 +833,110 @@ describe("LettaCodeClient", () => {
         success: false,
         approvalConflict: true,
         stopReason: "requires_approval",
+      });
+    } finally {
+      FakeAppServerSocket.inputScenario = "normal";
+      session.close();
+    }
+  });
+
+  test("websocket protocol sessions let the listener queue sends during an active turn", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.inputScenario = "queuedSecond";
+    const client = new LettaCodeClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123");
+    try {
+      await asAdvanced(session).initialize();
+      await session.send("first message");
+      await session.send("second message");
+
+      const inputCommands = fakeControlSocket().sent.filter(
+        (sent) => (sent as { type?: string }).type === "input",
+      ) as Array<{ payload: { messages: Array<{ client_message_id?: string }> } }>;
+      expect(inputCommands).toHaveLength(2);
+      const firstClientMessageId = inputCommands[0]?.payload.messages[0]?.client_message_id;
+      const secondClientMessageId = inputCommands[1]?.payload.messages[0]?.client_message_id;
+      expect(typeof firstClientMessageId).toBe("string");
+      expect(typeof secondClientMessageId).toBe("string");
+
+      const firstMessages: unknown[] = [];
+      const firstIterator = session.stream();
+      firstMessages.push((await firstIterator.next()).value);
+      firstMessages.push((await firstIterator.next()).value);
+
+      expect(firstMessages[0]).toMatchObject({
+        type: "assistant",
+        content: "first response",
+      });
+      expect(firstMessages[1]).toMatchObject({
+        type: "queue_update",
+        queue: [
+          expect.objectContaining({
+            id: "queue-1",
+            clientMessageId: secondClientMessageId,
+          }),
+        ],
+      });
+
+      const runtime = { agent_id: "agent-123", conversation_id: "conv-created" };
+      fakeStreamSocket().serverMessage({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          message_type: "stop_reason",
+          stop_reason: "end_turn",
+          run_id: "run-first",
+        },
+      });
+      firstMessages.push((await firstIterator.next()).value);
+      expect(firstMessages.at(-1)).toMatchObject({
+        type: "result",
+        success: true,
+        result: "first response",
+      });
+
+      fakeStreamSocket().serverMessage({
+        type: "update_queue",
+        runtime,
+        queue: [],
+      });
+      fakeStreamSocket().serverMessage({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          id: "msg-second",
+          message_type: "assistant_message",
+          content: "second response",
+          run_id: "run-second",
+        },
+      });
+      fakeStreamSocket().serverMessage({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          message_type: "stop_reason",
+          stop_reason: "end_turn",
+          run_id: "run-second",
+        },
+      });
+
+      const secondMessages: unknown[] = [];
+      for await (const message of session.stream()) {
+        secondMessages.push(message);
+      }
+      expect(secondMessages).toContainEqual({ type: "queue_update", queue: [] });
+      expect(secondMessages).toContainEqual(
+        expect.objectContaining({ type: "assistant", content: "second response" }),
+      );
+      expect(secondMessages.at(-1)).toMatchObject({
+        type: "result",
+        success: true,
+        result: "second response",
       });
     } finally {
       FakeAppServerSocket.inputScenario = "normal";
@@ -889,7 +1095,7 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("app-server sessions apply model sleeptime and list messages", async () => {
+  test("websocket protocol sessions apply model dreaming and list messages", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaCodeClient({
       backend: "remote",
@@ -899,7 +1105,7 @@ describe("LettaCodeClient", () => {
 
     const session = client.resumeSession("agent-123", {
       model: "anthropic/claude-opus-4",
-      sleeptime: { trigger: "step-count", stepCount: 3 },
+      dreaming: { trigger: "step-count", stepCount: 3 },
     });
 
     try {
@@ -934,6 +1140,27 @@ describe("LettaCodeClient", () => {
         toolset_preference: "developer",
       });
 
+      await session.sendCommand({
+        type: "change_device_state",
+        runtime: { agent_id: "agent-123", conversation_id: "default" },
+        payload: { cwd: "/workspace/next" },
+      });
+      expect(fakeControlSocket().sent.at(-1)).toMatchObject({
+        type: "change_device_state",
+        runtime: { agent_id: "agent-123", conversation_id: "default" },
+        payload: { cwd: "/workspace/next" },
+      });
+
+      const syncResponse = await session.sendCommand<{ type: "sync_response"; success: boolean }>(
+        {
+          type: "sync",
+          runtime: { agent_id: "agent-123", conversation_id: "default" },
+          recover_approvals: false,
+        },
+        { responseType: "sync_response" },
+      );
+      expect(syncResponse.success).toBe(true);
+
       await expect(asAdvanced(session).recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
         recovered: true,
         unsupported: false,
@@ -949,7 +1176,72 @@ describe("LettaCodeClient", () => {
     }
   });
 
-  test("app-server sessions reject unsupported stdio-only options", () => {
+  test("websocket protocol sessions list models, apply reasoning effort, and abort", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaCodeClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("agent-123", {
+      model: "lc-anthropic/claude-sonnet-4",
+      reasoningEffort: "high",
+    });
+
+    try {
+      await asAdvanced(session).initialize();
+
+      expect(fakeControlSocket().sent).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "list_models" }),
+          expect.objectContaining({
+            type: "update_model",
+            payload: {
+              model_id: "sonnet-high",
+              model_handle: "lc-anthropic/claude-sonnet-4",
+            },
+          }),
+        ]),
+      );
+
+      const catalog = await session.listModels();
+      expect(catalog.entries.map((entry) => entry.id)).toEqual([
+        "sonnet-low",
+        "sonnet-high",
+        "opus",
+      ]);
+      expect(catalog.availableHandles).toEqual([
+        "anthropic/claude-sonnet-4",
+        "anthropic/claude-opus-4",
+      ]);
+      expect(catalog.byokProviderAliases).toEqual({ "lc-anthropic": "anthropic" });
+
+      const updateResult = await session.updateModel({
+        model: "anthropic/claude-sonnet-4",
+        reasoningEffort: "low",
+      });
+      expect(updateResult).toMatchObject({
+        appliedTo: "conversation",
+        modelId: "sonnet-low",
+        modelHandle: "anthropic/claude-sonnet-4",
+      });
+      expect(fakeControlSocket().sent.at(-1)).toMatchObject({
+        type: "update_model",
+        payload: { model_id: "sonnet-low" },
+      });
+
+      await session.abort();
+      expect(fakeControlSocket().sent.at(-1)).toMatchObject({
+        type: "abort_message",
+        runtime: { agent_id: "agent-123", conversation_id: "default" },
+      });
+    } finally {
+      session.close();
+    }
+  });
+
+  test("websocket protocol sessions reject unsupported stdio-only options", () => {
     const client = new LettaCodeClient({
       backend: "remote",
       url: "ws://127.0.0.1:4500/ws",
@@ -957,8 +1249,8 @@ describe("LettaCodeClient", () => {
     });
 
     expect(() =>
-      client.resumeSession("agent-123", { sleeptime: { behavior: "auto-launch" } }),
-    ).toThrow("does not yet support sleeptime.behavior");
+      client.resumeSession("agent-123", { dreaming: { behavior: "auto-launch" } }),
+    ).toThrow("does not yet support dreaming.behavior");
   });
 
 

@@ -24,12 +24,18 @@ import type {
   ExecuteExternalToolRequest,
   ListMessagesOptions,
   ListMessagesResult,
+  ListModelsResult,
   BootstrapStateOptions,
   BootstrapStateResult,
   SDKStreamEventPayload,
   RunTurnOptions,
   RecoverPendingApprovalsOptions,
   RecoverPendingApprovalsResult,
+  SDKProtocolCommand,
+  SDKProtocolMessage,
+  SendCommandOptions,
+  UpdateModelOptions,
+  UpdateModelResult,
 } from "./types.js";
 import {
   isHeadlessAutoAllowTool,
@@ -141,6 +147,11 @@ export class Session implements AsyncDisposable {
     private options: InternalSessionOptions = {}
   ) {
     // Note: Validation happens in public API functions (createSession, createAgent, etc.)
+    if (options.reasoningEffort !== undefined) {
+      throw new Error(
+        "reasoningEffort is not supported by this session. Create a Cloud, Remote, or local agent session before setting reasoning effort.",
+      );
+    }
     this.transport = new SubprocessTransport(options);
 
     // Store external tools in a map for quick lookup
@@ -227,7 +238,7 @@ export class Session implements AsyncDisposable {
           memfsEnabled: initMsg.memfs_enabled,
           skillSources: initMsg.skill_sources,
           systemInfoReminderEnabled: initMsg.system_info_reminder_enabled,
-          sleeptime:
+          dreaming:
             initMsg.reflection_trigger &&
             initMsg.reflection_behavior &&
             typeof initMsg.reflection_step_count === "number"
@@ -1040,6 +1051,7 @@ export class Session implements AsyncDisposable {
    * Abort the current operation (interrupt without closing the session)
    */
   async abort(): Promise<void> {
+    if (!this.initialized || this.pumpClosed) return;
     sessionLog("abort", `aborting session (agent=${this._agentId})`);
     await this.transport.write({
       type: "control_request",
@@ -1142,6 +1154,32 @@ export class Session implements AsyncDisposable {
     };
   }
 
+  async listModels(): Promise<ListModelsResult> {
+    throw new Error(
+      "listModels() is not supported by this session. Use a Cloud, Remote, or local agent session.",
+    );
+  }
+
+  async sendCommand(command: SDKProtocolCommand): Promise<void>;
+  async sendCommand<TResponse extends SDKProtocolMessage = SDKProtocolMessage>(
+    command: SDKProtocolCommand,
+    options: SendCommandOptions,
+  ): Promise<TResponse>;
+  async sendCommand(
+    _command?: SDKProtocolCommand,
+    _options?: SendCommandOptions,
+  ): Promise<void> {
+    throw new Error(
+      "sendCommand() is not supported by this session. Use a Cloud, Remote, or local agent session.",
+    );
+  }
+
+  async updateModel(_update: string | UpdateModelOptions): Promise<UpdateModelResult> {
+    throw new Error(
+      "updateModel() is not supported by this session. Use a Cloud, Remote, or local agent session.",
+    );
+  }
+
   /**
    * Fetch all data needed to render the initial conversation view in one round-trip.
    *
@@ -1210,7 +1248,7 @@ export class Session implements AsyncDisposable {
   }
 
   async updateToolset(_toolsetPreference: string): Promise<void> {
-    throw new Error("Local stdio sessions do not support updateToolset(). Use an app-server or Cloud session.");
+    throw new Error("updateToolset() is not supported by this session. Use a Cloud, Remote, or local agent session.");
   }
 
   /**
@@ -1280,7 +1318,7 @@ export class Session implements AsyncDisposable {
         memfsEnabled: msg.memfs_enabled,
         skillSources: msg.skill_sources,
         systemInfoReminderEnabled: msg.system_info_reminder_enabled,
-        sleeptime:
+        dreaming:
           msg.reflection_trigger &&
           msg.reflection_behavior &&
           typeof msg.reflection_step_count === "number"

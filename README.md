@@ -62,6 +62,11 @@ for await (const msg of session.stream()) {
 }
 ```
 
+Cloud, remote, and local agent sessions can accept another `send()` while a
+turn is streaming. The SDK sends the same `input` frame used by Letta Desktop
+and the listener owns queueing; `stream()` may surface `queue_update` events
+before the current turn's `result`.
+
 By default, `resumeSession(agentId)` continues the agent’s default conversation.
 Use `createSession(agentId)` when you want to start a fresh thread.
 
@@ -76,13 +81,14 @@ await using session = client.resumeSession(agentId, {
 ```
 
 The top-level helpers (`createAgent`, `createSession`, `resumeSession`, and
-`prompt`) remain available for local app-server sessions.
+`prompt`) remain available. Local helper calls use Letta Code's default agent
+selection when you do not pass an agent ID.
 
 ### User-managed app-server backend
 
 Use `backend: "remote"` when you already have a Letta Code app-server running.
-The app-server URL selects the execution environment; the SDK uses the
-app-server websocket protocol for `runtime_start`, `input`, streaming deltas,
+The app-server URL selects the execution environment; the SDK uses the same
+Letta Code websocket protocol for `runtime_start`, `input`, streaming deltas,
 and SDK-defined external tools.
 
 ```ts
@@ -172,9 +178,9 @@ custom upgrade headers.
 ## Session configuration
 
 Session options let you set runtime defaults before a session starts, including
-`model`, `cwd`, `permissionMode`, and sleeptime triggers. For remote and
-Constellation sessions, `cwd` must be a path inside the selected runtime
-environment.
+`model`, `reasoningEffort`, `cwd`, `permissionMode`, and dreaming triggers. For
+remote and Constellation sessions, `cwd` must be a path inside the selected
+runtime environment.
 
 ```ts
 import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
@@ -183,15 +189,45 @@ const client = new LettaCodeClient({ backend: "local" });
 
 const session = client.resumeSession("agent-123", {
   model: "anthropic/claude-sonnet-4",
+  reasoningEffort: "high",
   // For local sessions this may be a local path; for remote/Constellation
   // sessions, use a path inside the selected runtime environment.
   cwd: "/workspace/project",
   permissionMode: "bypassPermissions",
-  sleeptime: {
+  dreaming: {
     trigger: "step-count", // off | step-count | compaction-event
     stepCount: 8,
   },
 });
+```
+
+You can also inspect and change models after startup:
+
+```ts
+const catalog = await session.listModels();
+await session.updateModel({ model: "sonnet", reasoningEffort: "medium" });
+```
+
+Call `await session.abort()` to interrupt the current turn without closing the
+session.
+
+For advanced protocol access, use `sendCommand()` with raw Letta Code websocket
+protocol commands:
+
+```ts
+await session.sendCommand({
+  type: "change_device_state",
+  runtime: { agent_id: session.agentId!, conversation_id: session.conversationId! },
+  payload: { cwd: "/workspace/project" },
+});
+
+const sync = await session.sendCommand(
+  {
+    type: "sync",
+    runtime: { agent_id: session.agentId!, conversation_id: session.conversationId! },
+  },
+  { responseType: "sync_response" },
+);
 ```
 
 ## Links

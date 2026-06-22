@@ -304,7 +304,7 @@ describe("Session", () => {
       expect(init.memfsEnabled).toBe(true);
       expect(init.skillSources).toEqual(["project", "agent"]);
       expect(init.systemInfoReminderEnabled).toBe(false);
-      expect(init.sleeptime).toEqual({
+      expect(init.dreaming).toEqual({
         trigger: "step-count",
         behavior: "reminder",
         stepCount: 9,

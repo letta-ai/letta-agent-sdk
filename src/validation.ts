@@ -11,7 +11,7 @@ import type {
   CreateBlock,
   SystemPromptPreset,
   SkillSource,
-  SleeptimeOptions,
+  DreamingOptions,
 } from "./types.js";
 
 const VALID_SKILL_SOURCES: SkillSource[] = [
@@ -20,6 +20,15 @@ const VALID_SKILL_SOURCES: SkillSource[] = [
   "agent",
   "project",
 ];
+
+const VALID_REASONING_EFFORTS = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
 
 /**
  * Extract block labels from memory items.
@@ -99,35 +108,47 @@ function validateSkillSources(sources: SkillSource[] | undefined): void {
   }
 }
 
-function validateSleeptimeOptions(sleeptime: SleeptimeOptions | undefined): void {
-  if (sleeptime === undefined) {
+function validateDreamingOptions(dreaming: DreamingOptions | undefined): void {
+  if (dreaming === undefined) {
     return;
   }
 
   if (
-    sleeptime.trigger !== undefined &&
-    !["off", "step-count", "compaction-event"].includes(sleeptime.trigger)
+    dreaming.trigger !== undefined &&
+    !["off", "step-count", "compaction-event"].includes(dreaming.trigger)
   ) {
     throw new Error(
-      `Invalid sleeptime.trigger '${String(sleeptime.trigger)}'. Valid values: off, step-count, compaction-event`
+      `Invalid dreaming.trigger '${String(dreaming.trigger)}'. Valid values: off, step-count, compaction-event`
     );
   }
 
   if (
-    sleeptime.behavior !== undefined &&
-    !["reminder", "auto-launch"].includes(sleeptime.behavior)
+    dreaming.behavior !== undefined &&
+    !["reminder", "auto-launch"].includes(dreaming.behavior)
   ) {
     throw new Error(
-      `Invalid sleeptime.behavior '${String(sleeptime.behavior)}'. Valid values: reminder, auto-launch`
+      `Invalid dreaming.behavior '${String(dreaming.behavior)}'. Valid values: reminder, auto-launch`
     );
   }
 
   if (
-    sleeptime.stepCount !== undefined &&
-    (!Number.isInteger(sleeptime.stepCount) || sleeptime.stepCount <= 0)
+    dreaming.stepCount !== undefined &&
+    (!Number.isInteger(dreaming.stepCount) || dreaming.stepCount <= 0)
   ) {
     throw new Error(
-      "Invalid sleeptime.stepCount. Expected a positive integer."
+      "Invalid dreaming.stepCount. Expected a positive integer."
+    );
+  }
+}
+
+function validateReasoningEffort(value: unknown): void {
+  if (value === undefined) return;
+  if (
+    typeof value !== "string" ||
+    !VALID_REASONING_EFFORTS.includes(value as (typeof VALID_REASONING_EFFORTS)[number])
+  ) {
+    throw new Error(
+      `Invalid reasoningEffort '${String(value)}'. Valid values: ${VALID_REASONING_EFFORTS.join(", ")}`
     );
   }
 }
@@ -142,7 +163,8 @@ export function validateCreateSessionOptions(options: CreateSessionOptions): voi
   }
 
   validateSkillSources(options.skillSources);
-  validateSleeptimeOptions(options.sleeptime);
+  validateReasoningEffort(options.reasoningEffort);
+  validateDreamingOptions(options.dreaming);
   validateApprovalRecoveryOptions(options);
   validateRemovedSessionOptions(options);
 }
@@ -197,5 +219,5 @@ export function validateCreateAgentOptions(options: CreateAgentOptions): void {
   }
 
   validateSkillSources(options.skillSources);
-  validateSleeptimeOptions(options.sleeptime);
+  validateDreamingOptions(options.dreaming);
 }

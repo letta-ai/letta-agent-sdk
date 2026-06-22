@@ -4,18 +4,29 @@ import type {
   CreateAgentOptions,
   LettaCodeClientSessionOptions,
   LettaCodeSession,
+  LettaCodeModelEntry,
+  ListModelsResult,
   ListMessagesOptions,
   ListMessagesResult,
   MessageContentItem,
   RecoverPendingApprovalsOptions,
   RecoverPendingApprovalsResult,
+  ReasoningEffort,
   RunTurnOptions,
   SDKErrorCode,
   SDKInitMessage,
+  SDKLoopStatusMessage,
   SDKMessage,
+  SDKProtocolCommand,
+  SDKProtocolMessage,
+  SDKQueueItem,
+  SDKQueueUpdateMessage,
   SDKResultMessage,
   SDKStreamEventPayload,
+  SendCommandOptions,
   SendMessage,
+  UpdateModelOptions,
+  UpdateModelResult,
 } from "./types.js";
 
 export type RuntimeScope = {
@@ -49,6 +60,10 @@ export type RuntimeTurnResult = {
   errorCode?: SDKErrorCode;
 };
 
+export type RuntimeSendTurnOptions = {
+  clientMessageId: string;
+};
+
 export type RuntimeRequestOptions = {
   timeoutMs?: number;
   predicate?: (message: ProtocolMessage) => boolean;
@@ -57,16 +72,17 @@ export type RuntimeRequestOptions = {
 export interface RemoteClientRuntimeController {
   onMessage(handler: (message: ProtocolMessage, channel?: string) => void): () => void;
   send(command: Record<string, unknown>): void;
+  sendTurnMessage(
+    runtime: RuntimeScope,
+    message: SendMessage,
+    options: RuntimeSendTurnOptions,
+  ): void;
+  abort(runtime: RuntimeScope): Promise<void>;
   request(
     type: string,
     body: Record<string, unknown>,
     options?: RuntimeRequestOptions,
   ): Promise<ProtocolMessage>;
-  runTurnMessage(
-    runtime: RuntimeScope,
-    message: SendMessage,
-    options?: { timeoutMs?: number },
-  ): Promise<RuntimeTurnResult>;
   recoverPendingApprovals(
     runtime: RuntimeScope,
     options?: RecoverPendingApprovalsOptions,
@@ -75,6 +91,11 @@ export interface RemoteClientRuntimeController {
     conversationId: string,
     options?: ListMessagesOptions,
   ): Promise<ListMessagesResult>;
+  listModels(): Promise<ListModelsResult>;
+  updateModel(
+    runtime: RuntimeScope,
+    payload: { model_id?: string; model_handle?: string },
+  ): Promise<UpdateModelResult>;
   close(): void;
 }
 
@@ -82,6 +103,7 @@ export type RuntimeSessionInit = {
   controller: RemoteClientRuntimeController;
   runtime: RuntimeScope;
   model?: string | null;
+  modelSettings?: Record<string, unknown> | null;
   tools?: string[];
 };
 
@@ -95,7 +117,48 @@ type ReflectionSettings = {
   step_count: number;
 };
 
-const FAILURE_STOP_REASONS = new Set(["error", "llm_api_error", "max_steps", "interrupted"]);
+type UpdateModelPayload = {
+  model_id?: string;
+  model_handle?: string;
+};
+
+type NormalizedUpdateModelInput = {
+  model?: string;
+  modelId?: string;
+  modelHandle?: string;
+  reasoningEffort?: ReasoningEffort;
+};
+
+type TurnTracker = {
+  id: number;
+  runtime: RuntimeScope;
+  clientMessageId: string;
+  queuedAt: number;
+  startedAt: number;
+  assistantText: string;
+  runIds: Set<string>;
+  observedTurnEvidence: boolean;
+  observedRequiresApprovalStop: boolean;
+  abortRequested: boolean;
+  timeout: ReturnType<typeof setTimeout> | null;
+};
+
+const FAILURE_STOP_REASONS = new Set([
+  "error",
+  "llm_api_error",
+  "max_steps",
+  "interrupted",
+  "cancelled",
+  "canceled",
+]);
+const REASONING_EFFORTS = new Set<ReasoningEffort>([
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+]);
 const KNOWN_SDK_ERROR_CODES = new Set<SDKErrorCode>([
   "approval_conflict",
   "approval_conflict_terminal",
@@ -130,6 +193,102 @@ function toSdkErrorCode(value: string | null | undefined): SDKErrorCode | undefi
     : undefined;
 }
 
+function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return typeof value === "string" && REASONING_EFFORTS.has(value as ReasoningEffort);
+}
+
+function nonEmptyString(value: unknown, name: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`Invalid ${name}. Expected a non-empty string.`);
+  }
+  return value;
+}
+
+function normalizeUpdateModelInput(update: string | UpdateModelOptions): NormalizedUpdateModelInput {
+  if (typeof update === "string") {
+    if (update.length === 0) {
+      throw new Error("Invalid model. Expected a non-empty string.");
+    }
+    return { model: update };
+  }
+  if (!update || typeof update !== "object" || Array.isArray(update)) {
+    throw new Error("Invalid updateModel options. Expected a model string or options object.");
+  }
+
+  const model = nonEmptyString(update.model, "model");
+  const modelId = nonEmptyString(update.modelId, "modelId");
+  const modelHandle = nonEmptyString(update.modelHandle, "modelHandle");
+  const reasoningEffort = update.reasoningEffort;
+  if (reasoningEffort !== undefined && !isReasoningEffort(reasoningEffort)) {
+    throw new Error(
+      `Invalid reasoningEffort '${String(reasoningEffort)}'. Valid values: ${[...REASONING_EFFORTS].join(", ")}`,
+    );
+  }
+  if (model !== undefined && (modelId !== undefined || modelHandle !== undefined)) {
+    throw new Error("Invalid updateModel options. Use either model or explicit modelId/modelHandle, not both.");
+  }
+  if (
+    model === undefined &&
+    modelId === undefined &&
+    modelHandle === undefined &&
+    reasoningEffort === undefined
+  ) {
+    throw new Error("Invalid updateModel options. Provide model, modelId, modelHandle, or reasoningEffort.");
+  }
+  return {
+    ...(model !== undefined ? { model } : {}),
+    ...(modelId !== undefined ? { modelId } : {}),
+    ...(modelHandle !== undefined ? { modelHandle } : {}),
+    ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+  };
+}
+
+function modelPayloadWithoutReasoning(input: NormalizedUpdateModelInput): UpdateModelPayload {
+  const payload: UpdateModelPayload = {};
+  if (input.modelId !== undefined) payload.model_id = input.modelId;
+  if (input.modelHandle !== undefined) payload.model_handle = input.modelHandle;
+  if (input.model !== undefined) {
+    if (input.model.includes("/")) payload.model_handle = input.model;
+    else payload.model_id = input.model;
+  }
+  return payload;
+}
+
+function toBaseModelHandle(
+  handle: string | undefined,
+  byokProviderAliases: Record<string, string> | undefined,
+): string | undefined {
+  if (!handle) return undefined;
+  const slashIndex = handle.indexOf("/");
+  if (slashIndex === -1) return handle;
+  const provider = handle.slice(0, slashIndex);
+  const model = handle.slice(slashIndex + 1);
+  const baseProvider = byokProviderAliases?.[provider];
+  return baseProvider ? `${baseProvider}/${model}` : handle;
+}
+
+function getContextWindow(value: Record<string, unknown> | null | undefined): number | undefined {
+  const contextWindow = value?.context_window;
+  return typeof contextWindow === "number" ? contextWindow : undefined;
+}
+
+function getReasoningEffort(entry: LettaCodeModelEntry): string | undefined {
+  const effort = entry.updateArgs?.reasoning_effort;
+  return typeof effort === "string" ? effort : undefined;
+}
+
+function sameContextCandidates(
+  candidates: LettaCodeModelEntry[],
+  contextWindow: number | undefined,
+): LettaCodeModelEntry[] {
+  if (contextWindow === undefined) return candidates;
+  const matches = candidates.filter(
+    (entry) => getContextWindow(entry.updateArgs) === contextWindow,
+  );
+  return matches.length > 0 ? matches : candidates;
+}
+
 function isApprovalConflictSignal(params: {
   detail?: string;
   message?: string;
@@ -147,13 +306,13 @@ function isApprovalConflictSignal(params: {
   );
 }
 
-function resolveReflectionSettings(
-  sleeptime: LettaCodeClientSessionOptions["sleeptime"],
+function resolveDreamingSettings(
+  dreaming: LettaCodeClientSessionOptions["dreaming"],
 ): ReflectionSettings | null {
-  if (!sleeptime) return null;
+  if (!dreaming) return null;
   return {
-    trigger: sleeptime.trigger ?? "step-count",
-    step_count: sleeptime.stepCount ?? 5,
+    trigger: dreaming.trigger ?? "step-count",
+    step_count: dreaming.stepCount ?? 5,
   };
 }
 
@@ -248,6 +407,67 @@ function sameRuntime(message: ProtocolMessage, runtime: RuntimeScope): boolean {
   return true;
 }
 
+function streamDeltaRecord(message: ProtocolMessage): Record<string, unknown> | null {
+  if (message.type !== "stream_delta") return null;
+  const delta = message.delta;
+  return delta && typeof delta === "object" && !Array.isArray(delta)
+    ? (delta as Record<string, unknown>)
+    : null;
+}
+
+function streamDeltaMessageType(delta: Record<string, unknown>): string | undefined {
+  return typeof delta.message_type === "string" ? delta.message_type : undefined;
+}
+
+function streamDeltaRunId(delta: Record<string, unknown>): string | undefined {
+  return typeof delta.run_id === "string" ? delta.run_id : undefined;
+}
+
+function streamDeltaStopReason(delta: Record<string, unknown>): string | null | undefined {
+  return typeof delta.stop_reason === "string" ? delta.stop_reason : undefined;
+}
+
+function loopStatusRecord(message: ProtocolMessage): Record<string, unknown> | null {
+  if (message.type !== "update_loop_status") return null;
+  const loopStatus = message.loop_status;
+  return loopStatus && typeof loopStatus === "object" && !Array.isArray(loopStatus)
+    ? (loopStatus as Record<string, unknown>)
+    : null;
+}
+
+function loopStatusValue(message: ProtocolMessage): string | undefined {
+  const loopStatus = loopStatusRecord(message);
+  return typeof loopStatus?.status === "string" ? loopStatus.status : undefined;
+}
+
+function loopStatusRunIds(message: ProtocolMessage): string[] {
+  const activeRunIds = loopStatusRecord(message)?.active_run_ids;
+  return Array.isArray(activeRunIds)
+    ? activeRunIds.filter((runId): runId is string => typeof runId === "string")
+    : [];
+}
+
+function queueItems(message: ProtocolMessage): SDKQueueItem[] {
+  const queue = message.queue;
+  if (!Array.isArray(queue)) return [];
+  return queue.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    if (typeof record.id !== "string") return [];
+    return [
+      {
+        id: record.id,
+        clientMessageId:
+          typeof record.client_message_id === "string" ? record.client_message_id : "",
+        kind: typeof record.kind === "string" ? record.kind : "message",
+        source: typeof record.source === "string" ? record.source : "user",
+        content: record.content,
+        enqueuedAt: typeof record.enqueued_at === "string" ? record.enqueued_at : "",
+      },
+    ];
+  });
+}
+
 export function normalizeSendMessage(message: SendMessage): string | MessageContentItem[] {
   return message;
 }
@@ -262,15 +482,18 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   protected _sessionId: string | null = null;
   protected _conversationId: string | null = null;
   protected _model = "";
+  protected _modelSettings: Record<string, unknown> | null = null;
 
   private readonly label: string;
   private readonly requestTimeoutMs: number | undefined;
   private streamQueue: SDKMessage[] = [];
   private streamResolvers: Array<(msg: SDKMessage | null) => void> = [];
   private removeMessageHandler: (() => void) | null = null;
-  private activeTurn: Promise<void> | null = null;
-  private activeTurnAssistantText = "";
+  private activeTurn: TurnTracker | null = null;
+  private pendingTurns: TurnTracker[] = [];
+  private nextTurnId = 0;
   private messageCounter = 0;
+  private clientMessageCounter = 0;
   private toolNames: string[] | undefined;
 
   protected constructor(
@@ -296,7 +519,13 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       this._agentId = init.runtime.agent_id;
       this._conversationId = init.runtime.conversation_id;
       this._sessionId = `${init.runtime.agent_id}:${init.runtime.conversation_id}`;
-      this._model = typeof init.model === "string" ? init.model : "";
+      this._modelSettings = init.modelSettings ?? null;
+      this._model =
+        typeof init.model === "string"
+          ? init.model
+          : typeof this._modelSettings?.model === "string"
+            ? this._modelSettings.model
+            : "";
       this.toolNames = init.tools;
       this.removeMessageHandler = this.controller.onMessage(this.handleProtocolMessage);
       this.initialized = true;
@@ -326,55 +555,29 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     if (!this.controller || !this.runtime) {
       throw new Error("Session is not initialized");
     }
-    if (this.activeTurn) {
-      throw new Error(`A turn is already in flight for this ${this.label} session`);
-    }
 
     await this.beforeTurn();
 
-    this.streamQueue.length = 0;
-    this.activeTurnAssistantText = "";
-    this.activeTurnStartedAt = Date.now();
-
-    const controller = this.controller;
-    const runtime = this.runtime;
-    this.activeTurn = controller
-      .runTurnMessage(runtime, message, {
-        ...(this.requestTimeoutMs !== undefined ? { timeoutMs: this.requestTimeoutMs } : {}),
-      })
-      .then((turn) => {
-        this.enqueue(this.resultFromTurn(turn));
-      })
-      .catch((error) => {
-        const detail = error instanceof Error ? error.message : String(error);
-        this.enqueue({
-          type: "error",
-          message: detail,
-          errorCode: "error",
-          stopReason: "error",
-          errorDetail: detail,
-          recoverable: false,
-        });
-        this.enqueue({
-          type: "result",
-          success: false,
-          error: "error",
-          errorCode: "error",
-          recoverable: false,
-          errorDetail: detail,
-          durationMs: Date.now() - this.activeTurnStartedAt,
-          conversationId: this._conversationId,
-        });
-      })
-      .finally(() => {
-        this.activeTurn = null;
+    const turn = this.trackSentTurn(this.runtime);
+    try {
+      this.controller.sendTurnMessage(this.runtime, message, {
+        clientMessageId: turn.clientMessageId,
       });
+    } catch (error) {
+      this.removeTrackedTurn(turn);
+      throw error;
+    }
   }
 
   async runTurn(
     message: SendMessage,
     _options: RunTurnOptions = {},
   ): Promise<SDKResultMessage> {
+    if (this.activeTurn || this.pendingTurns.length > 0) {
+      throw new Error(
+        `A turn is already in flight for this ${this.label} session. Use send() and stream() to let the listener queue messages.`,
+      );
+    }
     await this.send(message);
     for await (const msg of this.stream()) {
       if (msg.type === "result") {
@@ -400,6 +603,87 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       yield msg;
       if (msg.type === "result") break;
     }
+  }
+
+  async abort(): Promise<void> {
+    if (!this.initialized) return;
+    if (!this.controller || !this.runtime) return;
+    if (this.activeTurn) this.activeTurn.abortRequested = true;
+    await this.controller.abort(this.runtime);
+  }
+
+  async sendCommand(command: SDKProtocolCommand): Promise<void>;
+  async sendCommand<TResponse extends SDKProtocolMessage = SDKProtocolMessage>(
+    command: SDKProtocolCommand,
+    options: SendCommandOptions,
+  ): Promise<TResponse>;
+  async sendCommand<TResponse extends SDKProtocolMessage = SDKProtocolMessage>(
+    command: SDKProtocolCommand,
+    options?: SendCommandOptions,
+  ): Promise<void | TResponse> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+    if (!this.controller) {
+      throw new Error("Session is not initialized");
+    }
+    if (!command || typeof command !== "object" || Array.isArray(command)) {
+      throw new Error("Invalid command. Expected a protocol command object.");
+    }
+    if (typeof command.type !== "string" || command.type.length === 0) {
+      throw new Error("Invalid command. Expected a non-empty type.");
+    }
+
+    if (!options || (!options.responseType && !options.predicate && options.timeoutMs === undefined)) {
+      this.controller.send(command);
+      return;
+    }
+
+    const { type, ...body } = command;
+    const response = await this.controller.request(type, body, {
+      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      predicate: options.predicate
+        ? (message) => options.predicate?.(message as SDKProtocolMessage) === true
+        : options.responseType
+          ? (message) => message.type === options.responseType
+          : undefined,
+    });
+    return response as TResponse;
+  }
+
+  async listModels(): Promise<ListModelsResult> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+    if (!this.controller) {
+      throw new Error("Session is not initialized");
+    }
+    return this.controller.listModels();
+  }
+
+  async updateModel(update: string | UpdateModelOptions): Promise<UpdateModelResult> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+    if (!this.controller || !this.runtime) {
+      throw new Error("Session is not initialized");
+    }
+
+    const normalized = normalizeUpdateModelInput(update);
+    const payload = await this.resolveUpdateModelPayload(normalized);
+    const result = await this.controller.updateModel(this.runtime, payload);
+
+    if (result.modelHandle !== undefined) {
+      this._model = result.modelHandle;
+    } else if (payload.model_handle !== undefined) {
+      this._model = payload.model_handle;
+    } else if (typeof result.modelSettings?.model === "string") {
+      this._model = result.modelSettings.model;
+    }
+    if ("modelSettings" in result) {
+      this._modelSettings = result.modelSettings ?? null;
+    }
+    return result;
   }
 
   async recoverPendingApprovals(
@@ -462,6 +746,12 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     this.closed = true;
     this.removeMessageHandler?.();
     this.removeMessageHandler = null;
+    if (this.activeTurn?.timeout) clearTimeout(this.activeTurn.timeout);
+    for (const turn of this.pendingTurns) {
+      if (turn.timeout) clearTimeout(turn.timeout);
+    }
+    this.activeTurn = null;
+    this.pendingTurns.length = 0;
     this.controller?.close();
     this.controller = null;
     this.onCoreClose();
@@ -562,6 +852,161 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     this._model = model;
   }
 
+  private trackSentTurn(runtime: RuntimeScope): TurnTracker {
+    const turn: TurnTracker = {
+      id: ++this.nextTurnId,
+      runtime,
+      clientMessageId: `sdk-message-${Date.now()}-${++this.clientMessageCounter}`,
+      queuedAt: Date.now(),
+      startedAt: 0,
+      assistantText: "",
+      runIds: new Set<string>(),
+      observedTurnEvidence: false,
+      observedRequiresApprovalStop: false,
+      abortRequested: false,
+      timeout: null,
+    };
+
+    if (this.activeTurn) {
+      this.pendingTurns.push(turn);
+    } else {
+      this.activateTurn(turn);
+    }
+    return turn;
+  }
+
+  private activateTurn(turn: TurnTracker): void {
+    this.activeTurn = turn;
+    turn.startedAt = Date.now();
+    this.activeTurnStartedAt = turn.startedAt;
+    if (this.requestTimeoutMs !== undefined) {
+      turn.timeout = setTimeout(() => {
+        this.failTurn(turn, `Timed out waiting for ${this.label} turn`);
+      }, this.requestTimeoutMs);
+      (turn.timeout as { unref?: () => void }).unref?.();
+    }
+  }
+
+  private activateNextTurnFromProtocol(): TurnTracker | null {
+    if (this.activeTurn) return this.activeTurn;
+    const next = this.pendingTurns.shift();
+    if (!next) return null;
+    this.activateTurn(next);
+    return next;
+  }
+
+  private removeTrackedTurn(turn: TurnTracker): void {
+    if (turn.timeout) clearTimeout(turn.timeout);
+    if (this.activeTurn === turn) {
+      this.activeTurn = null;
+      return;
+    }
+    const index = this.pendingTurns.indexOf(turn);
+    if (index !== -1) this.pendingTurns.splice(index, 1);
+  }
+
+  private failTurn(turn: TurnTracker, detail: string): void {
+    if (this.activeTurn !== turn) return;
+    this.enqueue({
+      type: "error",
+      message: detail,
+      errorCode: "error",
+      stopReason: "error",
+      errorDetail: detail,
+      recoverable: false,
+    });
+    this.completeActiveTurn({
+      runtime: turn.runtime,
+      stopReason: "error",
+      runIds: [...turn.runIds],
+      success: false,
+      detail,
+      errorCode: "error",
+    });
+  }
+
+  private completeActiveTurn(turn: RuntimeTurnResult): void {
+    const active = this.activeTurn;
+    if (!active) return;
+    if (active.timeout) {
+      clearTimeout(active.timeout);
+      active.timeout = null;
+    }
+    this.enqueue(this.resultFromTurn(turn, active));
+    this.activeTurn = null;
+  }
+
+  private async resolveUpdateModelPayload(
+    input: NormalizedUpdateModelInput,
+  ): Promise<UpdateModelPayload> {
+    if (input.reasoningEffort === undefined) {
+      return modelPayloadWithoutReasoning(input);
+    }
+    if (!this.controller) {
+      throw new Error("Session is not initialized");
+    }
+
+    const catalog = await this.controller.listModels();
+    const byId = new Map(catalog.entries.map((entry) => [entry.id, entry]));
+    const aliases = catalog.byokProviderAliases;
+
+    let baseEntry: LettaCodeModelEntry | undefined;
+    let explicitHandle: string | undefined;
+    let targetHandle: string | undefined;
+
+    if (input.modelId !== undefined) {
+      baseEntry = byId.get(input.modelId);
+      explicitHandle = input.modelHandle;
+      targetHandle = baseEntry?.handle ?? toBaseModelHandle(input.modelHandle, aliases);
+    } else if (input.modelHandle !== undefined) {
+      explicitHandle = input.modelHandle;
+      targetHandle = toBaseModelHandle(input.modelHandle, aliases);
+    } else if (input.model !== undefined) {
+      baseEntry = byId.get(input.model);
+      if (baseEntry) {
+        targetHandle = baseEntry.handle;
+      } else {
+        explicitHandle = input.model;
+        targetHandle = toBaseModelHandle(input.model, aliases);
+      }
+    } else {
+      explicitHandle = this._model || undefined;
+      targetHandle = toBaseModelHandle(this._model || undefined, aliases);
+    }
+
+    if (!targetHandle) {
+      throw new Error("reasoningEffort requires a current model or explicit model/modelId/modelHandle.");
+    }
+
+    const candidates = catalog.entries.filter(
+      (entry) => entry.handle === targetHandle || entry.handle === explicitHandle,
+    );
+    if (candidates.length === 0) {
+      throw new Error(
+        `reasoningEffort requires a model from listModels(); no catalog entry found for ${targetHandle}.`,
+      );
+    }
+
+    const contextWindow =
+      getContextWindow(baseEntry?.updateArgs) ?? getContextWindow(this._modelSettings);
+    const scopedCandidates = sameContextCandidates(candidates, contextWindow);
+    const matchingEntry =
+      scopedCandidates.find((entry) => getReasoningEffort(entry) === input.reasoningEffort) ??
+      candidates.find((entry) => getReasoningEffort(entry) === input.reasoningEffort);
+
+    if (!matchingEntry) {
+      throw new Error(
+        `No ${input.reasoningEffort} reasoning tier found for model ${targetHandle}.`,
+      );
+    }
+
+    const payload: UpdateModelPayload = { model_id: matchingEntry.id };
+    if (explicitHandle !== undefined) {
+      payload.model_handle = explicitHandle;
+    }
+    return payload;
+  }
+
   protected async applyPostInitializeOptions(): Promise<void> {
     if (!this.controller || !this.runtime) return;
 
@@ -576,53 +1021,150 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       ensureSuccess(response, "Failed to enable memfs");
     }
 
-    const sleeptimeSettings = resolveReflectionSettings(options.sleeptime);
-    if (sleeptimeSettings) {
+    const dreamingSettings = resolveDreamingSettings(options.dreaming);
+    if (dreamingSettings) {
       const response = await this.controller.request(
         "set_reflection_settings",
         {
           runtime: this.runtime,
-          settings: sleeptimeSettings,
+          settings: dreamingSettings,
           scope: "both",
         },
         { predicate: (message) => message.type === "set_reflection_settings_response" },
       );
-      ensureSuccess(response, "Failed to update sleeptime settings");
+      ensureSuccess(response, "Failed to update dreaming settings");
     }
 
     if (this.mode.kind !== "session") return;
 
-    if (this.mode.options.model !== undefined) {
-      const response = await this.controller.request(
-        "update_model",
-        {
-          runtime: this.runtime,
-          payload: { model_handle: this.mode.options.model },
-        },
-        { predicate: (message) => message.type === "update_model_response" },
-      );
-      ensureSuccess(response, "Failed to update model");
-      const updatedModel = typeof response.model_handle === "string"
-        ? response.model_handle
-        : this.mode.options.model;
-      this._model = updatedModel;
+    if (
+      this.mode.options.model !== undefined ||
+      this.mode.options.reasoningEffort !== undefined
+    ) {
+      await this.updateModel({
+        ...(this.mode.options.model !== undefined ? { model: this.mode.options.model } : {}),
+        ...(this.mode.options.reasoningEffort !== undefined
+          ? { reasoningEffort: this.mode.options.reasoningEffort }
+          : {}),
+      });
     }
 
     // Initial cwd and permission mode are part of runtime_start for
-    // app-server/listener sessions. Reserve change_device_state for explicit
+    // websocket protocol sessions. Reserve change_device_state for explicit
     // post-init mutations via changeDeviceState().
   }
 
   private handleProtocolMessage = (message: ProtocolMessage): void => {
     if (!this.runtime || !sameRuntime(message, this.runtime)) return;
-    if (message.type !== "stream_delta") return;
-    const delta = message.delta;
-    if (!delta || typeof delta !== "object") return;
-    const sdkMessage = this.transformStreamDelta(delta as Record<string, unknown>);
+
+    if (message.type === "update_queue") {
+      const sdkMessage: SDKQueueUpdateMessage = {
+        type: "queue_update",
+        queue: queueItems(message),
+      };
+      this.enqueue(sdkMessage);
+      return;
+    }
+
+    if (message.type === "update_loop_status") {
+      this.handleLoopStatusMessage(message);
+      return;
+    }
+
+    const delta = streamDeltaRecord(message);
+    if (!delta) return;
+    const active = this.activateNextTurnFromProtocol();
+    if (active) {
+      active.observedTurnEvidence = true;
+      const runId = streamDeltaRunId(delta);
+      if (runId) active.runIds.add(runId);
+    }
+
+    const sdkMessage = this.transformStreamDelta(delta);
     if (sdkMessage) {
       this.enqueue(sdkMessage);
     }
+
+    this.handleTurnTerminalDelta(delta, sdkMessage);
   };
+
+  private handleLoopStatusMessage(message: ProtocolMessage): void {
+    const status = loopStatusValue(message);
+    if (!status) return;
+    const activeRunIds = loopStatusRunIds(message);
+    const sdkMessage: SDKLoopStatusMessage = {
+      type: "loop_status",
+      status,
+      activeRunIds,
+    };
+    this.enqueue(sdkMessage);
+
+    const active = this.activeTurn;
+    if (!active) return;
+    for (const runId of activeRunIds) active.runIds.add(runId);
+
+    const hadTurnEvidence = active.observedTurnEvidence || active.observedRequiresApprovalStop;
+    if (!hadTurnEvidence) return;
+    if (status === "WAITING_ON_APPROVAL") {
+      this.completeActiveTurn({
+        runtime: active.runtime,
+        stopReason: "requires_approval",
+        runIds: [...active.runIds],
+      });
+      return;
+    }
+    if (status === "WAITING_ON_INPUT" && active.abortRequested) {
+      this.completeActiveTurn({
+        runtime: active.runtime,
+        stopReason: "interrupted",
+        runIds: [...active.runIds],
+        success: false,
+        detail: "Interrupted",
+        errorCode: "interrupted",
+      });
+      return;
+    }
+    if (status === "WAITING_ON_INPUT" && active.observedTurnEvidence) {
+      this.completeActiveTurn({
+        runtime: active.runtime,
+        stopReason: null,
+        runIds: [...active.runIds],
+      });
+    }
+  }
+
+  private handleTurnTerminalDelta(
+    delta: Record<string, unknown>,
+    sdkMessage: SDKMessage | null,
+  ): void {
+    const active = this.activeTurn;
+    if (!active) return;
+    const messageType = streamDeltaMessageType(delta);
+    if (messageType === "stop_reason") {
+      const stopReason = streamDeltaStopReason(delta) ?? null;
+      if (stopReason === "requires_approval") {
+        active.observedRequiresApprovalStop = true;
+        return;
+      }
+      this.completeActiveTurn({
+        runtime: active.runtime,
+        stopReason,
+        runIds: [...active.runIds],
+      });
+      return;
+    }
+
+    if (sdkMessage?.type === "error") {
+      this.completeActiveTurn({
+        runtime: active.runtime,
+        stopReason: sdkMessage.stopReason,
+        runIds: [...active.runIds],
+        success: false,
+        detail: sdkMessage.errorDetail ?? sdkMessage.message,
+        errorCode: sdkMessage.errorCode,
+      });
+    }
+  }
 
   private transformStreamDelta(delta: Record<string, unknown>): SDKMessage | null {
     const messageType = typeof delta.message_type === "string" ? delta.message_type : undefined;
@@ -632,7 +1174,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     if (messageType === "assistant_message") {
       const content = extractTextFromContent(delta.content);
       if (!content) return null;
-      this.activeTurnAssistantText += content;
+      if (this.activeTurn) this.activeTurn.assistantText += content;
       return { type: "assistant", content, uuid, runId };
     }
 
@@ -748,7 +1290,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     };
   }
 
-  private resultFromTurn(turn: RuntimeTurnResult): SDKResultMessage {
+  private resultFromTurn(turn: RuntimeTurnResult, tracker?: TurnTracker): SDKResultMessage {
     const stopReason = turn.stopReason ?? (turn.success === false ? "error" : undefined);
     const approvalConflict = isApprovalConflictSignal({
       detail: turn.detail,
@@ -764,14 +1306,14 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     return {
       type: "result",
       success,
-      result: success ? (this.activeTurnAssistantText || undefined) : undefined,
+      result: success ? (tracker?.assistantText || undefined) : undefined,
       error: success ? undefined : (errorCode ?? stopReason ?? "error"),
       errorCode: success ? undefined : (errorCode ?? "error"),
       approvalConflict: approvalConflict || undefined,
       recoverable: approvalConflict ? true : success ? undefined : false,
       errorDetail: success ? undefined : turn.detail,
       stopReason,
-      durationMs: Date.now() - this.activeTurnStartedAt,
+      durationMs: Date.now() - (tracker?.startedAt || this.activeTurnStartedAt),
       conversationId: turn.runtime.conversation_id,
       runIds: turn.runIds.length > 0 ? turn.runIds : undefined,
     };

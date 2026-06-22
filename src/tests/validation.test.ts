@@ -2,20 +2,30 @@ import { describe, expect, test } from "bun:test";
 import { validateCreateAgentOptions, validateCreateSessionOptions } from "../validation.js";
 
 describe("validation", () => {
-  test("accepts valid session skill/reminder/sleeptime options", () => {
+  test("accepts valid session skill/reminder/dreaming options", () => {
     expect(() =>
       validateCreateSessionOptions({
         skillSources: ["project", "global"],
         systemInfoReminder: false,
-        sleeptime: {
+        dreaming: {
           trigger: "step-count",
           behavior: "reminder",
           stepCount: 6,
         },
         maxApprovalRecoveryAttempts: 2,
         approvalRecoveryTimeoutMs: 3000,
+        reasoningEffort: "high",
       }),
     ).not.toThrow();
+  });
+
+  test("rejects invalid session reasoning effort", () => {
+    expect(() =>
+      validateCreateSessionOptions({
+        // biome-ignore lint/suspicious/noExplicitAny: runtime validation test
+        reasoningEffort: "maximum" as any,
+      }),
+    ).toThrow("Invalid reasoningEffort");
   });
 
   test("rejects invalid session skill source", () => {
@@ -27,32 +37,32 @@ describe("validation", () => {
     ).toThrow("Invalid skill source");
   });
 
-  test("rejects invalid session sleeptime options", () => {
+  test("rejects invalid session dreaming options", () => {
     expect(() =>
       validateCreateSessionOptions({
-        sleeptime: {
+        dreaming: {
           // biome-ignore lint/suspicious/noExplicitAny: runtime validation test
           trigger: "sometimes" as any,
         },
       }),
-    ).toThrow("Invalid sleeptime.trigger");
+    ).toThrow("Invalid dreaming.trigger");
 
     expect(() =>
       validateCreateSessionOptions({
-        sleeptime: {
+        dreaming: {
           // biome-ignore lint/suspicious/noExplicitAny: runtime validation test
           behavior: "manual" as any,
         },
       }),
-    ).toThrow("Invalid sleeptime.behavior");
+    ).toThrow("Invalid dreaming.behavior");
 
     expect(() =>
       validateCreateSessionOptions({
-        sleeptime: {
+        dreaming: {
           stepCount: 0,
         },
       }),
-    ).toThrow("Invalid sleeptime.stepCount");
+    ).toThrow("Invalid dreaming.stepCount");
   });
 
   test("rejects invalid approval recovery options", () => {

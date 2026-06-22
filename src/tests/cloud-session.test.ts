@@ -619,7 +619,7 @@ describe("CloudEnvironmentSession", () => {
       model: "anthropic/claude-sonnet-4",
       cwd: "/repo",
       permissionMode: "bypassPermissions",
-      sleeptime: { trigger: "step-count", stepCount: 3 },
+      dreaming: { trigger: "step-count", stepCount: 3 },
     });
     const init = await asAdvanced(session).initialize();
 

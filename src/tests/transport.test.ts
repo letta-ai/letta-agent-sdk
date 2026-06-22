@@ -34,7 +34,7 @@ describe("transport args", () => {
     tags?: string[];
     skillSources?: Array<"bundled" | "global" | "agent" | "project">;
     systemInfoReminder?: boolean;
-    sleeptime?: {
+    dreaming?: {
       trigger?: "off" | "step-count" | "compaction-event";
       behavior?: "reminder" | "auto-launch";
       stepCount?: number;
@@ -118,9 +118,9 @@ describe("transport args", () => {
     expect(args).toContain("--no-system-info-reminder");
   });
 
-  test("sleeptime options forward reflection flags", () => {
+  test("dreaming options forward reflection flags", () => {
     const args = buildArgsFor({
-      sleeptime: {
+      dreaming: {
         trigger: "step-count",
         behavior: "reminder",
         stepCount: 12,

@@ -114,31 +114,31 @@ export type MessageContentItem = TextContent | ImageContent;
 export type SendMessage = string | MessageContentItem[];
 
 // ═══════════════════════════════════════════════════════════════
-// SKILLS / REMINDER / SLEEPTIME TYPES
+// SKILLS / REMINDER / DREAMING TYPES
 // ═══════════════════════════════════════════════════════════════
 
 export type SkillSource = "bundled" | "global" | "agent" | "project";
 
-export type SleeptimeTrigger = "off" | "step-count" | "compaction-event";
+export type DreamingTrigger = "off" | "step-count" | "compaction-event";
 
-export type SleeptimeBehavior = "reminder" | "auto-launch";
+export type DreamingBehavior = "reminder" | "auto-launch";
 
 /**
- * Sleeptime settings exposed through SDK options.
+ * Dreaming settings exposed through SDK options.
  * Any omitted fields preserve server/CLI defaults.
  */
-export interface SleeptimeOptions {
-  trigger?: SleeptimeTrigger;
-  behavior?: SleeptimeBehavior;
+export interface DreamingOptions {
+  trigger?: DreamingTrigger;
+  behavior?: DreamingBehavior;
   stepCount?: number;
 }
 
 /**
- * Fully-resolved sleeptime settings emitted by init messages.
+ * Fully-resolved dreaming settings emitted by init messages.
  */
-export interface EffectiveSleeptimeSettings {
-  trigger: SleeptimeTrigger;
-  behavior: SleeptimeBehavior;
+export interface EffectiveDreamingSettings {
+  trigger: DreamingTrigger;
+  behavior: DreamingBehavior;
   stepCount: number;
 }
 
@@ -289,7 +289,7 @@ export interface LettaCodeLocalAppServerOptions {
   url?: string;
   /** Optional WebSocket constructor for tests/non-standard runtimes. */
   WebSocket?: LettaCodeSocketConstructor;
-  /** Timeout for app-server request/turn correlation. */
+  /** Timeout for websocket protocol request/turn correlation. */
   requestTimeoutMs?: number;
   /** Local app-server listen URL when the SDK spawns it. Defaults to ws://127.0.0.1:0. */
   listen?: string;
@@ -299,10 +299,7 @@ export interface LettaCodeLocalAppServerOptions {
 
 export interface LettaCodeLocalClientOptions {
   backend?: "local";
-  /**
-   * Local transport. Defaults to app-server. Set to "stdio" for the legacy
-   * subprocess JSON transport fallback.
-   */
+  /** Advanced local transport override. Defaults to app-server. */
   transport?: "app-server" | "stdio";
   /** Advanced app-server overrides for local transport. */
   appServer?: LettaCodeLocalAppServerOptions;
@@ -316,7 +313,7 @@ export interface LettaCodeRemoteClientOptions {
   authToken?: string;
   /** Optional WebSocket constructor for non-browser runtimes and tests. */
   WebSocket?: LettaCodeSocketConstructor;
-  /** Timeout for app-server request/turn correlation. Defaults to app-server client default. */
+  /** Timeout for websocket protocol request/turn correlation. */
   requestTimeoutMs?: number;
 }
 
@@ -351,7 +348,7 @@ export interface LettaCodeCloudClientOptions {
   fetch?: typeof fetch;
   /** Optional WebSocket constructor for non-browser runtimes and tests. */
   WebSocket?: LettaCodeSocketConstructor;
-  /** Timeout for cloud websocket request/turn correlation. */
+  /** Timeout for websocket protocol request/turn correlation. */
   requestTimeoutMs?: number;
   /**
    * WebSocket authentication style. Defaults to Authorization headers; set to
@@ -406,6 +403,7 @@ export interface InternalSessionOptions {
 
   // Agent configuration
   model?: string;
+  reasoningEffort?: ReasoningEffort;
   embedding?: string;
   systemPrompt?: SystemPromptConfig;
 
@@ -420,7 +418,7 @@ export interface InternalSessionOptions {
   // Skills/reminders
   skillSources?: SkillSource[];
   systemInfoReminder?: boolean;
-  sleeptime?: SleeptimeOptions;
+  dreaming?: DreamingOptions;
 
   // Permissions
   allowedTools?: string[];
@@ -456,6 +454,67 @@ export type PermissionMode =
   | "plan"
   | "bypassPermissions";
 
+export type ReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh";
+
+export interface LettaCodeModelEntry {
+  id: string;
+  handle: string;
+  label: string;
+  description: string;
+  isDefault?: boolean;
+  isFeatured?: boolean;
+  free?: boolean;
+  updateArgs?: Record<string, unknown>;
+}
+
+export interface ListModelsResult {
+  entries: LettaCodeModelEntry[];
+  /** Handles available to this user. null means availability lookup failed. */
+  availableHandles?: string[] | null;
+  /** BYOK provider name -> base provider name, e.g. lc-anthropic -> anthropic. */
+  byokProviderAliases?: Record<string, string>;
+}
+
+export interface UpdateModelOptions {
+  /** Model id from listModels() or direct model handle. Model ids usually omit '/'. */
+  model?: string;
+  /** Explicit model id from listModels(). */
+  modelId?: string;
+  /** Explicit direct model handle, including BYOK handles. */
+  modelHandle?: string;
+  /** Select a reasoning tier for the target model handle. */
+  reasoningEffort?: ReasoningEffort;
+}
+
+export interface UpdateModelResult {
+  appliedTo?: "agent" | "conversation";
+  modelId?: string;
+  modelHandle?: string;
+  modelSettings?: Record<string, unknown> | null;
+}
+
+export type SDKProtocolMessage<TType extends string = string> = Record<string, unknown> & {
+  type: TType;
+  request_id?: string;
+};
+
+export type SDKProtocolCommand<TType extends string = string> = SDKProtocolMessage<TType>;
+
+export interface SendCommandOptions<TResponseType extends string = string> {
+  /** Wait for a response with this protocol message type. Omit for fire-and-forget commands. */
+  responseType?: TResponseType;
+  /** Override the websocket protocol request timeout for this command. */
+  timeoutMs?: number;
+  /** Optional custom matcher for advanced protocol responses. */
+  predicate?: (message: SDKProtocolMessage) => boolean;
+}
+
 /**
  * Options for createSession() and resumeSession() - restricted to options that can be applied to existing agents (LRU/Memo).
  * For creating new agents with custom memory/persona, use createAgent().
@@ -463,6 +522,9 @@ export type PermissionMode =
 export interface CreateSessionOptions {
   /** Model to use (e.g., "claude-sonnet-4-20250514") - updates the agent's LLM config */
   model?: string;
+
+  /** Reasoning effort tier to use with the selected/current model on websocket protocol sessions. */
+  reasoningEffort?: ReasoningEffort;
 
   /** System prompt preset (only presets, no custom strings or append) - updates the agent */
   systemPrompt?: SystemPromptPreset;
@@ -492,9 +554,9 @@ export interface CreateSessionOptions {
   systemInfoReminder?: boolean;
 
   /**
-   * Configure sleeptime (reflection) settings, equivalent to `/sleeptime`.
+   * Configure dreaming settings.
    */
-  sleeptime?: SleeptimeOptions;
+  dreaming?: DreamingOptions;
 
   /** Custom permission callback - called when tool needs approval */
   canUseTool?: CanUseToolCallback;
@@ -539,7 +601,15 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
 export interface LettaCodeSession extends AsyncDisposable {
   send(message: SendMessage): Promise<void>;
   stream(): AsyncGenerator<SDKMessage>;
+  abort(): Promise<void>;
+  sendCommand(command: SDKProtocolCommand): Promise<void>;
+  sendCommand<TResponse extends SDKProtocolMessage = SDKProtocolMessage>(
+    command: SDKProtocolCommand,
+    options: SendCommandOptions,
+  ): Promise<TResponse>;
   listMessages(options?: ListMessagesOptions): Promise<ListMessagesResult>;
+  listModels(): Promise<ListModelsResult>;
+  updateModel(update: string | UpdateModelOptions): Promise<UpdateModelResult>;
   close(): void;
   readonly agentId: string | null;
   readonly sessionId: string | null;
@@ -615,9 +685,9 @@ export interface CreateAgentOptions {
   systemInfoReminder?: boolean;
 
   /**
-   * Configure sleeptime (reflection) settings, equivalent to `/sleeptime`.
+   * Configure dreaming settings.
    */
-  sleeptime?: SleeptimeOptions;
+  dreaming?: DreamingOptions;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -638,7 +708,7 @@ export interface SDKInitMessage {
   memfsEnabled?: boolean;
   skillSources?: SkillSource[];
   systemInfoReminderEnabled?: boolean;
-  sleeptime?: EffectiveSleeptimeSettings;
+  dreaming?: EffectiveDreamingSettings;
 }
 
 export interface SDKAssistantMessage {
@@ -797,6 +867,26 @@ export interface SDKRetryMessage {
   runId?: string;
 }
 
+export interface SDKQueueItem {
+  id: string;
+  clientMessageId: string;
+  kind: string;
+  source: string;
+  content: unknown;
+  enqueuedAt: string;
+}
+
+export interface SDKQueueUpdateMessage {
+  type: "queue_update";
+  queue: SDKQueueItem[];
+}
+
+export interface SDKLoopStatusMessage {
+  type: "loop_status";
+  status: string;
+  activeRunIds: string[];
+}
+
 /** Union of all SDK message types */
 export type SDKMessage =
   | SDKInitMessage
@@ -807,7 +897,9 @@ export type SDKMessage =
   | SDKResultMessage
   | SDKStreamEventMessage
   | SDKErrorMessage
-  | SDKRetryMessage;
+  | SDKRetryMessage
+  | SDKQueueUpdateMessage
+  | SDKLoopStatusMessage;
 
 // ═══════════════════════════════════════════════════════════════
 // LIST MESSAGES API

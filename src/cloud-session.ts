@@ -71,7 +71,11 @@ type CloudRuntimeStartResponse = ProtocolMessage & {
   type: "runtime_start_response";
   success: boolean;
   runtime: RuntimeScope | null;
-  agent: (Record<string, unknown> & { id?: string; model?: string | null }) | null;
+  agent: (Record<string, unknown> & {
+    id?: string;
+    model?: string | null;
+    model_settings?: Record<string, unknown> | null;
+  }) | null;
   conversation: (Record<string, unknown> & { id?: string; agent_id?: string }) | null;
   error?: string;
 };
@@ -650,8 +654,8 @@ export function assertCloudSessionOptionsSupported(
   if (options.systemInfoReminder !== undefined) {
     throw new Error(`Constellation ${action}() has not wired systemInfoReminder to the remote device protocol yet.`);
   }
-  if (options.sleeptime?.behavior !== undefined) {
-    throw new Error(`Constellation ${action}() has not wired sleeptime.behavior to the remote device protocol yet.`);
+  if (options.dreaming?.behavior !== undefined) {
+    throw new Error(`Constellation ${action}() does not yet support dreaming.behavior overrides.`);
   }
   if ((options as { memfsStartup?: unknown }).memfsStartup !== undefined) {
     throw new Error(`Constellation ${action}() does not support memfsStartup.`);
@@ -731,6 +735,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
         }),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
+        modelSettings: response.agent?.model_settings ?? null,
         ...(tools !== undefined ? { tools } : {}),
       };
     } catch (error) {
