@@ -71,7 +71,11 @@ type CloudRuntimeStartResponse = ProtocolMessage & {
   type: "runtime_start_response";
   success: boolean;
   runtime: RuntimeScope | null;
-  agent: (Record<string, unknown> & { id?: string; model?: string | null }) | null;
+  agent: (Record<string, unknown> & {
+    id?: string;
+    model?: string | null;
+    model_settings?: Record<string, unknown> | null;
+  }) | null;
   conversation: (Record<string, unknown> & { id?: string; agent_id?: string }) | null;
   error?: string;
 };
@@ -731,6 +735,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
         }),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
+        modelSettings: response.agent?.model_settings ?? null,
         ...(tools !== undefined ? { tools } : {}),
       };
     } catch (error) {

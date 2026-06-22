@@ -406,6 +406,7 @@ export interface InternalSessionOptions {
 
   // Agent configuration
   model?: string;
+  reasoningEffort?: ReasoningEffort;
   embedding?: string;
   systemPrompt?: SystemPromptConfig;
 
@@ -456,6 +457,67 @@ export type PermissionMode =
   | "plan"
   | "bypassPermissions";
 
+export type ReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh";
+
+export interface LettaCodeModelEntry {
+  id: string;
+  handle: string;
+  label: string;
+  description: string;
+  isDefault?: boolean;
+  isFeatured?: boolean;
+  free?: boolean;
+  updateArgs?: Record<string, unknown>;
+}
+
+export interface ListModelsResult {
+  entries: LettaCodeModelEntry[];
+  /** Handles available to this user. null means availability lookup failed. */
+  availableHandles?: string[] | null;
+  /** BYOK provider name -> base provider name, e.g. lc-anthropic -> anthropic. */
+  byokProviderAliases?: Record<string, string>;
+}
+
+export interface UpdateModelOptions {
+  /** Model id from listModels() or direct model handle. Model ids usually omit '/'. */
+  model?: string;
+  /** Explicit model id from listModels(). */
+  modelId?: string;
+  /** Explicit direct model handle, including BYOK handles. */
+  modelHandle?: string;
+  /** Select a reasoning tier for the target model handle. */
+  reasoningEffort?: ReasoningEffort;
+}
+
+export interface UpdateModelResult {
+  appliedTo?: "agent" | "conversation";
+  modelId?: string;
+  modelHandle?: string;
+  modelSettings?: Record<string, unknown> | null;
+}
+
+export type SDKProtocolMessage<TType extends string = string> = Record<string, unknown> & {
+  type: TType;
+  request_id?: string;
+};
+
+export type SDKProtocolCommand<TType extends string = string> = SDKProtocolMessage<TType>;
+
+export interface SendCommandOptions<TResponseType extends string = string> {
+  /** Wait for a response with this protocol message type. Omit for fire-and-forget commands. */
+  responseType?: TResponseType;
+  /** Override the app-server request timeout for this command. */
+  timeoutMs?: number;
+  /** Optional custom matcher for advanced protocol responses. */
+  predicate?: (message: SDKProtocolMessage) => boolean;
+}
+
 /**
  * Options for createSession() and resumeSession() - restricted to options that can be applied to existing agents (LRU/Memo).
  * For creating new agents with custom memory/persona, use createAgent().
@@ -463,6 +525,9 @@ export type PermissionMode =
 export interface CreateSessionOptions {
   /** Model to use (e.g., "claude-sonnet-4-20250514") - updates the agent's LLM config */
   model?: string;
+
+  /** Reasoning effort tier to use with the selected/current model. */
+  reasoningEffort?: ReasoningEffort;
 
   /** System prompt preset (only presets, no custom strings or append) - updates the agent */
   systemPrompt?: SystemPromptPreset;
@@ -539,7 +604,15 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
 export interface LettaCodeSession extends AsyncDisposable {
   send(message: SendMessage): Promise<void>;
   stream(): AsyncGenerator<SDKMessage>;
+  abort(): Promise<void>;
+  sendCommand(command: SDKProtocolCommand): Promise<void>;
+  sendCommand<TResponse extends SDKProtocolMessage = SDKProtocolMessage>(
+    command: SDKProtocolCommand,
+    options: SendCommandOptions,
+  ): Promise<TResponse>;
   listMessages(options?: ListMessagesOptions): Promise<ListMessagesResult>;
+  listModels(): Promise<ListModelsResult>;
+  updateModel(update: string | UpdateModelOptions): Promise<UpdateModelResult>;
   close(): void;
   readonly agentId: string | null;
   readonly sessionId: string | null;
@@ -797,6 +870,26 @@ export interface SDKRetryMessage {
   runId?: string;
 }
 
+export interface SDKQueueItem {
+  id: string;
+  clientMessageId: string;
+  kind: string;
+  source: string;
+  content: unknown;
+  enqueuedAt: string;
+}
+
+export interface SDKQueueUpdateMessage {
+  type: "queue_update";
+  queue: SDKQueueItem[];
+}
+
+export interface SDKLoopStatusMessage {
+  type: "loop_status";
+  status: string;
+  activeRunIds: string[];
+}
+
 /** Union of all SDK message types */
 export type SDKMessage =
   | SDKInitMessage
@@ -807,7 +900,9 @@ export type SDKMessage =
   | SDKResultMessage
   | SDKStreamEventMessage
   | SDKErrorMessage
-  | SDKRetryMessage;
+  | SDKRetryMessage
+  | SDKQueueUpdateMessage
+  | SDKLoopStatusMessage;
 
 // ═══════════════════════════════════════════════════════════════
 // LIST MESSAGES API

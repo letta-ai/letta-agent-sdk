@@ -16,10 +16,10 @@ import {
   normalizeSendMessage,
   type ProtocolMessage,
   type RemoteClientRuntimeController,
+  type RuntimeSendTurnOptions,
   type RuntimeScope,
   type RuntimeSessionInit,
   type RuntimeSessionMode,
-  type RuntimeTurnResult,
 } from "./remote-client-session-core.js";
 import type {
   AnyAgentTool,
@@ -27,19 +27,25 @@ import type {
   CreateAgentOptions,
   LettaCodeRemoteClientOptions,
   LettaCodeClientSessionOptions,
+  ListModelsResult,
   ListMessagesOptions,
   ListMessagesResult,
   MessageContentItem,
   RecoverPendingApprovalsOptions,
   RecoverPendingApprovalsResult,
   SendMessage,
+  UpdateModelResult,
 } from "./types.js";
 
 type RuntimeStartResponse = ProtocolMessage & {
   type: "runtime_start_response";
   success: boolean;
   runtime: RuntimeScope | null;
-  agent: (Record<string, unknown> & { id?: string; model?: string | null }) | null;
+  agent: (Record<string, unknown> & {
+    id?: string;
+    model?: string | null;
+    model_settings?: Record<string, unknown> | null;
+  }) | null;
   conversation: (Record<string, unknown> & { id?: string; agent_id?: string }) | null;
   error?: string;
 };
@@ -62,9 +68,31 @@ type ConversationMessagesListResponse = ProtocolMessage & {
   error?: string;
 };
 
-type RuntimeStartCommand = Parameters<AppServerClient["runtimeStart"]>[0];
+type ListModelsResponse = ProtocolMessage & {
+  type: "list_models_response";
+  success: boolean;
+  entries?: unknown;
+  available_handles?: unknown;
+  byok_provider_aliases?: unknown;
+  error?: string;
+};
 
-type InputCommand = Parameters<AppServerClient["runTurn"]>[0];
+type UpdateModelResponse = ProtocolMessage & {
+  type: "update_model_response";
+  success: boolean;
+  applied_to?: unknown;
+  model_id?: unknown;
+  model_handle?: unknown;
+  model_settings?: unknown;
+  error?: string;
+};
+
+type UpdateModelPayload = {
+  model_id?: string;
+  model_handle?: string;
+};
+
+type RuntimeStartCommand = Parameters<AppServerClient["runtimeStart"]>[0];
 
 export function agentToolNames(
   agent: Record<string, unknown> | null | undefined,
@@ -373,6 +401,84 @@ export function toAppServerApprovalDecision(
   };
 }
 
+function stringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === "string") record[key] = entry;
+  }
+  return record;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return { ...(value as Record<string, unknown>) };
+}
+
+function normalizeListModelsResponse(response: ListModelsResponse): ListModelsResult {
+  if (!response.success) {
+    throw new Error(response.error ?? "listModels failed");
+  }
+
+  const entries = Array.isArray(response.entries)
+    ? response.entries.flatMap((entry) => {
+        if (!entry || typeof entry !== "object") return [];
+        const record = entry as Record<string, unknown>;
+        if (
+          typeof record.id !== "string" ||
+          typeof record.handle !== "string" ||
+          typeof record.label !== "string" ||
+          typeof record.description !== "string"
+        ) {
+          return [];
+        }
+        const updateArgs = objectRecord(record.updateArgs);
+        return [
+          {
+            id: record.id,
+            handle: record.handle,
+            label: record.label,
+            description: record.description,
+            ...(typeof record.isDefault === "boolean" ? { isDefault: record.isDefault } : {}),
+            ...(typeof record.isFeatured === "boolean" ? { isFeatured: record.isFeatured } : {}),
+            ...(typeof record.free === "boolean" ? { free: record.free } : {}),
+            ...(updateArgs ? { updateArgs } : {}),
+          },
+        ];
+      })
+    : [];
+
+  const result: ListModelsResult = { entries };
+  if (response.available_handles === null) {
+    result.availableHandles = null;
+  } else if (Array.isArray(response.available_handles)) {
+    result.availableHandles = response.available_handles.filter(
+      (handle): handle is string => typeof handle === "string",
+    );
+  }
+  const aliases = stringRecord(response.byok_provider_aliases);
+  if (aliases) result.byokProviderAliases = aliases;
+  return result;
+}
+
+function normalizeUpdateModelResponse(response: UpdateModelResponse): UpdateModelResult {
+  if (!response.success) {
+    throw new Error(response.error ?? "Failed to update model");
+  }
+  const result: UpdateModelResult = {};
+  if (response.applied_to === "agent" || response.applied_to === "conversation") {
+    result.appliedTo = response.applied_to;
+  }
+  if (typeof response.model_id === "string") result.modelId = response.model_id;
+  if (typeof response.model_handle === "string") result.modelHandle = response.model_handle;
+  if (response.model_settings === null) {
+    result.modelSettings = null;
+  } else if (response.model_settings && typeof response.model_settings === "object") {
+    result.modelSettings = { ...(response.model_settings as Record<string, unknown>) };
+  }
+  return result;
+}
+
 function runtimeScopeFromMessage(message: ProtocolMessage): RuntimeScope | null {
   if (message.runtime) return message.runtime;
   const agentId = typeof message.agent_id === "string" ? message.agent_id : null;
@@ -446,6 +552,31 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
     this.client.send(command as unknown as Parameters<AppServerClient["send"]>[0]);
   }
 
+  sendTurnMessage(
+    runtime: RuntimeScope,
+    message: SendMessage,
+    options: RuntimeSendTurnOptions,
+  ): void {
+    const payload: Record<string, unknown> = {
+      kind: "create_message",
+      messages: [
+        {
+          role: "user",
+          content: normalizeSendMessage(message),
+          client_message_id: options.clientMessageId,
+        },
+      ],
+    };
+    this.client.input({
+      runtime,
+      payload,
+    } as Parameters<AppServerClient["input"]>[0]);
+  }
+
+  async abort(runtime: RuntimeScope): Promise<void> {
+    await this.client.abort({ runtime } as Parameters<AppServerClient["abort"]>[0]);
+  }
+
   request(
     type: string,
     body: Record<string, unknown>,
@@ -462,35 +593,28 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
     return request(type, body, options);
   }
 
-  async runTurnMessage(
+  async listModels(): Promise<ListModelsResult> {
+    const response = (await this.request(
+      "list_models",
+      {},
+      { predicate: (message) => message.type === "list_models_response" },
+    )) as ListModelsResponse;
+    return normalizeListModelsResponse(response);
+  }
+
+  async updateModel(
     runtime: RuntimeScope,
-    message: SendMessage,
-    options: { timeoutMs?: number } = {},
-  ): Promise<RuntimeTurnResult> {
-    const payload: Record<string, unknown> = {
-      kind: "create_message",
-      messages: [
-        {
-          role: "user",
-          content: normalizeSendMessage(message),
-        },
-      ],
-    };
-    const command: InputCommand = {
-      runtime,
-      payload,
-    } as InputCommand;
-
-    const turn = await this.client.runTurn(command, {
-      allowLoopStatusFallback: true,
-      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
-    });
-
-    return {
-      runtime: turn.runtime,
-      stopReason: turn.stopReason,
-      runIds: turn.runIds,
-    };
+    payload: UpdateModelPayload,
+  ): Promise<UpdateModelResult> {
+    const response = (await this.request(
+      "update_model",
+      {
+        runtime,
+        payload,
+      },
+      { predicate: (message) => message.type === "update_model_response" },
+    )) as UpdateModelResponse;
+    return normalizeUpdateModelResponse(response);
   }
 
   async recoverPendingApprovals(
@@ -629,6 +753,7 @@ export class AppServerSession extends RemoteClientSessionCore {
         controller: new AppServerRuntimeController(client, this.remoteOptions),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
+        modelSettings: response.agent?.model_settings ?? null,
         ...(tools !== undefined ? { tools } : {}),
       };
     } catch (error) {

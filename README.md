@@ -62,6 +62,11 @@ for await (const msg of session.stream()) {
 }
 ```
 
+On app-server-backed sessions you may also call `send()` while another turn is
+streaming. The SDK sends the same `input` frame used by Letta Desktop and the
+listener owns queueing; `stream()` may surface `queue_update` events before the
+current turn's `result`.
+
 By default, `resumeSession(agentId)` continues the agent’s default conversation.
 Use `createSession(agentId)` when you want to start a fresh thread.
 
@@ -172,9 +177,9 @@ custom upgrade headers.
 ## Session configuration
 
 Session options let you set runtime defaults before a session starts, including
-`model`, `cwd`, `permissionMode`, and sleeptime triggers. For remote and
-Constellation sessions, `cwd` must be a path inside the selected runtime
-environment.
+`model`, `reasoningEffort`, `cwd`, `permissionMode`, and sleeptime triggers.
+For remote and Constellation sessions, `cwd` must be a path inside the selected
+runtime environment.
 
 ```ts
 import { LettaCodeClient } from "@letta-ai/letta-code-sdk";
@@ -183,6 +188,7 @@ const client = new LettaCodeClient({ backend: "local" });
 
 const session = client.resumeSession("agent-123", {
   model: "anthropic/claude-sonnet-4",
+  reasoningEffort: "high",
   // For local sessions this may be a local path; for remote/Constellation
   // sessions, use a path inside the selected runtime environment.
   cwd: "/workspace/project",
@@ -192,6 +198,35 @@ const session = client.resumeSession("agent-123", {
     stepCount: 8,
   },
 });
+```
+
+You can also inspect and change models after startup on app-server-backed
+sessions:
+
+```ts
+const catalog = await session.listModels();
+await session.updateModel({ model: "sonnet", reasoningEffort: "medium" });
+```
+
+Call `await session.abort()` to interrupt the current turn without closing the
+session.
+
+For advanced protocol access, use `sendCommand()` with raw app-server commands:
+
+```ts
+await session.sendCommand({
+  type: "change_device_state",
+  runtime: { agent_id: session.agentId!, conversation_id: session.conversationId! },
+  payload: { cwd: "/workspace/project" },
+});
+
+const sync = await session.sendCommand(
+  {
+    type: "sync",
+    runtime: { agent_id: session.agentId!, conversation_id: session.conversationId! },
+  },
+  { responseType: "sync_response" },
+);
 ```
 
 ## Links

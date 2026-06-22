@@ -14,8 +14,18 @@ describe("validation", () => {
         },
         maxApprovalRecoveryAttempts: 2,
         approvalRecoveryTimeoutMs: 3000,
+        reasoningEffort: "high",
       }),
     ).not.toThrow();
+  });
+
+  test("rejects invalid session reasoning effort", () => {
+    expect(() =>
+      validateCreateSessionOptions({
+        // biome-ignore lint/suspicious/noExplicitAny: runtime validation test
+        reasoningEffort: "maximum" as any,
+      }),
+    ).toThrow("Invalid reasoningEffort");
   });
 
   test("rejects invalid session skill source", () => {

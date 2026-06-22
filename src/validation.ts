@@ -21,6 +21,15 @@ const VALID_SKILL_SOURCES: SkillSource[] = [
   "project",
 ];
 
+const VALID_REASONING_EFFORTS = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
+
 /**
  * Extract block labels from memory items.
  */
@@ -132,6 +141,18 @@ function validateSleeptimeOptions(sleeptime: SleeptimeOptions | undefined): void
   }
 }
 
+function validateReasoningEffort(value: unknown): void {
+  if (value === undefined) return;
+  if (
+    typeof value !== "string" ||
+    !VALID_REASONING_EFFORTS.includes(value as (typeof VALID_REASONING_EFFORTS)[number])
+  ) {
+    throw new Error(
+      `Invalid reasoningEffort '${String(value)}'. Valid values: ${VALID_REASONING_EFFORTS.join(", ")}`
+    );
+  }
+}
+
 /**
  * Validate CreateSessionOptions (used by createSession and resumeSession).
  */
@@ -142,6 +163,7 @@ export function validateCreateSessionOptions(options: CreateSessionOptions): voi
   }
 
   validateSkillSources(options.skillSources);
+  validateReasoningEffort(options.reasoningEffort);
   validateSleeptimeOptions(options.sleeptime);
   validateApprovalRecoveryOptions(options);
   validateRemovedSessionOptions(options);
