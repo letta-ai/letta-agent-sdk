@@ -233,11 +233,11 @@ export function createAgentBody(
   if (options.systemPrompt !== undefined) {
     if (typeof options.systemPrompt === "string") {
       if (isPresetSystemPrompt(options.systemPrompt)) {
-        throw new Error("App-server createAgent() does not yet support system prompt presets.");
+        throw new Error("createAgent() does not yet support system prompt presets for this backend.");
       }
       body.system = options.systemPrompt;
     } else {
-      throw new Error("App-server createAgent() does not yet support system prompt preset objects.");
+      throw new Error("createAgent() does not yet support system prompt preset objects for this backend.");
     }
   }
 
