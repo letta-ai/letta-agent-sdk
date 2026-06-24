@@ -1055,9 +1055,39 @@ describe("CloudEnvironmentSession", () => {
     ]);
     expect(controlSocket.sent).toContainEqual(expect.objectContaining({ type: "enable_memfs" }));
 
-    await expect(client.createAgent({ systemPrompt: "default" })).rejects.toThrow(
+    await expect(client.createAgent({
+      model: "anthropic/claude-sonnet-4",
+      systemPrompt: "default",
+    })).rejects.toThrow(
       "App-server createAgent() does not yet support system prompt presets",
     );
+  });
+
+  test("rejects Cloud createAgent without an explicit model", async () => {
+    resetFakeCloud();
+    resetFakeAppServer();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaCodeClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      appServer: {
+        url: "ws://app-server.test/ws",
+        WebSocket: FakeAppServerSocket,
+      },
+    });
+
+    await expect(client.createAgent({
+      systemPrompt: "You are a repo assistant.",
+    })).rejects.toThrow("Constellation createAgent() requires an explicit model");
+    await expect(client.createAgent({
+      model: "   ",
+    })).rejects.toThrow("Constellation createAgent() requires an explicit model");
+
+    expect(requests).toHaveLength(0);
+    expect(FakeAppServerSocket.instances).toHaveLength(0);
   });
 
   test("responds to Remote Client approval requests through canUseTool", async () => {

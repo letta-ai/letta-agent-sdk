@@ -60,6 +60,10 @@ function hasCreateAgentEnvironment(options: CreateAgentOptions): boolean {
   return "environment" in (options as Record<string, unknown>);
 }
 
+function hasExplicitCreateAgentModel(options: CreateAgentOptions): boolean {
+  return typeof options.model === "string" && options.model.trim().length > 0;
+}
+
 function looksLikeConversationId(id: string): boolean {
   return id.startsWith("conv-") || id.startsWith("local-conv-");
 }
@@ -176,6 +180,11 @@ export class LettaCodeClient {
       return initMsg.agentId;
     }
     if (this.backend === "cloud") {
+      if (!hasExplicitCreateAgentModel(options)) {
+        throw new Error(
+          'Constellation createAgent() requires an explicit model. Pass model in createAgent({ model: "provider/model" }).',
+        );
+      }
       return createCloudAgent(this.cloudOptions(), options);
     }
     this.assertLocalBackend("createAgent");
