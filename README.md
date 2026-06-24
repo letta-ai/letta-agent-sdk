@@ -152,19 +152,33 @@ selected remote environment or managed sandbox. Local paths such as
 `process.cwd()` are not mapped into managed sandboxes automatically.
 
 You can still set a default `environment` on the client or override it per
-session to use an existing remote runtime instead of an SDK-managed sandbox:
+session to use an existing remote runtime instead of an SDK-managed sandbox. Use
+the environment name from `letta remote --env-name <name>`:
 
 ```ts
 const client = new LettaCodeClient({
   backend: "cloud",
   apiKey: process.env.LETTA_API_KEY,
-  environment: { connectionId: "conn-default" },
+  environment: { name: "devbox" },
 });
 
+await using session = client.resumeSession(agentId, {
+  environment: { name: "devbox" },
+});
+```
+
+For advanced cases where you want to target a specific remote connection, pass
+its `connectionId` instead. Connection IDs are assigned when the remote listener
+registers and may change after reconnects:
+
+```ts
 await using session = client.resumeSession(agentId, {
   environment: { connectionId: "conn-123" },
 });
 ```
+
+`environment` also accepts `{ id: "env-..." }` for an environment record or
+`{ deviceId: "device-..." }` for a stable device selector.
 
 `environment` and `sandbox` are mutually exclusive. Managed sandbox refresh and
 termination operate on the latest active sandbox for an agent; set
