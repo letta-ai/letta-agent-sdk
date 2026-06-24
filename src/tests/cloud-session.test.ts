@@ -1059,7 +1059,7 @@ describe("CloudEnvironmentSession", () => {
       model: "anthropic/claude-sonnet-4",
       systemPrompt: "default",
     })).rejects.toThrow(
-      "App-server createAgent() does not yet support system prompt presets",
+      "createAgent() does not yet support system prompt presets for this backend",
     );
   });
 
