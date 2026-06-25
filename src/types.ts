@@ -587,7 +587,7 @@ export interface CreateSessionOptions {
 }
 
 /**
- * Session options accepted by LettaCodeClient methods.
+ * Session options accepted by LettaAgentClient methods.
  *
  * `environment` is a cloud execution-target override. It is deliberately
  * session-scoped rather than part of createAgent() options.

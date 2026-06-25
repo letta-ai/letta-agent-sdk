@@ -82,7 +82,7 @@ type TurnSession = LettaCodeSession & {
  * `cloud` uses agents hosted on Constellation, with an explicit remote
  * environment or SDK-managed sandbox.
  */
-export class LettaCodeClient {
+export class LettaAgentClient {
   readonly backend: LettaCodeBackend;
   readonly environment: LettaCodeEnvironment | undefined;
   private readonly options: LettaCodeClientOptions;
@@ -101,16 +101,16 @@ export class LettaCodeClient {
 
     if (this.backend === "local" && this.environment !== undefined) {
       throw new Error(
-        'LettaCodeClient environment is only valid with backend: "cloud".',
+        'LettaAgentClient environment is only valid with backend: "cloud".',
       );
     }
     if (this.backend === "remote" && this.environment !== undefined) {
       throw new Error(
-        'LettaCodeClient environment is only valid with backend: "cloud"; remote url selects the app-server runtime.',
+        'LettaAgentClient environment is only valid with backend: "cloud"; remote url selects the app-server runtime.',
       );
     }
     if (this.backend !== "cloud" && (options as { sandbox?: unknown }).sandbox !== undefined) {
-      throw new Error('LettaCodeClient sandbox options are only valid with backend: "cloud".');
+      throw new Error('LettaAgentClient sandbox options are only valid with backend: "cloud".');
     }
 
     if (this.backend === "local") {
@@ -140,7 +140,7 @@ export class LettaCodeClient {
 
     if (this.backend === "remote") {
       if (!("url" in options) || typeof options.url !== "string" || options.url.length === 0) {
-        throw new Error("LettaCodeClient remote backend requires a non-empty url.");
+        throw new Error("LettaAgentClient remote backend requires a non-empty url.");
       }
       if (
         options.requestTimeoutMs !== undefined &&
@@ -354,7 +354,7 @@ export class LettaCodeClient {
     }
 
     throw new Error(
-      `LettaCodeClient backend '${this.backend}' is not implemented yet. ${action} currently supports backend 'local' only.`,
+      `LettaAgentClient backend '${this.backend}' is not implemented yet. ${action} currently supports backend 'local' only.`,
     );
   }
 
@@ -402,7 +402,7 @@ export class LettaCodeClient {
       return;
     }
     throw new Error(
-      `LettaCodeClient backend '${this.backend}' is not implemented yet. ${action} currently supports backend 'local' only.`,
+      `LettaAgentClient backend '${this.backend}' is not implemented yet. ${action} currently supports backend 'local' only.`,
     );
   }
 

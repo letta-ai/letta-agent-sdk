@@ -15,14 +15,14 @@ npm install @letta-ai/letta-agent-sdk
 ### Client creation
 
 ```ts
-import { LettaCodeClient } from "@letta-ai/letta-agent-sdk";
+import { LettaAgentClient } from "@letta-ai/letta-agent-sdk";
 
 // Local: SDK-owned Letta Code app-server over loopback websockets. The SDK
 // spawns/manages the app-server process for you.
-const localClient = new LettaCodeClient({ backend: "local" });
+const localClient = new LettaAgentClient({ backend: "local" });
 
 // Remote: connect to a user-managed Letta Code app-server over websockets.
-const remoteClient = new LettaCodeClient({
+const remoteClient = new LettaAgentClient({
   backend: "remote",
   url: "http://127.0.0.1:4500",
   // Required when the app-server is bound to a non-loopback interface with
@@ -32,7 +32,7 @@ const remoteClient = new LettaCodeClient({
 
 // Constellation: create or resume agents whose state lives in Letta's
 // agent cloud, with an SDK-managed sandbox by default.
-const client = new LettaCodeClient({
+const client = new LettaAgentClient({
   backend: "cloud",
   apiKey: process.env.LETTA_API_KEY,
 });
@@ -41,9 +41,9 @@ const client = new LettaCodeClient({
 ### Persistent agent with multi-turn conversations
 
 ```ts
-import { LettaCodeClient } from "@letta-ai/letta-agent-sdk";
+import { LettaAgentClient } from "@letta-ai/letta-agent-sdk";
 
-const client = new LettaCodeClient({ backend: "local" });
+const client = new LettaAgentClient({ backend: "local" });
 
 const agentId = await client.createAgent({
   persona: "You are a helpful coding assistant for TypeScript projects.",
@@ -92,7 +92,7 @@ Letta Code websocket protocol for `runtime_start`, `input`, streaming deltas,
 and SDK-defined external tools.
 
 ```ts
-const client = new LettaCodeClient({
+const client = new LettaAgentClient({
   backend: "remote",
   url: "http://127.0.0.1:4500",
   authToken: process.env.LETTA_APP_SERVER_TOKEN,
@@ -121,7 +121,7 @@ it to come online, refreshes it while the session is active, and cleans it up on
 close.
 
 ```ts
-const client = new LettaCodeClient({
+const client = new LettaAgentClient({
   backend: "cloud",
   apiKey: process.env.LETTA_API_KEY,
   sandbox: {
@@ -156,7 +156,7 @@ session to use an existing remote runtime instead of an SDK-managed sandbox. Use
 the environment name from `letta remote --env-name <name>`:
 
 ```ts
-const client = new LettaCodeClient({
+const client = new LettaAgentClient({
   backend: "cloud",
   apiKey: process.env.LETTA_API_KEY,
   environment: { name: "devbox" },
@@ -197,9 +197,9 @@ remote and Constellation sessions, `cwd` must be a path inside the selected
 runtime environment.
 
 ```ts
-import { LettaCodeClient } from "@letta-ai/letta-agent-sdk";
+import { LettaAgentClient } from "@letta-ai/letta-agent-sdk";
 
-const client = new LettaCodeClient({ backend: "local" });
+const client = new LettaAgentClient({ backend: "local" });
 
 const session = client.resumeSession("agent-123", {
   model: "anthropic/claude-sonnet-4",
