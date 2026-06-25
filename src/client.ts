@@ -415,6 +415,7 @@ export class LettaCodeClient {
     const appServer = localOptions.appServer;
     return {
       local: appServer?.url === undefined,
+      localBackend: "local",
       ...(appServer?.url !== undefined ? { url: appServer.url } : {}),
       ...(appServer?.WebSocket !== undefined ? { WebSocket: appServer.WebSocket } : {}),
       ...(appServer?.requestTimeoutMs !== undefined
