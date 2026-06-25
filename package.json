@@ -28,7 +28,7 @@
     "url": "https://github.com/letta-ai/letta-agent-sdk"
   },
   "dependencies": {
-    "@letta-ai/letta-code": "0.27.14"
+    "@letta-ai/letta-code": "0.27.17"
   },
   "devDependencies": {
     "@types/bun": "latest",
