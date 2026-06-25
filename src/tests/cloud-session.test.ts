@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { LettaCodeClient } from "../index.js";
+import { LettaAgentClient } from "../index.js";
 import { asAdvanced } from "./advanced-session.js";
 
 type Listener = (event: unknown) => void;
@@ -516,7 +516,7 @@ describe("CloudEnvironmentSession", () => {
   test("creates, refreshes, and cleans up a managed Cloud sandbox when no environment is specified", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -578,7 +578,7 @@ describe("CloudEnvironmentSession", () => {
   test("can leave managed Cloud sandbox cleanup to TTL", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -605,7 +605,7 @@ describe("CloudEnvironmentSession", () => {
   test("uses an explicit environment before using the Remote Client websocket", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -708,7 +708,7 @@ describe("CloudEnvironmentSession", () => {
   test("attaches to an explicit environment without creating a sandbox", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -738,7 +738,7 @@ describe("CloudEnvironmentSession", () => {
     resetFakeCloud();
     FakeCloudSocket.scenario = "duplicate_idempotency";
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -768,7 +768,7 @@ describe("CloudEnvironmentSession", () => {
     resetFakeCloud();
     FakeCloudSocket.syncSucceeds = false;
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -794,7 +794,7 @@ describe("CloudEnvironmentSession", () => {
   test("sends recovery sync on Cloud stream event sequence gaps", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -841,7 +841,7 @@ describe("CloudEnvironmentSession", () => {
   test("lists default-conversation messages through runtime protocol instead of Cloud REST", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -873,7 +873,7 @@ describe("CloudEnvironmentSession", () => {
   test("lists resumed conversation messages through runtime protocol instead of Cloud REST", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -907,7 +907,7 @@ describe("CloudEnvironmentSession", () => {
   test("lists explicit Cloud conversation ids through runtime protocol instead of Cloud REST", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -941,7 +941,7 @@ describe("CloudEnvironmentSession", () => {
   test("bootstraps resumed Cloud conversations from runtime history", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -983,7 +983,7 @@ describe("CloudEnvironmentSession", () => {
   test("uses bearer auth from headers for Cloud REST, environment polling, and websocket upgrades", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       headers: { Authorization: "Bearer sk-header", "x-project-id": "project-1" },
@@ -1016,7 +1016,7 @@ describe("CloudEnvironmentSession", () => {
     resetFakeCloud();
     resetFakeAppServer();
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -1067,7 +1067,7 @@ describe("CloudEnvironmentSession", () => {
     resetFakeCloud();
     resetFakeAppServer();
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -1095,7 +1095,7 @@ describe("CloudEnvironmentSession", () => {
     FakeCloudSocket.scenario = "approval";
     const requests: RecordedRequest[] = [];
     const decisions: Array<{ toolName: string; input: Record<string, unknown> }> = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -1138,7 +1138,7 @@ describe("CloudEnvironmentSession", () => {
   test("executes SDK-hosted external tool requests from the Cloud websocket", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -1256,7 +1256,7 @@ describe("CloudEnvironmentSession", () => {
   });
 
   test("validates managed Cloud sandbox options and environment exclusivity", () => {
-    expect(() => new LettaCodeClient({
+    expect(() => new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -1266,7 +1266,7 @@ describe("CloudEnvironmentSession", () => {
       sandbox: { ttlMinutes: 5 },
     })).toThrow("cannot specify both environment and sandbox options");
 
-    expect(() => new LettaCodeClient({
+    expect(() => new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -1275,7 +1275,7 @@ describe("CloudEnvironmentSession", () => {
       sandbox: { ttlMinutes: 61 },
     })).toThrow("Invalid sandbox.ttlMinutes");
 
-    const clientWithEnvironment = new LettaCodeClient({
+    const clientWithEnvironment = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -1287,7 +1287,7 @@ describe("CloudEnvironmentSession", () => {
       sandbox: { ttlMinutes: 5 },
     })).toThrow("cannot specify sandbox options when the client has a default environment");
 
-    const clientWithSandbox = new LettaCodeClient({
+    const clientWithSandbox = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -1299,7 +1299,7 @@ describe("CloudEnvironmentSession", () => {
       environment: { connectionId: "conn-explicit" },
     })).toThrow("cannot specify an environment when the client has default sandbox options");
 
-    expect(() => new LettaCodeClient({
+    expect(() => new LettaAgentClient({
       backend: "remote",
       url: "ws://app-server.test/ws",
       sandbox: { ttlMinutes: 5 },
@@ -1310,7 +1310,7 @@ describe("CloudEnvironmentSession", () => {
     resetFakeCloud();
     FakeCloudSocket.scenario = "terminal_error";
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
@@ -1341,7 +1341,7 @@ describe("CloudEnvironmentSession", () => {
     resetFakeCloud();
     FakeCloudSocket.scenario = "stale_idle_then_error";
     const requests: RecordedRequest[] = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",

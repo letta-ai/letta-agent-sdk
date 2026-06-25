@@ -5,9 +5,9 @@
  *
  * @example
  * ```typescript
- * import { LettaCodeClient, createAgent, createSession, resumeSession, prompt } from '@letta-ai/letta-agent-sdk';
+ * import { LettaAgentClient, createAgent, createSession, resumeSession, prompt } from '@letta-ai/letta-agent-sdk';
  *
- * const client = new LettaCodeClient({ backend: 'local' });
+ * const client = new LettaAgentClient({ backend: 'local' });
  * const agentId = await client.createAgent();
  * const clientSession = client.resumeSession(agentId);
  *
@@ -33,7 +33,7 @@
  */
 
 import { Session } from "./session.js";
-import { LettaCodeClient } from "./client.js";
+import { LettaAgentClient } from "./client.js";
 import type {
   CreateSessionOptions,
   CreateAgentOptions,
@@ -118,7 +118,7 @@ export type {
 } from "./types.js";
 
 export { Session } from "./session.js";
-export { LettaCodeClient } from "./client.js";
+export { LettaAgentClient } from "./client.js";
 
 export { extractStreamTextDelta } from "./stream-events.js";
 
@@ -154,7 +154,7 @@ export {
  */
 export async function createAgent(options: CreateAgentOptions = {}): Promise<string> {
   validateCreateAgentOptions(options);
-  return new LettaCodeClient().createAgent(options);
+  return new LettaAgentClient().createAgent(options);
 }
 
 /**
@@ -178,11 +178,11 @@ export function createSession(
 ): LettaCodeSession {
   validateCreateSessionOptions(options);
   if (agentId) {
-    return new LettaCodeClient().createSession(agentId, options);
+    return new LettaAgentClient().createSession(agentId, options);
   }
   // The app-server runtime_start protocol requires an explicit agent id. Keep
   // the historical default/LRU-agent helper on the legacy stdio transport.
-  return new LettaCodeClient({ backend: "local", transport: "stdio" }).createSession(options);
+  return new LettaAgentClient({ backend: "local", transport: "stdio" }).createSession(options);
 }
 
 /**
@@ -208,7 +208,7 @@ export function resumeSession(
   options: CreateSessionOptions = {},
 ): LettaCodeSession {
   validateCreateSessionOptions(options);
-  return new LettaCodeClient().resumeSession(id, options);
+  return new LettaAgentClient().resumeSession(id, options);
 }
 
 /**
@@ -287,7 +287,7 @@ export async function listMessagesDirect(
 ): Promise<ListMessagesResult> {
   // resumeSession uses --default which maps to the agent's default conversation.
   // The session is transient: we only need it long enough to list messages.
-  const session = new LettaCodeClient().resumeSession(agentId, {
+  const session = new LettaAgentClient().resumeSession(agentId, {
     permissionMode: "bypassPermissions",
   });
   await (session as InitializableSession).initialize();

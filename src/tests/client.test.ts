@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { LettaCodeClient, Session } from "../index.js";
+import { LettaAgentClient, Session } from "../index.js";
 import { asAdvanced } from "./advanced-session.js";
 
 type Listener = (event: unknown) => void;
@@ -457,9 +457,9 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
   }
 }
 
-describe("LettaCodeClient", () => {
+describe("LettaAgentClient", () => {
   test("defaults to the implemented local backend", () => {
-    const client = new LettaCodeClient();
+    const client = new LettaAgentClient();
 
     expect(client.backend).toBe("local");
     expect(client.environment).toBeUndefined();
@@ -467,7 +467,7 @@ describe("LettaCodeClient", () => {
 
   test("creates local app-server sessions without starting transport until use", () => {
     FakeAppServerSocket.instances = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "local",
       appServer: { url: "ws://127.0.0.1:4500/ws", WebSocket: FakeAppServerSocket },
     });
@@ -482,7 +482,7 @@ describe("LettaCodeClient", () => {
   });
 
   test("explicit local stdio transport keeps legacy Session fallback", async () => {
-    const client = new LettaCodeClient({ backend: "local", transport: "stdio" });
+    const client = new LettaAgentClient({ backend: "local", transport: "stdio" });
     const session = client.resumeSession("agent-123");
 
     try {
@@ -496,7 +496,7 @@ describe("LettaCodeClient", () => {
   });
 
   test("rejects environment overrides on local sessions", () => {
-    const client = new LettaCodeClient({ backend: "local" });
+    const client = new LettaAgentClient({ backend: "local" });
 
     expect(() =>
       client.resumeSession("agent-123", { environment: "work-laptop" }),
@@ -505,14 +505,14 @@ describe("LettaCodeClient", () => {
 
   test("rejects environment on remote app-server clients", () => {
     expect(() =>
-      new LettaCodeClient({
+      new LettaAgentClient({
         backend: "remote",
         url: "wss://example.com/ws",
         environment: "work-laptop",
       } as never),
     ).toThrow("remote url selects the app-server runtime");
 
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "wss://example.com/ws",
     });
@@ -523,7 +523,7 @@ describe("LettaCodeClient", () => {
 
   test("local backend uses app-server when an agent id is provided", async () => {
     FakeAppServerSocket.instances = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "local",
       appServer: { url: "ws://127.0.0.1:4500/ws", WebSocket: FakeAppServerSocket },
     });
@@ -548,7 +548,7 @@ describe("LettaCodeClient", () => {
   test("app-server init tools are backend-reported, not SDK external tools", async () => {
     FakeAppServerSocket.instances = [];
     FakeAppServerSocket.reportedAgentTools = [{ name: "Bash" }, { name: "Read" }];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "ws://127.0.0.1:4500/ws",
       WebSocket: FakeAppServerSocket,
@@ -583,11 +583,11 @@ describe("LettaCodeClient", () => {
   });
 
   test("constructs remote backend and keeps cloud construction typed", () => {
-    const remoteClient = new LettaCodeClient({
+    const remoteClient = new LettaAgentClient({
       backend: "remote",
       url: "wss://example.com/ws",
     });
-    const cloudClient = new LettaCodeClient({
+    const cloudClient = new LettaAgentClient({
       backend: "cloud",
       environment: { name: "LettaDevelopers" },
     });
@@ -599,7 +599,7 @@ describe("LettaCodeClient", () => {
 
   test("passes remote auth tokens to app-server websocket upgrades", async () => {
     FakeAppServerSocket.instances = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "http://127.0.0.1:4500",
       authToken: " super-secret-token\n",
@@ -622,7 +622,7 @@ describe("LettaCodeClient", () => {
   });
 
   test("constructs cloud backend sessions without using the local fallback", () => {
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "cloud",
       environment: "LettaDevelopers",
     });
@@ -635,7 +635,7 @@ describe("LettaCodeClient", () => {
 
   test("starts remote app-server sessions and runs a turn", async () => {
     FakeAppServerSocket.instances = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "http://127.0.0.1:4500",
       WebSocket: FakeAppServerSocket,
@@ -678,7 +678,7 @@ describe("LettaCodeClient", () => {
   test("websocket protocol sessions respond to can_use_tool control requests through the shared approval bridge", async () => {
     FakeAppServerSocket.instances = [];
     const approvals: Array<{ toolName: string; input: Record<string, unknown> }> = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "http://127.0.0.1:4500",
       WebSocket: FakeAppServerSocket,
@@ -742,7 +742,7 @@ describe("LettaCodeClient", () => {
   test("websocket protocol transport failures emit streamed error before failed result", async () => {
     FakeAppServerSocket.instances = [];
     FakeAppServerSocket.inputScenario = "hang";
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "http://127.0.0.1:4500",
       WebSocket: FakeAppServerSocket,
@@ -776,7 +776,7 @@ describe("LettaCodeClient", () => {
   test("websocket protocol sessions wait through auto-handled requires_approval stops", async () => {
     FakeAppServerSocket.instances = [];
     FakeAppServerSocket.inputScenario = "autoApprovalContinuation";
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "http://127.0.0.1:4500",
       WebSocket: FakeAppServerSocket,
@@ -817,7 +817,7 @@ describe("LettaCodeClient", () => {
   test("websocket protocol sessions terminalize only genuine pending approvals", async () => {
     FakeAppServerSocket.instances = [];
     FakeAppServerSocket.inputScenario = "manualApprovalWait";
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "http://127.0.0.1:4500",
       WebSocket: FakeAppServerSocket,
@@ -843,7 +843,7 @@ describe("LettaCodeClient", () => {
   test("websocket protocol sessions let the listener queue sends during an active turn", async () => {
     FakeAppServerSocket.instances = [];
     FakeAppServerSocket.inputScenario = "queuedSecond";
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "http://127.0.0.1:4500",
       WebSocket: FakeAppServerSocket,
@@ -946,7 +946,7 @@ describe("LettaCodeClient", () => {
 
   test("creates remote app-server agents through runtime_start", async () => {
     FakeAppServerSocket.instances = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "ws://127.0.0.1:4500/ws",
       WebSocket: FakeAppServerSocket,
@@ -975,7 +975,7 @@ describe("LettaCodeClient", () => {
 
   test("resumes remote conversations by resolving their agent first", async () => {
     FakeAppServerSocket.instances = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "ws://127.0.0.1:4500/ws",
       WebSocket: FakeAppServerSocket,
@@ -1002,7 +1002,7 @@ describe("LettaCodeClient", () => {
 
   test("resumes local-backend conversation ids through remote app-server", async () => {
     FakeAppServerSocket.instances = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "ws://127.0.0.1:4500/ws",
       WebSocket: FakeAppServerSocket,
@@ -1029,7 +1029,7 @@ describe("LettaCodeClient", () => {
 
   test("registers SDK tools as app-server external tools", async () => {
     FakeAppServerSocket.instances = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "ws://127.0.0.1:4500/ws",
       WebSocket: FakeAppServerSocket,
@@ -1097,7 +1097,7 @@ describe("LettaCodeClient", () => {
 
   test("websocket protocol sessions apply model dreaming and list messages", async () => {
     FakeAppServerSocket.instances = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "ws://127.0.0.1:4500/ws",
       WebSocket: FakeAppServerSocket,
@@ -1178,7 +1178,7 @@ describe("LettaCodeClient", () => {
 
   test("websocket protocol sessions list models, apply reasoning effort, and abort", async () => {
     FakeAppServerSocket.instances = [];
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "ws://127.0.0.1:4500/ws",
       WebSocket: FakeAppServerSocket,
@@ -1242,7 +1242,7 @@ describe("LettaCodeClient", () => {
   });
 
   test("websocket protocol sessions reject unsupported stdio-only options", () => {
-    const client = new LettaCodeClient({
+    const client = new LettaAgentClient({
       backend: "remote",
       url: "ws://127.0.0.1:4500/ws",
       WebSocket: FakeAppServerSocket,
@@ -1255,7 +1255,7 @@ describe("LettaCodeClient", () => {
 
 
   test("keeps environment out of createAgent payloads", async () => {
-    const client = new LettaCodeClient({ backend: "local" });
+    const client = new LettaAgentClient({ backend: "local" });
 
     await expect(
       client.createAgent({ environment: "work-laptop" } as never),
