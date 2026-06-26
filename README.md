@@ -252,3 +252,10 @@ const sync = await session.sendCommand(
 ---
 
 Made with 💜 in San Francisco
+
+<img
+  referrerpolicy="no-referrer-when-downgrade"
+  src="https://static.scarf.sh/a.png?x-pxid=29de91a5-e18c-4366-b192-33a909e184bc&page=README.md"
+  alt=""
+  aria-hidden="true"
+/>
