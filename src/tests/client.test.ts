@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { LettaAgentClient, Session } from "../index.js";
+import { LettaAgentClient, LettaCodeClient, Session } from "../index.js";
 import { asAdvanced } from "./advanced-session.js";
 
 type Listener = (event: unknown) => void;
@@ -458,6 +458,14 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
 }
 
 describe("LettaAgentClient", () => {
+  test("keeps LettaCodeClient as a compatibility alias", () => {
+    expect(LettaCodeClient).toBe(LettaAgentClient);
+    const client = new LettaCodeClient();
+
+    expect(client).toBeInstanceOf(LettaAgentClient);
+    expect(client.backend).toBe("local");
+  });
+
   test("defaults to the implemented local backend", () => {
     const client = new LettaAgentClient();
 

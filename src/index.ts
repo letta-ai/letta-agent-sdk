@@ -118,7 +118,7 @@ export type {
 } from "./types.js";
 
 export { Session } from "./session.js";
-export { LettaAgentClient } from "./client.js";
+export { LettaAgentClient, LettaAgentClient as LettaCodeClient } from "./client.js";
 
 export { extractStreamTextDelta } from "./stream-events.js";
 
