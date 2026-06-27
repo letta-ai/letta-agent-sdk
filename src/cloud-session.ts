@@ -28,6 +28,8 @@ import {
 } from "./remote-client-session-core.js";
 import type {
   AnyAgentTool,
+  BootstrapStateOptions,
+  BootstrapStateResult,
   CreateAgentOptions,
   LettaCodeClientSessionOptions,
   LettaCodeCloudClientOptions,
@@ -35,6 +37,8 @@ import type {
   LettaCodeEnvironment,
   LettaCodeSocketConstructor,
   LettaCodeSocketLike,
+  ListMessagesOptions,
+  ListMessagesResult,
 } from "./types.js";
 
 const DEFAULT_CLOUD_API_BASE_URL = "https://api.letta.com";
@@ -96,6 +100,8 @@ type CloudAgentSandboxRefresh = Record<string, unknown> & {
   sandboxId?: string;
   ttlMinutes?: number;
 };
+
+type CloudMessageListResponse = unknown[];
 
 type ManagedCloudSandbox = {
   agentId: string;
@@ -594,6 +600,13 @@ function externalToolsByName(tools: AnyAgentTool[] | undefined): Map<string, Any
   return result;
 }
 
+function appendListMessagesQuery(url: URL, options: ListMessagesOptions): void {
+  if (options.before !== undefined) url.searchParams.set("before", options.before);
+  if (options.after !== undefined) url.searchParams.set("after", options.after);
+  if (options.order !== undefined) url.searchParams.set("order", options.order);
+  if (options.limit !== undefined) url.searchParams.set("limit", String(options.limit));
+}
+
 function cloudHarnessAppServerOptions(
   clientOptions: LettaCodeCloudClientOptions,
 ): AppServerSessionOptions {
@@ -792,6 +805,40 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     await this.refreshManagedSandbox(sandbox);
   }
 
+  override async listMessages(options: ListMessagesOptions = {}): Promise<ListMessagesResult> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+    const conversationId = options.conversationId ?? this._conversationId;
+    if (!conversationId) {
+      throw new Error("No conversation id available for listMessages()");
+    }
+    return this.listCloudMessages(conversationId, options);
+  }
+
+  override async bootstrapState(
+    options: BootstrapStateOptions = {},
+  ): Promise<BootstrapStateResult> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+    const page = await this.listMessages({
+      limit: options.limit,
+      order: options.order,
+    });
+
+    const state: BootstrapStateResult = {
+      agentId: this._agentId ?? "",
+      conversationId: this._conversationId ?? "",
+      model: this._model,
+      messages: page.messages,
+    };
+    if (this.toolNames !== undefined) state.tools = this.toolNames;
+    if (page.nextBefore !== undefined) state.nextBefore = page.nextBefore;
+    if (page.hasMore !== undefined) state.hasMore = page.hasMore;
+    return state;
+  }
+
   protected override onCoreClose(): void {
     this.removeExternalToolHandler?.();
     this.removeExternalToolHandler = null;
@@ -859,6 +906,35 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       throw new Error(`Cloud resumeSession() could not retrieve conversation ${conversationId}.`);
     }
     return { id: body.id, agent_id: body.agent_id };
+  }
+
+  private async listCloudMessages(
+    conversationId: string,
+    options: ListMessagesOptions,
+  ): Promise<ListMessagesResult> {
+    const fetchImpl = getFetch(this.cloudOptions.fetch);
+    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
+    const url = new URL(
+      `${baseUrl}/v1/conversations/${encodeURIComponent(conversationId)}/messages`,
+    );
+    appendListMessagesQuery(url, options);
+    if (conversationId === "default") {
+      if (!this._agentId) {
+        throw new Error("Cloud listMessages() for default conversation requires an agent id.");
+      }
+      url.searchParams.set("agent_id", this._agentId);
+    }
+
+    const response = await fetchImpl(url, {
+      headers: cloudHeaders(this.cloudOptions),
+    });
+    const body = await parseJsonResponse(response);
+    assertOkResponse(response, body, "Cloud listMessages()");
+    if (!Array.isArray(body)) {
+      throw new Error("Cloud listMessages() response was not an array.");
+    }
+    const messages = body as CloudMessageListResponse;
+    return { messages };
   }
 
   private async resolveConnectionForRuntime(

@@ -494,7 +494,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   private nextTurnId = 0;
   private messageCounter = 0;
   private clientMessageCounter = 0;
-  private toolNames: string[] | undefined;
+  protected toolNames: string[] | undefined;
 
   protected constructor(
     protected readonly mode: RuntimeSessionMode,
