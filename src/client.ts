@@ -1,4 +1,5 @@
 import { Session } from "./session.js";
+import { RepositoriesClient } from "./repositories.js";
 import {
   AppServerSession,
   assertRemoteSessionOptionsSupported,
@@ -56,6 +57,10 @@ function stripCloudExecutionOptions(
   return sessionOptions;
 }
 
+function hasRepositoryResources(options: LettaCodeClientSessionOptions): boolean {
+  return options.resources !== undefined;
+}
+
 function hasCreateAgentEnvironment(options: CreateAgentOptions): boolean {
   return "environment" in (options as Record<string, unknown>);
 }
@@ -86,6 +91,7 @@ export class LettaAgentClient {
   readonly backend: LettaCodeBackend;
   readonly environment: LettaCodeEnvironment | undefined;
   private readonly options: LettaCodeClientOptions;
+  private repositoriesClient: RepositoriesClient | null = null;
 
   constructor(options: LettaCodeClientOptions = {}) {
     const backend = options.backend ?? "local";
@@ -161,6 +167,10 @@ export class LettaAgentClient {
    * Environment/device selection is intentionally not part of the agent payload;
    * it belongs to the client/session execution context.
    */
+  get repositories(): RepositoriesClient {
+    return this.getRepositoriesClient();
+  }
+
   async createAgent(options: CreateAgentOptions = {}): Promise<string> {
     if (hasCreateAgentEnvironment(options)) {
       throw new Error(
@@ -372,6 +382,9 @@ export class LettaAgentClient {
       if (options.sandbox !== undefined) {
         throw new Error(`${action}() sandbox options are only valid with backend: "cloud".`);
       }
+      if (hasRepositoryResources(options)) {
+        throw new Error(`${action}() repository resources are only valid with backend: "cloud".`);
+      }
       if (!this.useLegacyLocalStdio()) {
         assertRemoteSessionOptionsSupported(action, options);
       }
@@ -386,6 +399,9 @@ export class LettaAgentClient {
       }
       if (options.sandbox !== undefined) {
         throw new Error(`${action}() sandbox options are only valid with backend: "cloud"; remote url selects the app-server runtime.`);
+      }
+      if (hasRepositoryResources(options)) {
+        throw new Error(`${action}() repository resources are only valid with backend: "cloud".`);
       }
       assertRemoteSessionOptionsSupported(action, options);
       return;
@@ -433,6 +449,14 @@ export class LettaAgentClient {
       throw new Error("Remote options requested for non-remote backend.");
     }
     return this.options as LettaCodeRemoteClientOptions;
+  }
+
+  private getRepositoriesClient(): RepositoriesClient {
+    if (this.backend !== "cloud") {
+      throw new Error('client.repositories is only available with backend: "cloud".');
+    }
+    this.repositoriesClient ??= new RepositoriesClient(this.cloudOptions());
+    return this.repositoriesClient;
   }
 
   private cloudOptions(): LettaCodeCloudClientOptions {

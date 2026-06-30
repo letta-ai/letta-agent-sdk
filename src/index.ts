@@ -106,6 +106,23 @@ export type {
   LettaCodeModelEntry,
   UpdateModelOptions,
   UpdateModelResult,
+  Repository,
+  CreateRepositoryParams,
+  ListRepositoriesParams,
+  ListRepositoriesResult,
+  RepositoryResource,
+  RepositoryFileEntry,
+  ListRepositoryFilesParams,
+  ListRepositoryFilesResult,
+  CreateRepositoryFileParams,
+  RepositoryFile,
+  UpdateRepositoryFileParams,
+  RepositoryFileMutationResult,
+  DeleteRepositoryFileParams,
+  DeleteRepositoryFileResult,
+  RepositoryVersion,
+  ListRepositoryVersionsParams,
+  GetRepositoryVersionParams,
   // Bootstrap API
   BootstrapStateOptions,
   BootstrapStateResult,
@@ -118,6 +135,7 @@ export type {
 } from "./types.js";
 
 export { Session } from "./session.js";
+export { RepositoriesClient } from "./repositories.js";
 export { LettaAgentClient } from "./client.js";
 
 export { extractStreamTextDelta } from "./stream-events.js";
