@@ -1,6 +1,6 @@
 {
   "name": "@letta-ai/letta-agent-sdk",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "SDK for programmatic control of Letta agents",
   "type": "module",
   "main": "./dist/index.js",
