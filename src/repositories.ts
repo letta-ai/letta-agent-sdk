@@ -159,6 +159,20 @@ export class RepositoriesClient {
     return toRepository(await this.request(`/v1/repositories/${encodeURIComponent(repositoryId)}`, "GET", undefined, "Cloud get repository"));
   }
 
+  /**
+   * Delete a repository. The server soft-deletes it (marks the repository
+   * deleted rather than removing its data). Resolves on success; throws if the
+   * repository does not exist or is not visible to the caller's organization.
+   */
+  async delete(repositoryId: string): Promise<void> {
+    await this.request(
+      `/v1/repositories/${encodeURIComponent(repositoryId)}`,
+      "DELETE",
+      undefined,
+      "Cloud delete repository",
+    );
+  }
+
   readonly files = {
     list: async (
       repositoryId: string,
