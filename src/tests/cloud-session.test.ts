@@ -104,7 +104,10 @@ function createCloudFetchMock(
 
     const agentRepositoriesMatch = /^\/v1\/agents\/([^/]+)\/repositories$/.exec(parsed.pathname);
     if (agentRepositoriesMatch && method === "GET") {
-      return Promise.resolve(jsonResponse({ repositories: [] }));
+      return Promise.resolve(jsonResponse({ repositories: requests.some((request) => {
+        const requestPath = new URL(request.url).pathname;
+        return request.method === "POST" && requestPath === parsed.pathname;
+      }) ? [{ id: "repo-1", name: "repo-1", is_primary: false }] : [] }));
     }
 
     if (agentRepositoriesMatch && method === "POST") {

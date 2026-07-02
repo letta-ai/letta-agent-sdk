@@ -46,6 +46,8 @@ const MIN_SANDBOX_TTL_MINUTES = 1;
 const MAX_SANDBOX_TTL_MINUTES = 60;
 const DEFAULT_SANDBOX_READY_TIMEOUT_MS = 120_000;
 const DEFAULT_SANDBOX_READY_POLL_INTERVAL_MS = 1_000;
+const DEFAULT_REPOSITORY_ATTACH_TIMEOUT_MS = 10_000;
+const DEFAULT_REPOSITORY_ATTACH_POLL_INTERVAL_MS = 250;
 const SDK_AGENT_ORIGIN = "@letta-ai/letta-agent-sdk";
 
 type FetchLike = typeof fetch;
@@ -698,7 +700,6 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
 
   protected override async initializeRuntimeController(): Promise<RuntimeSessionInit> {
     const resolved = await this.resolveRuntime();
-    await this.attachSessionRepositories(resolved.runtime.agent_id);
     const connection = await this.resolveConnectionForRuntime(resolved.runtime);
     this.connectionId = connection.connectionId;
 
@@ -815,13 +816,6 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     let agentId = this.cloudMode.agentId;
     let conversationId = this.cloudMode.conversationId;
 
-    if (agentId && this.cloudMode.newConversation) {
-      const conversation = await this.createConversation(agentId);
-      conversationId = conversation.id;
-    } else if (agentId && this.cloudMode.defaultConversation) {
-      conversationId = "default";
-    }
-
     if (!agentId && conversationId) {
       const conversation = await this.retrieveConversation(conversationId);
       if (!conversation.agent_id) {
@@ -830,7 +824,22 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       agentId = conversation.agent_id;
     }
 
-    if (!agentId || !conversationId) {
+    if (!agentId) {
+      throw new Error(
+        "Constellation createSession()/resumeSession() requires an agent id or conversation id.",
+      );
+    }
+
+    await this.attachSessionRepositories(agentId);
+
+    if (this.cloudMode.newConversation) {
+      const conversation = await this.createConversation(agentId);
+      conversationId = conversation.id;
+    } else if (this.cloudMode.defaultConversation) {
+      conversationId = "default";
+    }
+
+    if (!conversationId) {
       throw new Error(
         "Constellation createSession()/resumeSession() requires an agent id or conversation id.",
       );
@@ -852,6 +861,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
           continue;
         }
         await this.linkAgentRepository(agentId, resource.repositoryId);
+        await this.waitForAgentRepository(agentId, resource.repositoryId);
         this.attachedRepositoryIds.add(resource.repositoryId);
       }
     } catch (error) {
@@ -908,6 +918,18 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
         typeof (repository as Record<string, unknown>).id === "string"
       ))
       : [];
+  }
+
+  private async waitForAgentRepository(agentId: string, repositoryId: string): Promise<void> {
+    const deadline = Date.now() + DEFAULT_REPOSITORY_ATTACH_TIMEOUT_MS;
+    while (true) {
+      const repositories = await this.listAgentRepositories(agentId);
+      if (repositories.some((repository) => repository.id === repositoryId)) return;
+      if (Date.now() >= deadline) {
+        throw new Error(`Cloud attach agent repository did not become visible for ${agentId}: ${repositoryId}`);
+      }
+      await sleep(DEFAULT_REPOSITORY_ATTACH_POLL_INTERVAL_MS);
+    }
   }
 
   private async linkAgentRepository(agentId: string, repositoryId: string): Promise<void> {
