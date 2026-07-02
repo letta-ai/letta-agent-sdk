@@ -58,7 +58,7 @@ function stripCloudExecutionOptions(
 }
 
 function hasRepositoryResources(options: LettaCodeClientSessionOptions): boolean {
-  return options.resources !== undefined;
+  return options.resources !== undefined && options.resources.length > 0;
 }
 
 function hasCreateAgentEnvironment(options: CreateAgentOptions): boolean {

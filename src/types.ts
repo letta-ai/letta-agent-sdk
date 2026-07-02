@@ -454,7 +454,12 @@ export interface DeleteRepositoryFileResult {
   commitSha: string;
 }
 
-export type RepositoryVersion = Record<string, unknown>;
+export interface RepositoryVersion {
+  sha: string;
+  message: string;
+  timestamp: string;
+  author_name: string | null;
+}
 
 export interface ListRepositoryVersionsParams {
   path?: string;

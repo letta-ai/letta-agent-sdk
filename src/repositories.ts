@@ -234,14 +234,19 @@ export class RepositoriesClient {
       repositoryId: string,
       params: UpdateRepositoryFileParams,
     ): Promise<RepositoryFileMutationResult> => toFileMutation(await this.request(
-      `/v1/repositories/${encodeURIComponent(repositoryId)}/files`,
-      "PATCH",
+      `/v1/repositories/${encodeURIComponent(repositoryId)}/files/content`,
+      "POST",
       {
         path: params.path,
         ...(params.content !== undefined ? { content: params.content } : {}),
         ...(params.newPath !== undefined ? { new_path: params.newPath } : {}),
         ...(params.precondition !== undefined
-          ? { precondition: { content_sha256: params.precondition.contentSha256 } }
+          ? {
+            precondition: {
+              type: "content_sha256",
+              content_sha256: params.precondition.contentSha256,
+            },
+          }
           : {}),
       },
       "Cloud update repository file",
@@ -252,7 +257,7 @@ export class RepositoriesClient {
       params: DeleteRepositoryFileParams,
     ): Promise<DeleteRepositoryFileResult> => {
       const body = await this.request(
-        `/v1/repositories/${encodeURIComponent(repositoryId)}/files`,
+        `/v1/repositories/${encodeURIComponent(repositoryId)}/files/content`,
         "DELETE",
         { path: params.path },
         "Cloud delete repository file",
@@ -275,8 +280,10 @@ export class RepositoriesClient {
       addOptionalSearchParam(url, "limit", params.limit);
       const body = await this.requestUrl(url, "GET", undefined, "Cloud list repository versions");
       if (Array.isArray(body)) return body as RepositoryVersion[];
-      if (body && typeof body === "object" && Array.isArray((body as Record<string, unknown>).versions)) {
-        return (body as { versions: RepositoryVersion[] }).versions;
+      if (body && typeof body === "object") {
+        const record = body as Record<string, unknown>;
+        if (Array.isArray(record.commits)) return record.commits as RepositoryVersion[];
+        if (Array.isArray(record.versions)) return record.versions as RepositoryVersion[];
       }
       return [];
     },
