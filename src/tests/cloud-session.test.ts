@@ -102,6 +102,24 @@ function createCloudFetchMock(
       }));
     }
 
+    const agentRepositoriesMatch = /^\/v1\/agents\/([^/]+)\/repositories$/.exec(parsed.pathname);
+    if (agentRepositoriesMatch && method === "GET") {
+      return Promise.resolve(jsonResponse({ repositories: requests.some((request) => {
+        const requestPath = new URL(request.url).pathname;
+        return request.method === "POST" && requestPath === parsed.pathname;
+      }) ? [{ id: "repo-1", name: "repo-1", is_primary: false }] : [] }));
+    }
+
+    if (agentRepositoriesMatch && method === "POST") {
+      const body = bodyOf(init) as { repository_id?: string } | undefined;
+      return Promise.resolve(jsonResponse({ success: true, repository: { id: body?.repository_id ?? "repo-1" } }));
+    }
+
+    const agentRepositoryMatch = /^\/v1\/agents\/([^/]+)\/repositories\/([^/]+)$/.exec(parsed.pathname);
+    if (agentRepositoryMatch && method === "DELETE") {
+      return Promise.resolve(jsonResponse({ success: true }));
+    }
+
     if (parsed.pathname === "/v1/environments" && method === "GET") {
       return Promise.resolve(jsonResponse({
         connections: environmentConnections ?? [
@@ -600,6 +618,45 @@ describe("CloudEnvironmentSession", () => {
       new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes" &&
         request.method === "DELETE"
     )).toBe(false);
+  });
+
+
+  test("attaches Cloud repository resources for the session and detaches on close", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { terminateOnClose: false },
+    });
+
+    const session = client.resumeSession("agent-1", {
+      resources: [{ type: "repository", repositoryId: "repo-1" }],
+    });
+    await asAdvanced(session).initialize();
+    session.close();
+
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(requests).toContainEqual(expect.objectContaining({
+      method: "GET",
+      url: "https://api.test/v1/agents/agent-1/repositories",
+    }));
+    expect(requests).toContainEqual(expect.objectContaining({
+      method: "POST",
+      url: "https://api.test/v1/agents/agent-1/repositories",
+      body: { repository_id: "repo-1" },
+    }));
+    expect(requests).toContainEqual(expect.objectContaining({
+      method: "DELETE",
+      url: "https://api.test/v1/agents/agent-1/repositories/repo-1",
+    }));
   });
 
   test("uses an explicit environment before using the Remote Client websocket", async () => {

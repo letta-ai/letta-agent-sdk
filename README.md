@@ -189,6 +189,37 @@ By default, websocket authentication uses `Authorization` headers. Set
 `webSocketAuth: "query"` for browser-style websocket clients that cannot send
 custom upgrade headers.
 
+## Cloud repositories
+
+Cloud clients can create hosted repositories, manage text files inside them,
+and attach repositories to a session as resources. Repository resources are
+attached before the session starts and detached when the SDK session closes.
+
+```ts
+const client = new LettaAgentClient({
+  backend: "cloud",
+  apiKey: process.env.LETTA_API_KEY,
+});
+
+const repo = await client.repositories.create({ name: "inputs" });
+
+await client.repositories.files.create(repo.id, {
+  path: "data.csv",
+  content: csvContent,
+});
+
+await using session = client.createSession(agentId, {
+  resources: [
+    { type: "repository", repositoryId: repo.id },
+  ],
+});
+
+await session.send("Analyze the files in the attached repository.");
+```
+
+Repository file helpers are available under `client.repositories.files`, and
+version history helpers are available under `client.repositories.versions`.
+
 ## Session configuration
 
 Session options let you set runtime defaults before a session starts, including
