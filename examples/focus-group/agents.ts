@@ -48,14 +48,14 @@ export async function createCandidateAgent(): Promise<Session> {
         description: 'Insights gathered from voter feedback',
       },
     ],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 }
 
 export async function resumeCandidateAgent(agentId: string): Promise<Session> {
   return resumeSession(agentId, {
     model: CONFIG.model,
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 }
 
@@ -113,14 +113,14 @@ Background: ${persona.background}`,
         description: 'My emotional reactions to political positions',
       },
     ],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 }
 
 export async function resumeVoterAgent(agentId: string): Promise<Session> {
   return resumeSession(agentId, {
     model: CONFIG.model,
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 }
 
@@ -159,14 +159,14 @@ export async function createAnalystAgent(): Promise<Session> {
         description: 'Tactical recommendations based on focus group insights',
       },
     ],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 }
 
 export async function resumeAnalystAgent(agentId: string): Promise<Session> {
   return resumeSession(agentId, {
     model: CONFIG.model,
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 }
 

@@ -61,7 +61,7 @@ async function getSession(): Promise<Session> {
     console.log(`Resuming agent: ${state.agentId}`);
     session = await resumeSession(state.agentId, {
       model: 'haiku',
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
   } else {
     console.log('Creating new agent...');
@@ -88,7 +88,7 @@ You have memory that persists across conversations. Use it to remember important
           description: 'Important things from our conversations',
         },
       ],
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
   }
 

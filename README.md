@@ -138,7 +138,7 @@ const agentId = await client.createAgent({
 });
 
 await using session = client.resumeSession(agentId, {
-  permissionMode: "bypassPermissions",
+  permissionMode: "unrestricted",
 });
 
 await session.send("Summarize this repository.");
@@ -238,7 +238,7 @@ const session = client.resumeSession("agent-123", {
   // For local sessions this may be a local path; for remote/Constellation
   // sessions, use a path inside the selected runtime environment.
   cwd: "/workspace/project",
-  permissionMode: "bypassPermissions",
+  permissionMode: "unrestricted",
   dreaming: {
     trigger: "step-count", // off | step-count | compaction-event
     stepCount: 8,

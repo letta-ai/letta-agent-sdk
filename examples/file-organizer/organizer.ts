@@ -89,7 +89,7 @@ export async function getOrCreateAgent(state: FileOrganizerState): Promise<Sessi
     return resumeSession(state.agentId, {
       model: DEFAULT_CONFIG.model,
       allowedTools: ['Bash', 'Read', 'Glob'],
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
   }
 
@@ -114,7 +114,7 @@ export async function getOrCreateAgent(state: FileOrganizerState): Promise<Sessi
       },
     ],
     allowedTools: ['Bash', 'Read', 'Glob'],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 
   return session;

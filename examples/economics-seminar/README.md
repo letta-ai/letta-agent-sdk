@@ -118,7 +118,7 @@ After running a seminar, the agents can be "teleported" into other contexts:
 import { resumeSession } from '@letta-ai/letta-agent-sdk';
 
 // Get agent ID from --status
-const drChen = resumeSession('agent-xxx', { permissionMode: 'bypassPermissions' });
+const drChen = resumeSession('agent-xxx', { permissionMode: 'unrestricted' });
 
 // Dr. Chen remembers all past seminars!
 await drChen.send('What patterns have you noticed in economics presentations?');

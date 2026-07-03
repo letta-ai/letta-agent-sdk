@@ -543,11 +543,9 @@ export interface InternalSessionOptions {
 }
 
 export type PermissionMode =
-  | "default"
   | "standard"
   | "acceptEdits"
-  | "plan"
-  | "bypassPermissions";
+  | "unrestricted";
 
 export type ReasoningEffort =
   | "none"

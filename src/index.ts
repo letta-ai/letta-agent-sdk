@@ -306,7 +306,7 @@ export async function listMessagesDirect(
   // resumeSession uses --default which maps to the agent's default conversation.
   // The session is transient: we only need it long enough to list messages.
   const session = new LettaAgentClient().resumeSession(agentId, {
-    permissionMode: "bypassPermissions",
+    permissionMode: "unrestricted",
   });
   await (session as InitializableSession).initialize();
   try {

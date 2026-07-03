@@ -67,7 +67,7 @@ export async function createResearcher(
     return resumeSession(existingAgentId, {
       model: 'haiku',
       allowedTools: ['Glob', 'Read', 'Write'],
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
   }
   
@@ -120,7 +120,7 @@ export async function createResearcher(
       },
     ],
     allowedTools: ['web_search', 'Glob', 'Read', 'Write'],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 }
 

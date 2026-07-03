@@ -155,21 +155,23 @@ describe("buildCliArgs — model and embedding", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("buildCliArgs — permission mode", () => {
-  test("bypassPermissions → --yolo", () => {
-    const args = buildCliArgs({ permissionMode: "bypassPermissions" });
-    expect(args).toContain("--yolo");
-    expect(args).not.toContain("--permission-mode");
+  test("unrestricted → --permission-mode unrestricted", () => {
+    const args = buildCliArgs({ permissionMode: "unrestricted" });
+    const idx = args.indexOf("--permission-mode");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("unrestricted");
+    expect(args).not.toContain("--yolo");
   });
 
-  test("other non-default modes → --permission-mode <mode>", () => {
+  test("acceptEdits → --permission-mode acceptEdits", () => {
     const args = buildCliArgs({ permissionMode: "acceptEdits" });
     const idx = args.indexOf("--permission-mode");
     expect(idx).toBeGreaterThan(-1);
     expect(args[idx + 1]).toBe("acceptEdits");
   });
 
-  test("default mode → standard permission mode", () => {
-    const args = buildCliArgs({ permissionMode: "default" });
+  test("standard mode → --permission-mode standard", () => {
+    const args = buildCliArgs({ permissionMode: "standard" });
     const idx = args.indexOf("--permission-mode");
     expect(idx).toBeGreaterThan(-1);
     expect(args[idx + 1]).toBe("standard");
@@ -181,6 +183,14 @@ describe("buildCliArgs — permission mode", () => {
     const idx = args.indexOf("--permission-mode");
     expect(idx).toBeGreaterThan(-1);
     expect(args[idx + 1]).toBe("standard");
+    expect(args).not.toContain("--yolo");
+  });
+
+  test("legacy bypassPermissions alias → unrestricted permission mode", () => {
+    const args = buildCliArgs({ permissionMode: "bypassPermissions" as never });
+    const idx = args.indexOf("--permission-mode");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("unrestricted");
     expect(args).not.toContain("--yolo");
   });
 });

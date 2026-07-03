@@ -6,6 +6,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
+import { normalizePermissionMode } from "./remote-client-session-core.js";
 import type { InternalSessionOptions, WireMessage } from "./types.js";
 
 // All logging gated behind DEBUG_SDK env var
@@ -154,14 +155,8 @@ export function buildCliArgs(options: InternalSessionOptions): string[] {
     }
   }
 
-  // Permission mode
-  if (options.permissionMode === "bypassPermissions") {
-    args.push("--yolo");
-  } else {
-    const mode =
-      options.permissionMode === undefined || options.permissionMode === "default"
-        ? "standard"
-        : options.permissionMode;
+  const mode = normalizePermissionMode(options.permissionMode);
+  if (mode !== undefined) {
     args.push("--permission-mode", mode);
   }
 

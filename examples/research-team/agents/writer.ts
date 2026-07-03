@@ -74,7 +74,7 @@ export async function createWriter(
     return resumeSession(existingAgentId, {
       model: 'haiku',
       allowedTools: ['Glob', 'Read', 'Write'],
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
   }
   
@@ -159,7 +159,7 @@ export async function createWriter(
       },
     ],
     allowedTools: ['Glob', 'Read', 'Write'],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 }
 

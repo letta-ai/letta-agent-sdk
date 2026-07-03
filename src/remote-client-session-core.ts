@@ -170,16 +170,46 @@ const KNOWN_SDK_ERROR_CODES = new Set<SDKErrorCode>([
   "stream_closed",
 ]);
 
-export function mapPermissionMode(
-  mode: LettaCodeClientSessionOptions["permissionMode"],
-): string | undefined {
-  if (mode === undefined || mode === "default" || mode === "standard") {
+type LegacyPermissionMode = "default" | "bypassPermissions" | "fullAccess";
+
+export function normalizePermissionMode(
+  mode:
+    | LettaCodeClientSessionOptions["permissionMode"]
+    | LegacyPermissionMode
+    | undefined,
+): LettaCodeClientSessionOptions["permissionMode"] | undefined {
+  if (mode === undefined || mode === "default") {
     return "standard";
   }
-  if (mode === "acceptEdits") return "acceptEdits";
-  if (mode === "bypassPermissions") return "unrestricted";
-  if (mode === "plan") return "memory";
+  if (mode === "bypassPermissions" || mode === "fullAccess") {
+    return "unrestricted";
+  }
+  if (
+    mode === "standard" ||
+    mode === "acceptEdits" ||
+    mode === "unrestricted"
+  ) {
+    return mode;
+  }
   return undefined;
+}
+
+export function mapPermissionMode(
+  mode:
+    | LettaCodeClientSessionOptions["permissionMode"]
+    | LegacyPermissionMode
+    | undefined,
+): string | undefined {
+  return normalizePermissionMode(mode);
+}
+
+export function isUnrestrictedPermissionMode(
+  mode:
+    | LettaCodeClientSessionOptions["permissionMode"]
+    | LegacyPermissionMode
+    | undefined,
+): boolean {
+  return normalizePermissionMode(mode) === "unrestricted";
 }
 
 export function ensureSuccess(message: Record<string, unknown>, fallback: string): void {
@@ -792,8 +822,10 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     }
     const payload: Record<string, unknown> = {};
     if (updates.cwd !== undefined) payload.cwd = updates.cwd;
-    const mode = mapPermissionMode(updates.permissionMode);
-    if (mode !== undefined) payload.mode = mode;
+    if (updates.permissionMode !== undefined) {
+      const mode = mapPermissionMode(updates.permissionMode);
+      if (mode !== undefined) payload.mode = mode;
+    }
     if (updates.agentId !== undefined) payload.agent_id = updates.agentId;
     if (updates.conversationId !== undefined) payload.conversation_id = updates.conversationId;
 

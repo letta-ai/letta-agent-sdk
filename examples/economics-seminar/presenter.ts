@@ -51,7 +51,7 @@ export async function createPresenter(
     return resumeSession(existingAgentId, {
       model: config.model,
       allowedTools: ['web_search', 'Read', 'Write'],
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
   }
   
@@ -105,7 +105,7 @@ export async function createPresenter(
       },
     ],
     allowedTools: ['web_search', 'Read', 'Write'],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 }
 

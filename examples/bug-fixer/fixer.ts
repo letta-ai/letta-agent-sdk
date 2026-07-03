@@ -84,7 +84,7 @@ export async function getOrCreateAgent(state: BugFixerState): Promise<Session> {
     return resumeSession(state.agentId, {
       model: DEFAULT_CONFIG.model,
       allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
   }
 
@@ -120,7 +120,7 @@ export async function getOrCreateAgent(state: BugFixerState): Promise<Session> {
       },
     ],
     allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 
   return session;

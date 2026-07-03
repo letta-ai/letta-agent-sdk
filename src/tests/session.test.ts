@@ -314,7 +314,7 @@ describe("Session", () => {
     }
   });
 
-  describe("handleCanUseTool with bypassPermissions", () => {
+  describe("handleCanUseTool with unrestricted", () => {
     async function invokeCanUseTool(
       session: Session,
       tool_name: string,
@@ -341,10 +341,10 @@ describe("Session", () => {
       return capturedResponse;
     }
 
-    test("auto-approves tools when permissionMode is bypassPermissions", async () => {
-      // Create a session with bypassPermissions
+    test("auto-approves tools when permissionMode is unrestricted", async () => {
+      // Create a session with unrestricted
       const session = new Session({
-        permissionMode: "bypassPermissions",
+        permissionMode: "unrestricted",
       });
 
       const capturedResponse = await invokeCanUseTool(session, "Bash", {
@@ -366,10 +366,10 @@ describe("Session", () => {
       });
     });
 
-    test("denies tools by default when no callback and not bypassPermissions", async () => {
-      // Create a session with default permission mode
+    test("denies tools by default when no callback and not unrestricted", async () => {
+      // Create a session with standard permission mode
       const session = new Session({
-        permissionMode: "default",
+        permissionMode: "standard",
       });
 
       const capturedResponse = await invokeCanUseTool(session, "Bash", {
@@ -393,7 +393,7 @@ describe("Session", () => {
 
     test("auto-allows EnterPlanMode without callback", async () => {
       const session = new Session({
-        permissionMode: "default",
+        permissionMode: "standard",
       });
 
       const capturedResponse = await invokeCanUseTool(
@@ -416,9 +416,9 @@ describe("Session", () => {
       });
     });
 
-    test("denies AskUserQuestion without callback even in bypassPermissions", async () => {
+    test("denies AskUserQuestion without callback even in unrestricted", async () => {
       const session = new Session({
-        permissionMode: "bypassPermissions",
+        permissionMode: "unrestricted",
       });
 
       const capturedResponse = await invokeCanUseTool(
@@ -443,9 +443,9 @@ describe("Session", () => {
       });
     });
 
-    test("uses canUseTool callback when provided and not bypassPermissions", async () => {
+    test("uses canUseTool callback when provided and not unrestricted", async () => {
       const session = new Session({
-        permissionMode: "default",
+        permissionMode: "standard",
         canUseTool: async (toolName) => {
           if (toolName === "Bash") {
             return { behavior: "allow" };
@@ -728,7 +728,7 @@ describe("Session", () => {
   describe("approval recovery flow", () => {
     test("recoverPendingApprovals returns unknown pending state on timeout", async () => {
       const session = new Session({
-        permissionMode: "default",
+        permissionMode: "standard",
       });
       const transport = new MockTransport();
       attachMockTransport(session, transport);
@@ -750,7 +750,7 @@ describe("Session", () => {
 
     test("recoverPendingApprovals reports unsupported when CLI rejects subtype", async () => {
       const session = new Session({
-        permissionMode: "default",
+        permissionMode: "standard",
       });
       const transport = new MockTransport();
       attachMockTransport(session, transport);
@@ -795,7 +795,7 @@ describe("Session", () => {
 
     test("runTurn terminalizes approval conflict when recovery is unsupported", async () => {
       const session = new Session({
-        permissionMode: "default",
+        permissionMode: "standard",
       });
       const transport = new MockTransport();
       attachMockTransport(session, transport);
@@ -851,7 +851,7 @@ describe("Session", () => {
 
     test("runTurn retries once after successful recovery", async () => {
       const session = new Session({
-        permissionMode: "default",
+        permissionMode: "standard",
       });
       const transport = new MockTransport();
       attachMockTransport(session, transport);
@@ -920,7 +920,7 @@ describe("Session", () => {
 
     test("runTurn preserves non-conflict error detail on terminal result", async () => {
       const session = new Session({
-        permissionMode: "default",
+        permissionMode: "standard",
       });
       const transport = new MockTransport();
       attachMockTransport(session, transport);
@@ -953,7 +953,7 @@ describe("Session", () => {
   describe("background pump parity", () => {
     test("propagates approval conflict detail from error message to terminal result", async () => {
       const session = new Session({
-        permissionMode: "default",
+        permissionMode: "standard",
       });
       const transport = new MockTransport();
       attachMockTransport(session, transport);
@@ -992,7 +992,7 @@ describe("Session", () => {
     test("handles can_use_tool control requests before stream iteration starts", async () => {
       let callbackInvocations = 0;
       const session = new Session({
-        permissionMode: "default",
+        permissionMode: "standard",
         canUseTool: () => {
           callbackInvocations += 1;
           return { behavior: "allow" };
@@ -1041,7 +1041,7 @@ describe("Session", () => {
 
     test("bounds buffered stream messages and drops oldest deterministically", async () => {
       const session = new Session({
-        permissionMode: "default",
+        permissionMode: "standard",
       });
       const transport = new MockTransport();
       attachMockTransport(session, transport);
@@ -1096,7 +1096,7 @@ describe("Session", () => {
 
     test("emits error and retry messages instead of dropping them", async () => {
       const session = new Session({
-        permissionMode: "default",
+        permissionMode: "standard",
       });
       const transport = new MockTransport();
       attachMockTransport(session, transport);

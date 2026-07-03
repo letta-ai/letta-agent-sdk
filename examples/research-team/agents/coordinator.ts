@@ -55,7 +55,7 @@ export async function createCoordinator(
     return resumeSession(existingAgentId, {
       model: 'haiku',
       allowedTools: ['Glob', 'Read', 'Write'],
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
   }
   
@@ -127,7 +127,7 @@ export async function createCoordinator(
       },
     ],
     allowedTools: ['Glob', 'Read', 'Write'],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 }
 
