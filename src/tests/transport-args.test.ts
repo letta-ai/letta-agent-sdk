@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { buildCliArgs } from "../transport.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Baseline: every invocation includes these two pairs
+// Baseline: every invocation includes stream-json I/O and standard permissions.
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("buildCliArgs — baseline args", () => {
@@ -25,11 +25,12 @@ describe("buildCliArgs — baseline args", () => {
     expect(args[inIdx + 1]).toBe("stream-json");
   });
 
-  test("minimum invocation (empty options) produces exactly the two baseline pairs", () => {
+  test("minimum invocation (empty options) produces exactly the baseline flags", () => {
     const args = buildCliArgs({});
     expect(args).toEqual([
       "--output-format", "stream-json",
       "--input-format", "stream-json",
+      "--permission-mode", "standard",
     ]);
   });
 });
@@ -167,15 +168,19 @@ describe("buildCliArgs — permission mode", () => {
     expect(args[idx + 1]).toBe("acceptEdits");
   });
 
-  test("default mode → no permission flag", () => {
+  test("default mode → standard permission mode", () => {
     const args = buildCliArgs({ permissionMode: "default" });
-    expect(args).not.toContain("--permission-mode");
+    const idx = args.indexOf("--permission-mode");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("standard");
     expect(args).not.toContain("--yolo");
   });
 
-  test("no permissionMode → no permission flag", () => {
+  test("no permissionMode → standard permission mode", () => {
     const args = buildCliArgs({});
-    expect(args).not.toContain("--permission-mode");
+    const idx = args.indexOf("--permission-mode");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("standard");
     expect(args).not.toContain("--yolo");
   });
 });

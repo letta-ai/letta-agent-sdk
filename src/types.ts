@@ -544,6 +544,7 @@ export interface InternalSessionOptions {
 
 export type PermissionMode =
   | "default"
+  | "standard"
   | "acceptEdits"
   | "plan"
   | "bypassPermissions";

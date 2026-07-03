@@ -27,7 +27,7 @@ describe("CLI resolution", () => {
 
 describe("transport args", () => {
   function buildArgsFor(options: {
-    permissionMode?: "default" | "acceptEdits" | "plan" | "bypassPermissions";
+    permissionMode?: "default" | "standard" | "acceptEdits" | "plan" | "bypassPermissions";
     allowedTools?: string[];
     disallowedTools?: string[];
     createOnly?: boolean;
@@ -51,6 +51,18 @@ describe("transport args", () => {
     expect(args).toContain("--permission-mode");
     expect(args).toContain("acceptEdits");
     expect(args).not.toContain("--accept-edits");
+  });
+
+  test("default uses --permission-mode standard", () => {
+    const args = buildArgsFor({ permissionMode: "default" });
+    expect(args).toContain("--permission-mode");
+    expect(args).toContain("standard");
+  });
+
+  test("standard uses --permission-mode standard", () => {
+    const args = buildArgsFor({ permissionMode: "standard" });
+    expect(args).toContain("--permission-mode");
+    expect(args).toContain("standard");
   });
 
   test("plan mode uses --permission-mode plan", () => {

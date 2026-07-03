@@ -173,7 +173,9 @@ const KNOWN_SDK_ERROR_CODES = new Set<SDKErrorCode>([
 export function mapPermissionMode(
   mode: LettaCodeClientSessionOptions["permissionMode"],
 ): string | undefined {
-  if (mode === undefined || mode === "default") return undefined;
+  if (mode === undefined || mode === "default" || mode === "standard") {
+    return "standard";
+  }
   if (mode === "acceptEdits") return "acceptEdits";
   if (mode === "bypassPermissions") return "unrestricted";
   if (mode === "plan") return "memory";

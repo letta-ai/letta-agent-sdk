@@ -157,8 +157,12 @@ export function buildCliArgs(options: InternalSessionOptions): string[] {
   // Permission mode
   if (options.permissionMode === "bypassPermissions") {
     args.push("--yolo");
-  } else if (options.permissionMode && options.permissionMode !== "default") {
-    args.push("--permission-mode", options.permissionMode);
+  } else {
+    const mode =
+      options.permissionMode === undefined || options.permissionMode === "default"
+        ? "standard"
+        : options.permissionMode;
+    args.push("--permission-mode", mode);
   }
 
   // Allowed / disallowed tools
