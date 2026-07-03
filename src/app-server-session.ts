@@ -12,6 +12,7 @@ import { startLocalAppServer, type LocalAppServerHandle } from "./local-app-serv
 import {
   RemoteClientSessionCore,
   ensureSuccess,
+  isUnrestrictedPermissionMode,
   mapPermissionMode,
   normalizeSendMessage,
   type ProtocolMessage,
@@ -329,7 +330,7 @@ export async function resolveAppServerToolApproval(
     };
   }
 
-  if (options.permissionMode === "bypassPermissions" && !toolNeedsRuntimeUserInput) {
+  if (isUnrestrictedPermissionMode(options.permissionMode) && !toolNeedsRuntimeUserInput) {
     return { behavior: "allow", updatedInput: null, updatedPermissions: [] };
   }
 

@@ -56,7 +56,7 @@ export async function createAnalyst(
     return resumeSession(existingAgentId, {
       model: 'haiku',
       allowedTools: ['Glob', 'Read', 'Write'],
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
   }
   
@@ -126,7 +126,7 @@ List full references at end
       },
     ],
     allowedTools: ['Glob', 'Read', 'Write'],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 }
 

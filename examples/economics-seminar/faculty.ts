@@ -60,7 +60,7 @@ export async function createFacultyMember(
     return resumeSession(existingAgentId, {
       model: config.model,
       allowedTools: ['Read', 'Write'],
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
   }
   
@@ -118,7 +118,7 @@ export async function createFacultyMember(
       },
     ],
     allowedTools: ['Read', 'Write'],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 }
 

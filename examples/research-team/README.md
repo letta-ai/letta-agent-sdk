@@ -209,7 +209,7 @@ const researcherAgentId = 'agent-xxx-yyy-zzz';
 // Teleport the trained researcher into your code
 const researcher = resumeSession(researcherAgentId, {
   allowedTools: ['web_search', 'Read', 'Write'],
-  permissionMode: 'bypassPermissions',
+  permissionMode: 'unrestricted',
 });
 
 // The agent remembers everything it learned!
@@ -235,7 +235,7 @@ app.post('/research', async (req, res) => {
   
   // Teleport the trained researcher
   const researcher = resumeSession(teamState.agentIds.researcher!, {
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
   
   await researcher.send(`Research: ${query}`);

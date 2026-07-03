@@ -56,7 +56,7 @@ async function main() {
 
   const researcher = resumeSession(teamState.agentIds.researcher!, {
     allowedTools: ['web_search', 'Read', 'Write'],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 
   console.log('   Asking: "What search strategies have you found effective?"\n');
@@ -89,7 +89,7 @@ async function main() {
 
     const analyst = resumeSession(teamState.agentIds.analyst, {
       allowedTools: ['Read', 'Write'],
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
 
     console.log('   Asking: "What analysis frameworks have worked well?"\n');

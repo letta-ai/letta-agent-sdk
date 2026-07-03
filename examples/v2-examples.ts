@@ -85,7 +85,7 @@ async function basicSession() {
   // Create agent, then resume default conversation
   const agentId = await createAgent();
   await using session = resumeSession(agentId, {
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
   
   await session.send('Hello! Introduce yourself in one sentence.');
@@ -110,7 +110,7 @@ async function multiTurn() {
   // Create new agent + new conversation
   await using session = createSession(undefined, {
     model: 'haiku',
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 
   // Turn 1
@@ -158,7 +158,7 @@ async function sessionResume() {
   // First session - establish a memory
   {
     const session = resumeSession(agentId, {
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
     
     console.log('[Session 1] Teaching agent a secret word...');
@@ -181,7 +181,7 @@ async function sessionResume() {
   // Resume and verify agent remembers
   {
     await using session = resumeSession(agentId, {
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
     
     console.log('[Session 2] Asking agent for the secret word...');
@@ -215,7 +215,7 @@ async function testOptions() {
   console.log('Testing systemPrompt preset...');
   const sysPromptSession = createSession(undefined, {
     systemPrompt: 'letta-claude',
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
   await sysPromptSession.send('Hello, what kind of agent are you?');
   let sysPromptResponse = '';
@@ -230,7 +230,7 @@ async function testOptions() {
   const cwdSession = createSession(undefined, {
     cwd: '/tmp',
     allowedTools: ['Bash'],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
   await cwdSession.send('Run pwd to show current directory');
   let cwdResponse = '';
@@ -245,7 +245,7 @@ async function testOptions() {
   console.log('Testing allowedTools option...');
   const toolsSession = createSession(undefined, {
     allowedTools: ['Bash'],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
   await toolsSession.send('Run: echo tool-test-ok');
   let toolsResponse = '';
@@ -256,20 +256,20 @@ async function testOptions() {
   const hasToolOutput = toolsResponse.includes('tool-test-ok');
   console.log(`  allowedTools: ${hasToolOutput ? 'PASS' : 'CHECK'} - ${toolsResponse.slice(0, 60)}`);
 
-  // Test permissionMode: bypassPermissions
-  console.log('Testing permissionMode: bypassPermissions...');
-  const bypassSession = createSession(undefined, {
+  // Test permissionMode: unrestricted
+  console.log('Testing permissionMode: unrestricted...');
+  const unrestrictedSession = createSession(undefined, {
     allowedTools: ['Bash'],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
-  await bypassSession.send('Run: echo bypass-test');
-  let bypassResponse = '';
-  for await (const msg of bypassSession.stream()) {
-    if (msg.type === 'result') bypassResponse = msg.result || '';
+  await unrestrictedSession.send('Run: echo unrestricted-test');
+  let unrestrictedResponse = '';
+  for await (const msg of unrestrictedSession.stream()) {
+    if (msg.type === 'result') unrestrictedResponse = msg.result || '';
   }
-  bypassSession.close();
-  const hasBypassOutput = bypassResponse.includes('bypass-test');
-  console.log(`  permissionMode: ${hasBypassOutput ? 'PASS' : 'CHECK'}`);
+  unrestrictedSession.close();
+  const hasUnrestrictedOutput = unrestrictedResponse.includes('unrestricted-test');
+  console.log(`  permissionMode: ${hasUnrestrictedOutput ? 'PASS' : 'CHECK'}`);
 
   console.log();
 }
@@ -283,7 +283,7 @@ async function testMessageTypes() {
 
   const agentId = await createAgent();
   const session = resumeSession(agentId, {
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 
   await session.send('Say "hello" exactly');
@@ -329,7 +329,7 @@ async function testSessionProperties() {
   // Create new agent + new conversation
   const session = createSession(undefined, {
     model: 'haiku',
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 
   // Before send - properties should be null
@@ -367,7 +367,7 @@ async function testToolExecution() {
   async function runWithTools(message: string, tools: string[]): Promise<string> {
     const session = createSession(agentId, {
       allowedTools: tools,
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
     await session.send(message);
     let result = '';
@@ -412,14 +412,14 @@ async function testToolExecution() {
 async function testPermissionCallback() {
   console.log('=== Testing Permission Callback ===\n');
 
-  // Note: permissionMode 'default' with NO allowedTools triggers callback
+  // Note: permissionMode 'standard' with NO allowedTools triggers callback
   // allowedTools auto-allows tools, bypassing the callback
 
   // Test 1: Allow specific commands via callback
   console.log('Testing canUseTool callback (allow)...');
   const allowSession = createSession(undefined, {
     // NO allowedTools - this ensures callback is invoked
-    permissionMode: 'default',
+    permissionMode: 'standard',
     canUseTool: async (toolName, toolInput) => {
       console.error('CALLBACK:', toolName, toolInput);
       const command = (toolInput as { command?: string }).command || '';
@@ -441,7 +441,7 @@ async function testPermissionCallback() {
   // Test 2: Deny specific commands via callback
   console.log('Testing canUseTool callback (deny)...');
   const denySession = createSession(undefined, {
-    permissionMode: 'default',
+    permissionMode: 'standard',
     canUseTool: async (toolName, toolInput) => {
       const command = (toolInput as { command?: string }).command || '';
       if (command.includes('dangerous')) {
@@ -472,7 +472,7 @@ async function testSystemPrompt() {
 
   async function runWithSystemPrompt(msg: string, systemPrompt: any): Promise<string> {
     const agentId = await createAgent({ systemPrompt });
-    const session = resumeSession(agentId, { permissionMode: 'bypassPermissions' });
+    const session = resumeSession(agentId, { permissionMode: 'unrestricted' });
     await session.send(msg);
     let result = '';
     for await (const m of session.stream()) {
@@ -533,7 +533,7 @@ async function testMemoryConfig() {
 
   async function runWithMemory(msg: string, memory?: any[]): Promise<{ success: boolean; result: string }> {
     const agentId = await createAgent({ memory });
-    const session = resumeSession(agentId, { permissionMode: 'bypassPermissions' });
+    const session = resumeSession(agentId, { permissionMode: 'unrestricted' });
     await session.send(msg);
     let result = '';
     let success = false;
@@ -595,7 +595,7 @@ async function testConvenienceProps() {
 
   async function runWithProps(msg: string, props: Record<string, any>): Promise<{ success: boolean; result: string }> {
     const agentId = await createAgent(props);
-    const session = resumeSession(agentId, { permissionMode: 'bypassPermissions' });
+    const session = resumeSession(agentId, { permissionMode: 'unrestricted' });
     await session.send(msg);
     let result = '';
     let success = false;
@@ -688,7 +688,7 @@ async function testConversations() {
   console.log('Test 1: Resume default conversation...');
   {
     const session = resumeSession(agentId, {
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
 
     await session.send('Remember: the secret code is ALPHA. Store this in memory.');
@@ -710,7 +710,7 @@ async function testConversations() {
   console.log('\nTest 2: Create new conversation (createSession)...');
   {
     const session = createSession(agentId, {
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
 
     await session.send('Remember: the secret code for THIS conversation is BETA.');
@@ -734,7 +734,7 @@ async function testConversations() {
     console.log('  Use resumeSession(agentId) to resume default conversation');
   } else {
     await using session = resumeSession(conversationId1!, {
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
 
     await session.send('What is the secret code for this conversation?');
@@ -757,7 +757,7 @@ async function testConversations() {
   console.log('\nTest 4: Create another new conversation...');
   {
     await using session = createSession(agentId, {
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
 
     await session.send('Say "third conversation"');
@@ -780,7 +780,7 @@ async function testConversations() {
   console.log('\nTest 5: Resume default conversation via resumeSession(agentId)...');
   {
     await using session = resumeSession(agentId, {
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
 
     await session.send('What is the secret code? (should be ALPHA from default conversation)');
@@ -799,7 +799,7 @@ async function testConversations() {
   console.log('\nTest 6: conversationId in result message...');
   {
     await using session = resumeSession(conversationId1!, {
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
 
     await session.send('Hi');
@@ -822,7 +822,7 @@ async function testConversations() {
   {
     await using session = createSession(undefined, {
       model: 'haiku',
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
 
     await session.send('Say "lru agent test ok"');

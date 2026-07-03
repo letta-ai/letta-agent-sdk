@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { buildCliArgs } from "../transport.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Baseline: every invocation includes these two pairs
+// Baseline: every invocation includes stream-json I/O and standard permissions.
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("buildCliArgs — baseline args", () => {
@@ -25,11 +25,12 @@ describe("buildCliArgs — baseline args", () => {
     expect(args[inIdx + 1]).toBe("stream-json");
   });
 
-  test("minimum invocation (empty options) produces exactly the two baseline pairs", () => {
+  test("minimum invocation (empty options) produces exactly the baseline flags", () => {
     const args = buildCliArgs({});
     expect(args).toEqual([
       "--output-format", "stream-json",
       "--input-format", "stream-json",
+      "--permission-mode", "standard",
     ]);
   });
 });
@@ -154,28 +155,42 @@ describe("buildCliArgs — model and embedding", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("buildCliArgs — permission mode", () => {
-  test("bypassPermissions → --yolo", () => {
-    const args = buildCliArgs({ permissionMode: "bypassPermissions" });
-    expect(args).toContain("--yolo");
-    expect(args).not.toContain("--permission-mode");
+  test("unrestricted → --permission-mode unrestricted", () => {
+    const args = buildCliArgs({ permissionMode: "unrestricted" });
+    const idx = args.indexOf("--permission-mode");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("unrestricted");
+    expect(args).not.toContain("--yolo");
   });
 
-  test("other non-default modes → --permission-mode <mode>", () => {
+  test("acceptEdits → --permission-mode acceptEdits", () => {
     const args = buildCliArgs({ permissionMode: "acceptEdits" });
     const idx = args.indexOf("--permission-mode");
     expect(idx).toBeGreaterThan(-1);
     expect(args[idx + 1]).toBe("acceptEdits");
   });
 
-  test("default mode → no permission flag", () => {
-    const args = buildCliArgs({ permissionMode: "default" });
-    expect(args).not.toContain("--permission-mode");
+  test("standard mode → --permission-mode standard", () => {
+    const args = buildCliArgs({ permissionMode: "standard" });
+    const idx = args.indexOf("--permission-mode");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("standard");
     expect(args).not.toContain("--yolo");
   });
 
-  test("no permissionMode → no permission flag", () => {
+  test("no permissionMode → standard permission mode", () => {
     const args = buildCliArgs({});
-    expect(args).not.toContain("--permission-mode");
+    const idx = args.indexOf("--permission-mode");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("standard");
+    expect(args).not.toContain("--yolo");
+  });
+
+  test("legacy bypassPermissions alias → unrestricted permission mode", () => {
+    const args = buildCliArgs({ permissionMode: "bypassPermissions" as never });
+    const idx = args.indexOf("--permission-mode");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("unrestricted");
     expect(args).not.toContain("--yolo");
   });
 });

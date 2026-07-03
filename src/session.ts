@@ -41,6 +41,7 @@ import {
   isHeadlessAutoAllowTool,
   requiresRuntimeUserInput,
 } from "./interactiveToolPolicy.js";
+import { isUnrestrictedPermissionMode } from "./remote-client-session-core.js";
 
 
 // All logging gated behind DEBUG_SDK env var
@@ -972,7 +973,7 @@ export class Session implements AsyncDisposable {
     const autoAllowWithoutCallback =
       isHeadlessAutoAllowTool(toolName);
 
-    sessionLog("canUseTool", `tool=${toolName} mode=${this.options.permissionMode || "default"} requestId=${requestId}`);
+    sessionLog("canUseTool", `tool=${toolName} mode=${this.options.permissionMode || "standard"} requestId=${requestId}`);
 
     // Tools that require runtime user input cannot be auto-allowed without a callback.
     if (toolNeedsRuntimeUserInput && !hasCallback) {
@@ -982,11 +983,11 @@ export class Session implements AsyncDisposable {
         interrupt: false,
       };
     } else if (
-      this.options.permissionMode === "bypassPermissions" &&
+      isUnrestrictedPermissionMode(this.options.permissionMode) &&
       !toolNeedsRuntimeUserInput
     ) {
-      // bypassPermissions auto-allows non-interactive tools.
-      sessionLog("canUseTool", `AUTO-ALLOW ${toolName} (bypassPermissions)`);
+      // unrestricted auto-allows non-interactive tools.
+      sessionLog("canUseTool", `AUTO-ALLOW ${toolName} (unrestricted)`);
       response = {
         behavior: "allow",
         updatedInput: null,

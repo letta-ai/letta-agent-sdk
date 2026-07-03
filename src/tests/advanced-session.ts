@@ -15,6 +15,12 @@ export type AdvancedSession = LettaCodeSession & {
   recoverPendingApprovals(
     options?: RecoverPendingApprovalsOptions,
   ): Promise<RecoverPendingApprovalsResult>;
+  changeDeviceState(updates: {
+    cwd?: string;
+    permissionMode?: "standard" | "acceptEdits" | "unrestricted";
+    agentId?: string;
+    conversationId?: string;
+  }): Promise<void>;
   updateToolset(toolsetPreference: string): Promise<void>;
   bootstrapState(options?: BootstrapStateOptions): Promise<BootstrapStateResult>;
 };

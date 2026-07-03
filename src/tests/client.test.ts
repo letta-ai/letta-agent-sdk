@@ -1140,6 +1140,24 @@ describe("LettaAgentClient", () => {
         toolset_preference: "developer",
       });
 
+      await asAdvanced(session).changeDeviceState({ cwd: "/workspace/method" });
+      const cwdOnlyDeviceState = fakeControlSocket().sent.at(-1) as {
+        payload?: Record<string, unknown>;
+      };
+      expect(cwdOnlyDeviceState).toMatchObject({
+        type: "change_device_state",
+        runtime: { agent_id: "agent-123", conversation_id: "default" },
+        payload: { cwd: "/workspace/method" },
+      });
+      expect(cwdOnlyDeviceState.payload).not.toHaveProperty("mode");
+
+      await asAdvanced(session).changeDeviceState({ permissionMode: "unrestricted" });
+      expect(fakeControlSocket().sent.at(-1)).toMatchObject({
+        type: "change_device_state",
+        runtime: { agent_id: "agent-123", conversation_id: "default" },
+        payload: { mode: "unrestricted" },
+      });
+
       await session.sendCommand({
         type: "change_device_state",
         runtime: { agent_id: "agent-123", conversation_id: "default" },

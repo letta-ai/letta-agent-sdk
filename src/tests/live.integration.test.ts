@@ -302,7 +302,7 @@ describeLive("live integration: letta-agent-sdk", () => {
       await ensureAgentReady();
 
       const session = createSession(agentId, {
-        permissionMode: "bypassPermissions",
+        permissionMode: "unrestricted",
       });
       openedSessions.push(session);
 
@@ -332,7 +332,7 @@ describeLive("live integration: letta-agent-sdk", () => {
       expect(conversationId.startsWith("conv-")).toBe(true);
 
       const session = resumeSession(conversationId, {
-        permissionMode: "bypassPermissions",
+        permissionMode: "unrestricted",
       });
       openedSessions.push(session);
 
@@ -350,7 +350,7 @@ describeLive("live integration: letta-agent-sdk", () => {
       await ensureAgentReady();
 
       const session = createSession(agentId, {
-        permissionMode: "bypassPermissions",
+        permissionMode: "unrestricted",
       });
       openedSessions.push(session);
 
@@ -380,7 +380,7 @@ describeLive("live integration: letta-agent-sdk", () => {
       await ensureAgentReady();
 
       const session = createSession(agentId, {
-        permissionMode: "bypassPermissions",
+        permissionMode: "unrestricted",
       });
       openedSessions.push(session);
 
@@ -425,7 +425,7 @@ describeLive("live integration: letta-agent-sdk", () => {
       await ensureAgentReady();
 
       const session = createSession(agentId, {
-        permissionMode: "bypassPermissions",
+        permissionMode: "unrestricted",
       });
       openedSessions.push(session);
 
@@ -492,7 +492,7 @@ describeLive("live integration: letta-agent-sdk", () => {
       await ensureAgentReady();
 
       const session = createSession(agentId, {
-        permissionMode: "bypassPermissions",
+        permissionMode: "unrestricted",
       });
       openedSessions.push(session);
 
@@ -546,7 +546,7 @@ describeLive("live integration: letta-agent-sdk", () => {
       await ensureAgentReady();
 
       const session = createSession(agentId, {
-        permissionMode: "bypassPermissions",
+        permissionMode: "unrestricted",
       });
       openedSessions.push(session);
 
@@ -613,7 +613,7 @@ describeLive("live integration: letta-agent-sdk", () => {
 
       try {
         const session = createSession(stuckAgentId, {
-          permissionMode: "bypassPermissions",
+          permissionMode: "unrestricted",
         });
         openedSessions.push(session);
 

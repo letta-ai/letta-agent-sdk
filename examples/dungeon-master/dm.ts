@@ -96,7 +96,7 @@ export async function createDM(state: GameState): Promise<Session> {
     return resumeSession(state.dmAgentId, {
       model: DEFAULT_CONFIG.model,
       allowedTools: ['Read', 'Write'],
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
   }
 
@@ -163,7 +163,7 @@ None - waiting to start or load a campaign
       },
     ],
     allowedTools: ['Read', 'Write'],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 
   return session;

@@ -101,7 +101,7 @@ export async function getOrCreateAgent(state: ReleaseNotesState): Promise<Sessio
     return resumeSession(state.agentId, {
       model: DEFAULT_CONFIG.model,
       allowedTools: ['Bash', 'Read', 'Write', 'Glob'],
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'unrestricted',
     });
   }
 
@@ -126,7 +126,7 @@ export async function getOrCreateAgent(state: ReleaseNotesState): Promise<Sessio
       },
     ],
     allowedTools: ['Bash', 'Read', 'Write', 'Glob'],
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'unrestricted',
   });
 
   return session;

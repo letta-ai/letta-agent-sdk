@@ -27,7 +27,7 @@ describe("CLI resolution", () => {
 
 describe("transport args", () => {
   function buildArgsFor(options: {
-    permissionMode?: "default" | "acceptEdits" | "plan" | "bypassPermissions";
+    permissionMode?: "standard" | "acceptEdits" | "unrestricted";
     allowedTools?: string[];
     disallowedTools?: string[];
     createOnly?: boolean;
@@ -53,16 +53,17 @@ describe("transport args", () => {
     expect(args).not.toContain("--accept-edits");
   });
 
-  test("plan mode uses --permission-mode plan", () => {
-    const args = buildArgsFor({ permissionMode: "plan" });
+  test("standard uses --permission-mode standard", () => {
+    const args = buildArgsFor({ permissionMode: "standard" });
     expect(args).toContain("--permission-mode");
-    expect(args).toContain("plan");
+    expect(args).toContain("standard");
   });
 
-  test("bypassPermissions still uses --yolo alias", () => {
-    const args = buildArgsFor({ permissionMode: "bypassPermissions" });
-    expect(args).toContain("--yolo");
-    expect(args).not.toContain("--permission-mode");
+  test("unrestricted uses --permission-mode unrestricted", () => {
+    const args = buildArgsFor({ permissionMode: "unrestricted" });
+    expect(args).toContain("--permission-mode");
+    expect(args).toContain("unrestricted");
+    expect(args).not.toContain("--yolo");
   });
 
   test("allowedTools and disallowedTools are forwarded to CLI flags", () => {

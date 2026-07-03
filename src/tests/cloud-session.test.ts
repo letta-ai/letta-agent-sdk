@@ -675,7 +675,7 @@ describe("CloudEnvironmentSession", () => {
     const session = client.resumeSession("agent-1", {
       model: "anthropic/claude-sonnet-4",
       cwd: "/repo",
-      permissionMode: "bypassPermissions",
+      permissionMode: "unrestricted",
       dreaming: { trigger: "step-count", stepCount: 3 },
     });
     const init = await asAdvanced(session).initialize();
