@@ -406,3 +406,29 @@ export async function imageFromURL(url: string): Promise<ImageContent> {
     source: { type: "base64", media_type, data }
   };
 }
+
+// ═══════════════════════════════════════════════════════════════
+// DREAMING — batch memory formation over recorded sessions
+// ═══════════════════════════════════════════════════════════════
+
+export {
+  dream,
+  packDreamBatches,
+  selectDreamSessions,
+  getTrajectorySource,
+  listTrajectorySourceTypes,
+  AGGREGATOR_PERSONA,
+  REFLECTION_SYSTEM_PROMPT,
+} from "./dream/index.js";
+export type {
+  DreamOptions,
+  DreamResult,
+  DreamSourceSpec,
+  DreamBatch,
+  DreamAggregationOutcome,
+  BatchReflectionResult,
+  DiscoveredSession,
+  NormalizedRecord,
+  NormalizedSession,
+  TrajectorySource,
+} from "./dream/index.js";

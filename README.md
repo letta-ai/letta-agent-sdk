@@ -275,6 +275,32 @@ const sync = await session.sendCommand(
 );
 ```
 
+## Dreaming
+
+Form long-term memory from recorded coding sessions — Claude Code, Codex, OpenHands, Letta conversations, or pre-normalized transcripts. Sessions are normalized to a shared format, packed into time-ordered batches, reflected on by concurrent agent sessions (each editing an isolated git clone of the target memory filesystem), and synthesized into the target by one aggregation pass that works from the batches' diffs.
+
+```typescript
+import { LettaAgentClient, dream } from "@letta-ai/letta-agent-sdk";
+
+const client = new LettaAgentClient({ backend: "cloud", apiKey: process.env.LETTA_API_KEY });
+
+const result = await dream({
+  client,
+  sources: [
+    { type: "claude" },                          // all local Claude Code sessions
+    { type: "codex", locator: "<session-id>" },  // that Codex session onwards
+  ],
+  memoryDir: "/path/to/memory-repo",             // git repo the learnings land on
+  runRoot: "/path/to/run-artifacts",
+});
+
+if (result.kind === "completed") {
+  console.log(result.aggregation.report);
+}
+```
+
+Source types: `claude`, `codex` (local stores; a locator acts as a time cursor), `openhands:<dir>`, `letta:<agent-id>/<conversation-id>` (recorded Letta conversation transcripts), `transcript:<file|dir>` (normalized files). Use `planOnly: true` to preview session selection and batch packing without running agents, and pass `reflectorAgentId`/`aggregatorAgentId` to reuse worker agents across runs. Every run records per-batch `input/`, the edited memory clone, `diff.patch`, `trajectory.json`, and `report.json` under `runRoot`. See `examples/dream.ts`.
+
 ## Links
 
 - Docs: https://docs.letta.com/letta-agent-sdk
