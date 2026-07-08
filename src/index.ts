@@ -413,6 +413,9 @@ export async function imageFromURL(url: string): Promise<ImageContent> {
 
 export {
   dream,
+  initDreamAgent,
+  loadDreamAgent,
+  resolveDreamTarget,
   packDreamBatches,
   selectDreamSessions,
   getTrajectorySource,
@@ -426,6 +429,9 @@ export type {
   DreamSourceSpec,
   DreamBatch,
   DreamAggregationOutcome,
+  DreamAgentConfig,
+  DreamTarget,
+  LoadedDreamAgent,
   BatchReflectionResult,
   DiscoveredSession,
   NormalizedRecord,

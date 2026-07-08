@@ -6,13 +6,20 @@
 // interpolates {{vars}}. render() throws on unresolved {{vars}} so a renamed
 // placeholder fails at run start instead of leaking into a prompt.
 
+import aggregatorContinueMd from "./prompts/aggregator-continue.md";
 import aggregatorPersonaMd from "./prompts/aggregator-persona.md";
 import aggregatorUserMd from "./prompts/aggregator-user.md";
+import reflectionContinueMd from "./prompts/reflection-continue.md";
 import reflectionSystemMd from "./prompts/reflection-system.md";
 import reflectionUserMd from "./prompts/reflection-user.md";
+import targetAggregatorMd from "./prompts/target-aggregator.md";
+import targetGuidanceAgentsMd from "./prompts/target-guidance-agents-md.md";
+import targetGuidanceGenericMd from "./prompts/target-guidance-generic.md";
+import targetReflectionMd from "./prompts/target-reflection.md";
 
 export const REFLECTION_SYSTEM_PROMPT: string = reflectionSystemMd.trim();
 export const AGGREGATOR_PERSONA: string = aggregatorPersonaMd.trim();
+export const AGGREGATOR_CONTINUE_PROMPT: string = aggregatorContinueMd.trim();
 
 function render(
   template: string,
@@ -52,6 +59,40 @@ export function buildReflectionUserPrompt(input: {
     sessionList: input.sessionFileNames.map((name) => `- ${name}`).join("\n"),
     memoryDir: input.memoryDir,
     instructionSection: instructionSection(input.instruction),
+  });
+}
+
+export function buildReflectionContinuePrompt(input: {
+  memoryDir: string;
+}): string {
+  return render(reflectionContinueMd, { memoryDir: input.memoryDir });
+}
+
+function targetGuidance(kind: "agents-md" | "generic"): string {
+  return (
+    kind === "agents-md" ? targetGuidanceAgentsMd : targetGuidanceGenericMd
+  ).trim();
+}
+
+/** Directive for a reflection batch to maintain the target doc in its clone. */
+export function buildTargetReflectionInstruction(input: {
+  kind: "agents-md" | "generic";
+  docPath: string;
+}): string {
+  return render(targetReflectionMd, {
+    docPath: input.docPath,
+    guidance: targetGuidance(input.kind),
+  });
+}
+
+/** Directive for the aggregator to synthesize the target doc onto the memfs. */
+export function buildTargetAggregatorInstruction(input: {
+  kind: "agents-md" | "generic";
+  docPath: string;
+}): string {
+  return render(targetAggregatorMd, {
+    docPath: input.docPath,
+    guidance: targetGuidance(input.kind),
   });
 }
 

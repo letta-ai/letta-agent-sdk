@@ -9,7 +9,12 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { LettaAgentClient } from "../client.js";
 import { gitOutput } from "./clone.js";
-import { buildAggregatorUserPrompt } from "./prompts.js";
+import {
+  AGGREGATOR_CONTINUE_PROMPT,
+  buildAggregatorUserPrompt,
+  buildTargetAggregatorInstruction,
+} from "./prompts.js";
+import { type DreamTarget, targetMemfsRelPath } from "./targets.js";
 import type { BatchReflectionResult } from "./reflect.js";
 import { runAgentToCompletion } from "./runner.js";
 import { normalizeSdkMessages } from "./sdk-messages.js";
@@ -32,6 +37,8 @@ export async function runDreamAggregation(params: {
   runRoot: string;
   reflections: BatchReflectionResult[];
   instruction?: string;
+  /** Doc maintained in the memfs at system/<fileName>. */
+  target?: DreamTarget;
   log?: (line: string) => void;
 }): Promise<DreamAggregationOutcome> {
   const log = params.log ?? (() => {});
@@ -56,17 +63,38 @@ export async function runDreamAggregation(params: {
     "HEAD",
   ]);
 
+  const instruction = [
+    params.instruction,
+    params.target
+      ? buildTargetAggregatorInstruction({
+          kind: params.target.kind,
+          docPath: join(params.memoryDir, targetMemfsRelPath(params.target)),
+        })
+      : undefined,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const userPrompt = buildAggregatorUserPrompt({
     batchesDir: join(params.runRoot, "batches"),
     batchCount: params.reflections.length,
     memoryDir: params.memoryDir,
-    instruction: params.instruction,
+    ...(instruction ? { instruction } : {}),
   });
 
   log(
     `[aggregate] integrating ${withContent.length} reflection output(s) into memory`,
   );
-  const run = await runAgentToCompletion(params.client, {
+  const landedCommits = async () =>
+    Number(
+      (
+        await gitOutput(params.memoryDir, [
+          "rev-list",
+          "--count",
+          `${baseRevision}..HEAD`,
+        ]).catch(() => "0")
+      ).trim() || "0",
+    );
+  let run = await runAgentToCompletion(params.client, {
     agentId: params.aggregatorAgentId,
     userPrompt,
     // cwd one level above the target so the harness's own state doesn't land
@@ -75,9 +103,34 @@ export async function runDreamAggregation(params: {
     label: "aggregate",
     onProgress: log,
   });
+  // The model can end its turn narrating its plan instead of executing it.
+  // While nothing has landed on the target, nudge the same conversation to
+  // keep going — its plan and diff survey are already in context.
+  const passes: { prompt: string; run: typeof run }[] = [{ prompt: userPrompt, run }];
+  for (
+    let nudge = 0;
+    nudge < 2 &&
+    run.success &&
+    run.conversationId !== null &&
+    (await landedCommits()) === 0;
+    nudge++
+  ) {
+    log("[aggregate] turn ended with no commits on target — nudging to continue");
+    run = await runAgentToCompletion(params.client, {
+      agentId: params.aggregatorAgentId,
+      userPrompt: AGGREGATOR_CONTINUE_PROMPT,
+      cwd: dirname(params.memoryDir),
+      label: "aggregate",
+      resumeConversationId: run.conversationId,
+      onProgress: log,
+    });
+    passes.push({ prompt: AGGREGATOR_CONTINUE_PROMPT, run });
+  }
 
-  const records = normalizeSdkMessages(userPrompt, run.messages);
-  if (records) {
+  const records = passes.flatMap(
+    (pass) => normalizeSdkMessages(pass.prompt, pass.run.messages) ?? [],
+  );
+  if (records.length > 0) {
     await writeFile(
       join(aggregateDir, "trajectory.json"),
       JSON.stringify(records, null, 1),
@@ -116,7 +169,7 @@ export async function runDreamAggregation(params: {
         conversationId: outcome.conversationId,
         success: outcome.success,
         error: outcome.error,
-        durationMs: run.durationMs,
+        durationMs: passes.reduce((total, pass) => total + pass.run.durationMs, 0),
         inputs: withContent.map((r) => `batch-${r.batchIndex}`),
         report: run.report,
       },

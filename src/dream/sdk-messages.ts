@@ -13,6 +13,35 @@ import type { NormalizedRecord } from "./types.js";
  * the run's user prompt as the leading user record. Returns null when the
  * messages contain no conversational content.
  */
+/**
+ * The cloud (api-backend) wire streams reasoning/assistant content as
+ * per-token deltas that all share their logical message's id; stitch those
+ * runs back into whole messages. Complete-message streams (local backend)
+ * pass through unchanged, since consecutive distinct messages have distinct
+ * ids.
+ */
+function coalesceStreamDeltas(messages: SDKMessage[]): SDKMessage[] {
+  const coalesced: SDKMessage[] = [];
+  for (const msg of messages) {
+    const prev = coalesced[coalesced.length - 1];
+    if (
+      prev !== undefined &&
+      (msg.type === "reasoning" || msg.type === "assistant") &&
+      prev.type === msg.type &&
+      prev.uuid === msg.uuid
+    ) {
+      prev.content += msg.content;
+      continue;
+    }
+    coalesced.push(
+      msg.type === "reasoning" || msg.type === "assistant"
+        ? { ...msg }
+        : msg,
+    );
+  }
+  return coalesced;
+}
+
 export function normalizeSdkMessages(
   userPrompt: string,
   messages: SDKMessage[],
@@ -25,7 +54,7 @@ export function normalizeSdkMessages(
       timestamp: null,
     },
   ];
-  for (const msg of messages) {
+  for (const msg of coalesceStreamDeltas(messages)) {
     switch (msg.type) {
       case "reasoning":
         if (msg.content) {

@@ -16,7 +16,12 @@ import { join } from "node:path";
 import type { LettaAgentClient } from "../client.js";
 import type { DreamBatch } from "./batching.js";
 import { cloneMemoryTree, gitOutput, inspectMemoryTree } from "./clone.js";
-import { buildReflectionUserPrompt } from "./prompts.js";
+import {
+  buildReflectionContinuePrompt,
+  buildReflectionUserPrompt,
+  buildTargetReflectionInstruction,
+} from "./prompts.js";
+import { type DreamTarget, targetMemfsRelPath } from "./targets.js";
 import { runAgentToCompletion } from "./runner.js";
 import { normalizeSdkMessages } from "./sdk-messages.js";
 import { sessionFileName } from "./select.js";
@@ -53,6 +58,8 @@ export interface RunBatchReflectionsParams {
   normalizedJsonByKey: Map<string, string>;
   concurrency: number;
   instruction?: string;
+  /** Doc each batch maintains in its clone at system/<fileName>. */
+  target?: DreamTarget;
   log?: (line: string) => void;
 }
 
@@ -83,13 +90,24 @@ async function runOneBatch(
     sessionFileNames.push(fileName);
   }
 
+  const instruction = [
+    params.instruction,
+    params.target
+      ? buildTargetReflectionInstruction({
+          kind: params.target.kind,
+          docPath: join(outputDir, targetMemfsRelPath(params.target)),
+        })
+      : undefined,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const userPrompt = buildReflectionUserPrompt({
     batchIndex: batch.index,
     inputDir,
     sessionFileNames,
     memoryDir: outputDir,
     timeRange: { start: batch.startTime, end: batch.endTime },
-    instruction: params.instruction,
+    ...(instruction ? { instruction } : {}),
   });
 
   const label = `reflect:batch-${batch.index}`;
@@ -98,26 +116,99 @@ async function runOneBatch(
       `${batch.startTime} → ${batch.endTime}`,
   );
 
-  const run = await runAgentToCompletion(params.client, {
+  // Session startup is the contended phase: concurrent sessions on the shared
+  // reflector can collide on its git config lock, and a thundering herd of
+  // runtime starts can push the slowest past the request timeout. Both are
+  // transient — retry with jitter instead of failing the batch.
+  const TRANSIENT_INIT_ERROR =
+    /could not lock config file|Timed out waiting for runtime-start/;
+  let run = await runAgentToCompletion(params.client, {
     agentId: params.reflectorAgentId,
     userPrompt,
     cwd: batchDir,
     label,
     onProgress: log,
   });
+  for (
+    let retry = 0;
+    !run.success &&
+    run.error !== undefined &&
+    TRANSIENT_INIT_ERROR.test(run.error) &&
+    retry < 3;
+    retry++
+  ) {
+    const delayMs = 500 + Math.floor(Math.random() * 2000);
+    log(`[${label}] transient session-init contention, retrying in ${delayMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    run = await runAgentToCompletion(params.client, {
+      agentId: params.reflectorAgentId,
+      userPrompt,
+      cwd: batchDir,
+      label,
+      onProgress: log,
+    });
+  }
 
-  const records = normalizeSdkMessages(userPrompt, run.messages);
-  if (records) {
+  // The model can end its turn before doing the work (e.g. after narrating a
+  // plan). While the clone is completely untouched, nudge the same
+  // conversation onward — its survey of the sessions is already in context.
+  const passes: { prompt: string; run: typeof run }[] = [
+    { prompt: userPrompt, run },
+  ];
+  for (
+    let nudge = 0;
+    nudge < 2 && run.success && run.conversationId !== null;
+    nudge++
+  ) {
+    const state = await inspectMemoryTree(outputDir, baseRevision);
+    if (state.commitCount > 0 || state.dirty) break;
+    const continuePrompt = buildReflectionContinuePrompt({
+      memoryDir: outputDir,
+    });
+    log(`[${label}] turn ended with no memory changes — nudging to continue`);
+    run = await runAgentToCompletion(params.client, {
+      agentId: params.reflectorAgentId,
+      userPrompt: continuePrompt,
+      cwd: batchDir,
+      label,
+      resumeConversationId: run.conversationId,
+      onProgress: log,
+    });
+    passes.push({ prompt: continuePrompt, run });
+  }
+
+  const records = passes.flatMap(
+    (pass) => normalizeSdkMessages(pass.prompt, pass.run.messages) ?? [],
+  );
+  if (records.length > 0) {
     await writeFile(
       join(batchDir, "trajectory.json"),
       JSON.stringify(records, null, 1),
       "utf-8",
     );
   }
-  const { commitCount, dirty } = await inspectMemoryTree(
+  let { commitCount, dirty } = await inspectMemoryTree(
     outputDir,
     baseRevision,
   );
+  if (dirty) {
+    // Agents occasionally end without committing their last edits. That tree
+    // content is the batch's real output — commit it so diff.patch (the
+    // aggregator's primary input) reflects it. `dirty` stays true to record
+    // the protocol break.
+    try {
+      await gitOutput(outputDir, ["add", "-A"]);
+      await gitOutput(outputDir, [
+        "commit",
+        "-m",
+        `reflection: batch ${batch.index} (recovered uncommitted edits)`,
+      ]);
+      commitCount += 1;
+    } catch {
+      // Recovery is best-effort; an unrecoverable tree still ships its diff
+      // of whatever WAS committed.
+    }
+  }
   // The batch's changes relative to the shared base — the aggregator's
   // primary input.
   try {
@@ -164,7 +255,10 @@ export async function runBatchReflections(
     1,
     Math.min(params.concurrency, params.batches.length),
   );
-  const workers = Array.from({ length: workerCount }, async () => {
+  const workers = Array.from({ length: workerCount }, async (_, workerIndex) => {
+    // Stagger session startups: a same-instant herd of runtime starts can
+    // push the slowest past the protocol request timeout.
+    await new Promise((resolve) => setTimeout(resolve, workerIndex * 1500));
     while (next < params.batches.length) {
       const batch = params.batches[next++];
       if (!batch) break;

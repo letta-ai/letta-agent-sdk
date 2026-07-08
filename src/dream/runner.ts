@@ -14,6 +14,8 @@ export interface RunAgentOptions {
   cwd: string;
   /** Progress label for logging. */
   label: string;
+  /** Continue this existing conversation instead of starting a new one. */
+  resumeConversationId?: string;
   onProgress?: (line: string) => void;
 }
 
@@ -35,11 +37,14 @@ export async function runAgentToCompletion(
   const started = Date.now();
   const log = options.onProgress ?? (() => {});
 
-  const session = client.createSession(options.agentId, {
-    permissionMode: "unrestricted",
+  const sessionOptions = {
+    permissionMode: "unrestricted" as const,
     cwd: options.cwd,
-    dreaming: { trigger: "off" },
-  });
+    dreaming: { trigger: "off" as const },
+  };
+  const session = options.resumeConversationId
+    ? client.resumeSession(options.resumeConversationId, sessionOptions)
+    : client.createSession(options.agentId, sessionOptions);
 
   const messages: SDKMessage[] = [];
   let success = false;

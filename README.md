@@ -280,18 +280,35 @@ const sync = await session.sendCommand(
 Form long-term memory from recorded coding sessions — Claude Code, Codex, OpenHands, Letta conversations, or pre-normalized transcripts. Sessions are normalized to a shared format, packed into time-ordered batches, reflected on by concurrent agent sessions (each editing an isolated git clone of the target memory filesystem), and synthesized into the target by one aggregation pass that works from the batches' diffs.
 
 ```typescript
-import { LettaAgentClient, dream } from "@letta-ai/letta-agent-sdk";
+import { LettaAgentClient, dream, initDreamAgent } from "@letta-ai/letta-agent-sdk";
 
-const client = new LettaAgentClient({ backend: "cloud", apiKey: process.env.LETTA_API_KEY });
+// Dreaming edits local files, so the harness must run on this machine.
+// harnessBackend "api" keeps the worker agents (and models like
+// letta/auto-memory) on Letta Cloud; omit it to stay fully local.
+const client = new LettaAgentClient({
+  backend: "local",
+  appServer: { harnessBackend: "api" },
+});
 
+// One-time: initialize the agent identity dreams are tied to. Targets are
+// bound here — an AGENTS.md doc maintained at system/AGENTS.md, and a
+// skills/ directory mirrored as the memfs skills/ tier.
+const agent = await initDreamAgent({
+  rootDir: "./dream-agent",
+  targets: ["./AGENTS.md", "./skills/"],
+  model: "anthropic/claude-opus-4-6",
+});
+
+// Every dream against the agent uses (and persists) its memory filesystem,
+// worker agents, reflection cursors, and targets; run artifacts land under
+// <rootDir>/runs/<dream-id>.
 const result = await dream({
   client,
+  agent: "./dream-agent",
   sources: [
     { type: "claude" },                          // all local Claude Code sessions
     { type: "codex", locator: "<session-id>" },  // that Codex session onwards
   ],
-  memoryDir: "/path/to/memory-repo",             // git repo the learnings land on
-  runRoot: "/path/to/run-artifacts",
 });
 
 if (result.kind === "completed") {
@@ -299,7 +316,13 @@ if (result.kind === "completed") {
 }
 ```
 
+Prefer the agent form; the lower-level knobs (`memoryDir` + `runRoot` + `target`, plus explicit `reflectorAgentId`/`aggregatorAgentId`) remain for callers managing their own layout.
+
 Source types: `claude`, `codex` (local stores; a locator acts as a time cursor), `openhands:<dir>`, `letta:<agent-id>/<conversation-id>` (recorded Letta conversation transcripts), `transcript:<file|dir>` (normalized files). Use `planOnly: true` to preview session selection and batch packing without running agents, and pass `reflectorAgentId`/`aggregatorAgentId` to reuse worker agents across runs. Every run records per-batch `input/`, the edited memory clone, `diff.patch`, `trajectory.json`, and `report.json` under `runRoot`. See `examples/dream.ts`.
+
+OpenHands conversations are long-lived streams, so they carry a reflection cursor: after a successful run, each conversation's last-reflected position is committed to the memory repo (`.dream/cursors.json`), and later runs reflect only on events past it — a conversation with nothing new is skipped entirely. Claude/Codex sessions are finite files and are re-processed as selected.
+
+Targets — bound at `initDreamAgent` (or via the low-level `target` option) — maintain a doc (e.g. an [AGENTS.md](https://agents.md)) from memory: the on-disk copy is synced into the memfs at `system/<name>` before reflection (the repo copy is the source of truth), each batch revises it alongside its other memory edits, the aggregator synthesizes one cohesive revision, and the result is exported back to the path with its managed frontmatter stripped. A run that yields no durable guidance leaves the doc untouched — and if the doc doesn't exist yet, it is only created when there is real content to record.
 
 ## Links
 

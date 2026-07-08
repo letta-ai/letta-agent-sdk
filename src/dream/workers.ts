@@ -35,6 +35,10 @@ export async function ensureDreamWorkers(
       systemPrompt: REFLECTION_SYSTEM_PROMPT,
       ...(options.model ? { model: options.model } : {}),
       tags: ["role:dream-reflector"],
+      // Workers carry no memfs of their own: reflection edits per-batch
+      // clones and aggregation edits the caller's target, and a shared memfs
+      // would make concurrent sessions contend on its git state.
+      memfs: false,
     });
     log(`[reflector] created ${reflectorAgentId}`);
   }
@@ -45,6 +49,7 @@ export async function ensureDreamWorkers(
       persona: AGGREGATOR_PERSONA,
       ...(options.model ? { model: options.model } : {}),
       tags: ["role:dream-aggregator"],
+      memfs: false,
     });
     log(`[aggregator] created ${aggregatorAgentId}`);
   }
