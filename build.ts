@@ -26,6 +26,8 @@ await Bun.build({
   format: "esm",
   minify: false,
   sourcemap: "external",
+  // Prompt text lives in .md files (src/dream/prompts/); inline as strings.
+  loader: { ".md": "text" },
 });
 
 // Generate type declarations
