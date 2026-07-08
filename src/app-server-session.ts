@@ -711,8 +711,8 @@ export class AppServerSession extends RemoteClientSessionCore {
   }
 
   protected override shouldEnableMemfs(options: LettaCodeClientSessionOptions | CreateAgentOptions): boolean {
-    void options;
-    return this.mode.kind === "create-agent";
+    if (this.mode.kind !== "create-agent") return false;
+    return (options as CreateAgentOptions).memfs !== false;
   }
 
   protected override async initializeRuntimeController(): Promise<RuntimeSessionInit> {

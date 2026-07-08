@@ -431,7 +431,7 @@ export class LettaAgentClient {
     const appServer = localOptions.appServer;
     return {
       local: appServer?.url === undefined,
-      localBackend: "local",
+      localBackend: appServer?.harnessBackend ?? "local",
       ...(appServer?.url !== undefined ? { url: appServer.url } : {}),
       ...(appServer?.WebSocket !== undefined ? { WebSocket: appServer.WebSocket } : {}),
       ...(appServer?.requestTimeoutMs !== undefined

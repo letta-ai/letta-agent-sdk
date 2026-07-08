@@ -287,6 +287,15 @@ export interface LettaCodeLocalAppServerOptions {
    * Omit to let the SDK spawn and own a loopback app-server.
    */
   url?: string;
+  /**
+   * Which Letta Code backend the spawned app-server runs against:
+   * - "local": the in-process experimental backend (agents stored on this
+   *   machine, `agent-local-*` ids). The default.
+   * - "api": Letta Cloud (real `agent-*` ids, cloud-side models such as
+   *   letta/auto-memory) with tools still executing on this machine. Requires
+   *   the harness to be authenticated (login or LETTA_API_KEY).
+   */
+  harnessBackend?: "api" | "local";
   /** Optional WebSocket constructor for tests/non-standard runtimes. */
   WebSocket?: LettaCodeSocketConstructor;
   /** Timeout for websocket protocol request/turn correlation. */
@@ -743,6 +752,14 @@ export interface CreateAgentOptions {
 
   /** Convenience: Set human block value directly */
   human?: string;
+
+  /**
+   * Whether to enable the git-backed memory filesystem on the new agent
+   * (default true). Pass false for worker-style agents that should not carry
+   * their own memory repo — enabling memfs is a slow backend round trip, and
+   * concurrent sessions on a shared-memfs agent contend on its git state.
+   */
+  memfs?: boolean;
 
   /** List of allowed tool names */
   allowedTools?: string[];
