@@ -230,6 +230,10 @@ export function createAgentBody(
 
   if (options.model !== undefined) body.model = options.model;
   if (options.embedding !== undefined) body.embedding = options.embedding;
+  if (options.name !== undefined) body.name = options.name;
+  if (options.description !== undefined) body.description = options.description;
+  if (options.hidden !== undefined) body.hidden = options.hidden;
+  if (options.baseTools !== undefined) body.tools = options.baseTools;
 
   if (options.systemPrompt !== undefined) {
     if (typeof options.systemPrompt === "string") {
@@ -783,11 +787,16 @@ export class AppServerSession extends RemoteClientSessionCore {
     if (this.remoteOptions.local !== true) {
       throw new Error("App-server session requires a url unless local app-server spawning is enabled.");
     }
+    // Session-level env layers over client-level env: each SDK-owned session
+    // spawns its own app-server process, so this is a per-session scope.
+    const sessionEnv = (
+      this.mode.options as { env?: Record<string, string> }
+    ).env;
     this.ownedAppServer = await startLocalAppServer({
       listen: this.remoteOptions.localListen,
       backend: this.remoteOptions.localBackend,
       startupTimeoutMs: this.remoteOptions.localStartupTimeoutMs,
-      env: this.remoteOptions.localEnv,
+      env: { ...this.remoteOptions.localEnv, ...sessionEnv },
     });
     return this.ownedAppServer.url;
   }
@@ -820,7 +829,17 @@ export class AppServerSession extends RemoteClientSessionCore {
         body: createAgentBody(this.mode.options, {
           includeSdkOriginTag: this.remoteOptions.includeSdkOriginTag,
         }),
-        pin_global: this.remoteOptions.pinGlobalAgent ?? true,
+        // Hidden (worker-style) agents default to unpinned.
+        pin_global:
+          this.remoteOptions.pinGlobalAgent ??
+          (this.mode.options as CreateAgentOptions).hidden !== true,
+        // Signal memfs-less (worker-style) creation to the harness so it
+        // skips the memfs tag/settings/clone entirely; older harnesses
+        // ignore the field, and the client-side enable_memfs skip still
+        // applies either way.
+        ...((this.mode.options as CreateAgentOptions).memfs === false
+          ? { memfs: false }
+          : {}),
       };
       return command as RuntimeStartCommand;
     }

@@ -1050,7 +1050,13 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       const response = await this.controller.request(
         "enable_memfs",
         this.enableMemfsBody(),
-        { predicate: (message) => message.type === "enable_memfs_response" },
+        {
+          predicate: (message) => message.type === "enable_memfs_response",
+          // Enabling the memory filesystem on a cloud agent is a slow
+          // multi-round-trip operation; the default request timeout is far
+          // too tight for it.
+          timeoutMs: 180_000,
+        },
       );
       ensureSuccess(response, "Failed to enable memfs");
     }
