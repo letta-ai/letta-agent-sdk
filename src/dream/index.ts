@@ -37,6 +37,11 @@ import {
 } from "./agent.js";
 import { loadDreamCursors, saveDreamCursors } from "./cursors.js";
 import {
+  AGGREGATOR_PERSONA,
+  buildTargetsOnlyConstraint,
+} from "./prompts.js";
+import { targetMemfsRelPath } from "./targets.js";
+import {
   readExistingTarget,
   readTargetFromMemory,
   resolveDreamTarget,
@@ -76,12 +81,16 @@ export interface DreamOptions {
   /** What to reflect on. */
   sources: DreamSourceSpec[];
   /**
-   * Root directory of a dream agent (see initDreamAgent). When set, the
-   * memory filesystem, run directory (runs/<dream-id>), worker agents, model,
-   * and targets all come from — and persist to — the agent identity, and
-   * memoryDir/runRoot/target must be omitted.
+   * A dream agent id (see initDreamAgent). When set, the memory filesystem
+   * is the agent's own memfs checkout, run artifacts land under its harness
+   * directory, the reflector worker and targets come from — and persist to —
+   * the agent's pipeline state, and AGGREGATION RUNS ON THE AGENT ITSELF so
+   * synthesized changes land in its memory through the harness's memory
+   * machinery. memoryDir/runRoot/target must be omitted.
    */
   agent?: string;
+  /** Override the harness agents directory when using `agent` (tests). */
+  agentsDir?: string;
   /**
    * The target memory filesystem: a git repository the aggregation lands on.
    * Pass a worktree of the real memfs when isolation from concurrent edits
@@ -157,7 +166,9 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
   // An agent identity supplies (and persists) everything a bare run takes
   // as explicit options.
   const agentState = options.agent
-    ? await loadDreamAgent(options.agent)
+    ? await loadDreamAgent(options.agent, {
+        ...(options.agentsDir ? { agentsDir: options.agentsDir } : {}),
+      })
     : undefined;
   if (agentState && (options.memoryDir || options.runRoot || options.target)) {
     throw new Error(
@@ -170,6 +181,10 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
   if (!memoryDir || !runRoot) {
     throw new Error("dream() requires either `agent` or memoryDir + runRoot");
   }
+  // Pipeline state (cursors) lives beside the agent's memory checkout, never
+  // committed into the real memfs behind the harness's back; standalone runs
+  // keep it inside their own memory repo.
+  const cursorDir = agentState?.stateDir ?? memoryDir;
 
   let sessions = await selectDreamSessions(options.sources);
   if (sessions.length === 0) {
@@ -189,7 +204,7 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
   // Cursor-tracked harnesses (openhands: long-lived, append-only
   // conversations) are trimmed to the records past their reflection cursor;
   // a conversation with nothing new is dropped entirely.
-  const cursors = await loadDreamCursors(memoryDir);
+  const cursors = await loadDreamCursors(cursorDir);
   const lastReflectedTsByKey = new Map<string, string>();
   const normalizedJsonByKey = new Map<string, string>();
   const measuredSessions: DiscoveredSession[] = [];
@@ -242,9 +257,25 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
   // Seed the targets into the memfs before any batch clones are taken, so
   // every clone starts from the current on-disk (shared) state.
   let target = options.target ? resolveDreamTarget(options.target) : undefined;
+  let scopeConstraint: string | undefined;
   if (agentState) {
     await syncAgentTargetsIntoMemory(agentState);
-    target = (await classifyAgentTargets(agentState)).fileTarget;
+    const classified = await classifyAgentTargets(agentState);
+    target = classified.fileTarget;
+    if (agentState.config.targetsOnly) {
+      scopeConstraint = buildTargetsOnlyConstraint({
+        targetPaths: [
+          ...(classified.fileTarget
+            ? [
+                `${targetMemfsRelPath(classified.fileTarget)} (under the memory root)`,
+              ]
+            : []),
+          ...classified.dirTargets.map(
+            (d) => `${d.memfsSubdir}/ (under the memory root)`,
+          ),
+        ],
+      });
+    }
   } else if (target) {
     const existing = await readExistingTarget(target);
     if (existing !== null) {
@@ -257,24 +288,27 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
     }
   }
 
+  const effectiveInstruction =
+    [options.instruction, scopeConstraint].filter(Boolean).join("\n\n") ||
+    undefined;
+
   await mkdir(runRoot, { recursive: true });
+  // The dream agent aggregates its own memory; only the reflector is a
+  // separate worker. Its id persists in the pipeline state so every dream
+  // against this agent reuses it.
   const workers = await ensureDreamWorkers(options.client, {
     reflectorAgentId:
       options.reflectorAgentId ?? agentState?.config.reflectorAgentId,
     aggregatorAgentId:
-      options.aggregatorAgentId ?? agentState?.config.aggregatorAgentId,
+      options.aggregatorAgentId ?? agentState?.agentId,
     model: options.model ?? agentState?.config.model,
     log,
   });
-  // Workers belong to the identity: persist ids so every dream against this
-  // agent reuses them (their history doubles as the agent's dream history).
   if (
     agentState &&
-    (agentState.config.reflectorAgentId !== workers.reflectorAgentId ||
-      agentState.config.aggregatorAgentId !== workers.aggregatorAgentId)
+    agentState.config.reflectorAgentId !== workers.reflectorAgentId
   ) {
     agentState.config.reflectorAgentId = workers.reflectorAgentId;
-    agentState.config.aggregatorAgentId = workers.aggregatorAgentId;
     await saveDreamAgentConfig(agentState);
   }
   log(
@@ -289,7 +323,7 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
     batches,
     normalizedJsonByKey,
     concurrency: options.concurrency ?? batches.length,
-    instruction: options.instruction,
+    instruction: effectiveInstruction,
     ...(target ? { target } : {}),
     log,
   });
@@ -300,8 +334,11 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
     memoryDir,
     runRoot,
     reflections: batchResults,
-    instruction: options.instruction,
+    instruction: effectiveInstruction,
     ...(target ? { target } : {}),
+    // When the dream agent aggregates its own memory it carries no dedicated
+    // aggregator persona block — fold the persona into the prompt instead.
+    ...(agentState ? { personaPreamble: AGGREGATOR_PERSONA } : {}),
     log,
   });
 
@@ -320,7 +357,7 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
       advanced += 1;
     }
     if (advanced > 0) {
-      await saveDreamCursors(memoryDir, cursors);
+      await saveDreamCursors(cursorDir, cursors);
       log(`[cursor] advanced ${advanced} cursor(s)`);
     }
   }

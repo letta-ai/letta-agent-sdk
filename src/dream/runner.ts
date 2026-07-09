@@ -16,6 +16,8 @@ export interface RunAgentOptions {
   label: string;
   /** Continue this existing conversation instead of starting a new one. */
   resumeConversationId?: string;
+  /** Extra env for the session's harness process (see session options). */
+  env?: Record<string, string>;
   onProgress?: (line: string) => void;
 }
 
@@ -41,6 +43,7 @@ export async function runAgentToCompletion(
     permissionMode: "unrestricted" as const,
     cwd: options.cwd,
     dreaming: { trigger: "off" as const },
+    ...(options.env ? { env: options.env } : {}),
   };
   const session = options.resumeConversationId
     ? client.resumeSession(options.resumeConversationId, sessionOptions)

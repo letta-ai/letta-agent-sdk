@@ -39,6 +39,12 @@ export async function runDreamAggregation(params: {
   instruction?: string;
   /** Doc maintained in the memfs at system/<fileName>. */
   target?: DreamTarget;
+  /**
+   * Persona text prepended to the prompt when the aggregating agent doesn't
+   * carry a dedicated aggregator persona block (a dream agent synthesizing
+   * its own memory).
+   */
+  personaPreamble?: string;
   log?: (line: string) => void;
 }): Promise<DreamAggregationOutcome> {
   const log = params.log ?? (() => {});
@@ -74,12 +80,15 @@ export async function runDreamAggregation(params: {
   ]
     .filter(Boolean)
     .join("\n\n");
-  const userPrompt = buildAggregatorUserPrompt({
+  const builtPrompt = buildAggregatorUserPrompt({
     batchesDir: join(params.runRoot, "batches"),
     batchCount: params.reflections.length,
     memoryDir: params.memoryDir,
     ...(instruction ? { instruction } : {}),
   });
+  const userPrompt = params.personaPreamble
+    ? `${params.personaPreamble.trim()}\n\n${builtPrompt}`
+    : builtPrompt;
 
   log(
     `[aggregate] integrating ${withContent.length} reflection output(s) into memory`,
@@ -94,6 +103,14 @@ export async function runDreamAggregation(params: {
         ]).catch(() => "0")
       ).trim() || "0",
     );
+  // Scope the session's memory to the target memfs so the harness's memory
+  // guard applies to the tree the aggregator is synthesizing onto. The
+  // EXPLICIT marker distinguishes this deliberate scope from stale leakage.
+  const memoryEnv = {
+    MEMORY_DIR: params.memoryDir,
+    LETTA_MEMORY_DIR: params.memoryDir,
+    LETTA_MEMORY_DIR_EXPLICIT: "1",
+  };
   let run = await runAgentToCompletion(params.client, {
     agentId: params.aggregatorAgentId,
     userPrompt,
@@ -101,6 +118,7 @@ export async function runDreamAggregation(params: {
     // inside (and get committed to) the memory filesystem.
     cwd: dirname(params.memoryDir),
     label: "aggregate",
+    env: memoryEnv,
     onProgress: log,
   });
   // The model can end its turn narrating its plan instead of executing it.
@@ -122,6 +140,7 @@ export async function runDreamAggregation(params: {
       cwd: dirname(params.memoryDir),
       label: "aggregate",
       resumeConversationId: run.conversationId,
+      env: memoryEnv,
       onProgress: log,
     });
     passes.push({ prompt: AGGREGATOR_CONTINUE_PROMPT, run });

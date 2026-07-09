@@ -122,11 +122,20 @@ async function runOneBatch(
   // transient — retry with jitter instead of failing the batch.
   const TRANSIENT_INIT_ERROR =
     /could not lock config file|Timed out waiting for runtime-start/;
+  // Scope the session's memory to its clone: the harness's memory guard then
+  // applies to the batch's own memory copy rather than being stripped. The
+  // EXPLICIT marker distinguishes this deliberate scope from stale leakage.
+  const memoryEnv = {
+    MEMORY_DIR: outputDir,
+    LETTA_MEMORY_DIR: outputDir,
+    LETTA_MEMORY_DIR_EXPLICIT: "1",
+  };
   let run = await runAgentToCompletion(params.client, {
     agentId: params.reflectorAgentId,
     userPrompt,
     cwd: batchDir,
     label,
+    env: memoryEnv,
     onProgress: log,
   });
   for (
@@ -145,6 +154,7 @@ async function runOneBatch(
       userPrompt,
       cwd: batchDir,
       label,
+      env: memoryEnv,
       onProgress: log,
     });
   }
@@ -172,6 +182,7 @@ async function runOneBatch(
       cwd: batchDir,
       label,
       resumeConversationId: run.conversationId,
+      env: memoryEnv,
       onProgress: log,
     });
     passes.push({ prompt: continuePrompt, run });

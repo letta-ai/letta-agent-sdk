@@ -13,6 +13,7 @@ import reflectionContinueMd from "./prompts/reflection-continue.md";
 import reflectionSystemMd from "./prompts/reflection-system.md";
 import reflectionUserMd from "./prompts/reflection-user.md";
 import targetAggregatorMd from "./prompts/target-aggregator.md";
+import targetsOnlyMd from "./prompts/targets-only.md";
 import targetGuidanceAgentsMd from "./prompts/target-guidance-agents-md.md";
 import targetGuidanceGenericMd from "./prompts/target-guidance-generic.md";
 import targetReflectionMd from "./prompts/target-reflection.md";
@@ -82,6 +83,15 @@ export function buildTargetReflectionInstruction(input: {
   return render(targetReflectionMd, {
     docPath: input.docPath,
     guidance: targetGuidance(input.kind),
+  });
+}
+
+/** Constraint confining ALL memory edits to the bound target paths. */
+export function buildTargetsOnlyConstraint(input: {
+  targetPaths: string[];
+}): string {
+  return render(targetsOnlyMd, {
+    targetList: input.targetPaths.map((p) => `- ${p}`).join("\n"),
   });
 }
 

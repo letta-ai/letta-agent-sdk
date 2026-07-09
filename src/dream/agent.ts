@@ -1,21 +1,23 @@
-// A dream agent: the persistent identity a dream run is tied to. Initializing
-// one creates its root directory —
+// A dream agent IS a memfs-enabled Letta agent — the identity is its agent
+// id. Its memory lives where the harness keeps that agent's memory
+// filesystem checkout (~/.letta/agents/<id>/memory), maintained and synced
+// by the harness; the pipeline stores nothing but its own state next to it:
 //
-//   agent.json    identity: name, model, worker agent ids, target paths
-//   memory/       the agent's memory filesystem (git repo, initial commit)
-//   runs/         one artifact directory per dream (dream-<stamp>)
+//   ~/.letta/agents/<agent-id>/
+//     memory/              the agent's memfs checkout (harness-owned)
+//     dream/               pipeline state: agent.json (bound targets,
+//                          reflector id, model), reflection cursors, and
+//                          runs/<dream-id>/ per-dream artifacts
 //
-// and TARGETS are bound at initialization, not per run: an AGENTS.md file
-// target is maintained at system/AGENTS.md, and a skills/ directory target is
-// mirrored at skills/ in the memfs. Every dream against the agent syncs the
-// targets in first (the on-disk copies are the source of truth), and exports
-// what the aggregation committed back out. Reflection cursors live inside the
-// memory repo (.dream/cursors.json), so the whole identity is one directory.
+// TARGETS are bound at initialization: an AGENTS.md file target maintained at
+// system/AGENTS.md, and a skills/ directory target mirrored at skills/.
+// Aggregation runs as a session ON the dream agent itself, so synthesized
+// changes land in its own memfs through the harness's memory machinery.
 
-import { execFile } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { promisify } from "node:util";
+import type { LettaAgentClient } from "../client.js";
 import {
   type DreamTarget,
   exportDirTargetFromMemory,
@@ -28,35 +30,53 @@ import {
   writeTarget,
 } from "./targets.js";
 
-const execFileAsync = promisify(execFile);
-
 export interface DreamAgentConfig {
   schema_version: "v1";
   name?: string;
   createdAt: string;
-  /** Model for the worker agents (created lazily on the first dream). */
+  /** Model for the reflector worker (created lazily on the first dream). */
   model?: string;
   reflectorAgentId?: string;
-  aggregatorAgentId?: string;
   /** Absolute target paths bound at initialization. */
   targets: string[];
+  /**
+   * When true, the agent's memory IS its targets: every dream confines its
+   * edits to the bound target paths (system/<doc>, skills/) and creates no
+   * other memory files. Default: targets are maintained in addition to
+   * regular tiered memory, matching letta-code's `dream --to`.
+   */
+  targetsOnly?: boolean;
 }
 
 export interface LoadedDreamAgent {
-  rootDir: string;
+  /** The Letta agent this identity IS. */
+  agentId: string;
+  /** The agent's memory filesystem checkout (harness-owned). */
   memoryDir: string;
+  /** Pipeline state directory (dream/). */
+  stateDir: string;
   runsDir: string;
   configPath: string;
   config: DreamAgentConfig;
 }
 
-function agentPaths(rootDir: string): Omit<LoadedDreamAgent, "config"> {
-  const root = resolve(rootDir);
+/** The harness's per-agent directory (memory checkout lives inside). */
+function harnessAgentDir(agentId: string, agentsDir?: string): string {
+  return join(agentsDir ?? join(homedir(), ".letta", "agents"), agentId);
+}
+
+function agentPaths(
+  agentId: string,
+  agentsDir?: string,
+): Omit<LoadedDreamAgent, "config"> {
+  const base = harnessAgentDir(agentId, agentsDir);
+  const stateDir = join(base, "dream");
   return {
-    rootDir: root,
-    memoryDir: join(root, "memory"),
-    runsDir: join(root, "runs"),
-    configPath: join(root, "agent.json"),
+    agentId,
+    memoryDir: join(base, "memory"),
+    stateDir,
+    runsDir: join(stateDir, "runs"),
+    configPath: join(stateDir, "agent.json"),
   };
 }
 
@@ -71,51 +91,61 @@ export async function saveDreamAgentConfig(
 }
 
 export async function loadDreamAgent(
-  rootDir: string,
+  agentId: string,
+  options: { agentsDir?: string } = {},
 ): Promise<LoadedDreamAgent> {
-  const paths = agentPaths(rootDir);
+  const paths = agentPaths(agentId, options.agentsDir);
   const raw = await readFile(paths.configPath, "utf-8").catch(() => null);
   if (raw === null) {
     throw new Error(
-      `No dream agent at ${paths.rootDir} (missing agent.json — run initDreamAgent first)`,
+      `${agentId} is not an initialized dream agent (missing ${paths.configPath} — run initDreamAgent first)`,
     );
   }
   return { ...paths, config: JSON.parse(raw) as DreamAgentConfig };
 }
 
 /**
- * Initialize a new dream-agent identity: memory repo with an initial commit,
- * runs directory, agent.json — and seed the configured targets into memory.
+ * Initialize a new dream agent: create a memfs-enabled Letta agent (the
+ * identity is its agent id), record the pipeline state next to the harness's
+ * memory checkout, and seed the configured targets into memory.
  */
-export async function initDreamAgent(options: {
-  rootDir: string;
-  /** Target paths (e.g. "./AGENTS.md", "./skills/") bound to this agent. */
-  targets?: string[];
-  name?: string;
-  model?: string;
-}): Promise<LoadedDreamAgent> {
-  const paths = agentPaths(options.rootDir);
+export async function initDreamAgent(
+  client: LettaAgentClient,
+  options: {
+    /** Target paths (e.g. "./AGENTS.md", "./skills/") bound to this agent. */
+    targets?: string[];
+    /** Confine all memory edits to the targets (see DreamAgentConfig). */
+    targetsOnly?: boolean;
+    name?: string;
+    /** Model for the dream agent AND its reflector worker. */
+    model?: string;
+    /** Override the harness agents directory (tests). */
+    agentsDir?: string;
+    /** Reuse an existing memfs-enabled agent instead of creating one. */
+    agentId?: string;
+  } = {},
+): Promise<LoadedDreamAgent> {
+  const agentId =
+    options.agentId ??
+    (await client.createAgent({
+      ...(options.model ? { model: options.model } : {}),
+      tags: ["role:dream-agent"],
+      // memfs stays enabled (the default): this agent's memory filesystem IS
+      // the dream target, and aggregation runs on the agent itself.
+    }));
+
+  const paths = agentPaths(agentId, options.agentsDir);
   const existing = await readFile(paths.configPath, "utf-8").catch(() => null);
   if (existing !== null) {
-    throw new Error(`A dream agent already exists at ${paths.rootDir}`);
+    throw new Error(`${agentId} is already an initialized dream agent`);
   }
-  await mkdir(paths.memoryDir, { recursive: true });
+  const memoryInfo = await stat(paths.memoryDir).catch(() => null);
+  if (!memoryInfo?.isDirectory()) {
+    throw new Error(
+      `No memory filesystem checkout at ${paths.memoryDir} — the dream agent must be memfs-enabled`,
+    );
+  }
   await mkdir(paths.runsDir, { recursive: true });
-  await execFileAsync("git", ["init", "--quiet"], { cwd: paths.memoryDir });
-  await execFileAsync(
-    "git",
-    [
-      "-c",
-      "user.name=Dream",
-      "-c",
-      "user.email=dream@letta.com",
-      "commit",
-      "--allow-empty",
-      "-m",
-      "memory: initial state",
-    ],
-    { cwd: paths.memoryDir },
-  );
 
   const agent: LoadedDreamAgent = {
     ...paths,
@@ -125,6 +155,7 @@ export async function initDreamAgent(options: {
       createdAt: new Date().toISOString(),
       ...(options.model ? { model: options.model } : {}),
       targets: (options.targets ?? []).map((t) => resolve(t)),
+      ...(options.targetsOnly ? { targetsOnly: true } : {}),
     },
   };
   await saveDreamAgentConfig(agent);
@@ -149,7 +180,7 @@ export async function classifyAgentTargets(
       out.dirTargets.push({ path, memfsSubdir: basename(path) });
     } else if (out.fileTarget) {
       throw new Error(
-        `Dream agent ${agent.rootDir} has multiple file targets; only one maintained doc is supported`,
+        `Dream agent ${agent.agentId} has multiple file targets; only one maintained doc is supported`,
       );
     } else {
       out.fileTarget = resolveDreamTarget(spec);
@@ -158,7 +189,7 @@ export async function classifyAgentTargets(
   return out;
 }
 
-/** Sync every configured target into the memory repo (repo-as-truth). */
+/** Sync every configured target into the memory checkout (repo-as-truth). */
 export async function syncAgentTargetsIntoMemory(
   agent: LoadedDreamAgent,
 ): Promise<void> {

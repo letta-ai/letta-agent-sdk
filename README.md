@@ -290,21 +290,23 @@ const client = new LettaAgentClient({
   appServer: { harnessBackend: "api" },
 });
 
-// One-time: initialize the agent identity dreams are tied to. Targets are
-// bound here — an AGENTS.md doc maintained at system/AGENTS.md, and a
-// skills/ directory mirrored as the memfs skills/ tier.
-const agent = await initDreamAgent({
-  rootDir: "./dream-agent",
+// One-time: initialize a dream agent — a memfs-enabled Letta agent whose
+// own memory filesystem is the dream target; the identity is its agent id.
+// Targets are bound here: an AGENTS.md doc maintained at system/AGENTS.md,
+// and a skills/ directory mirrored as the memfs skills/ tier.
+const agent = await initDreamAgent(client, {
   targets: ["./AGENTS.md", "./skills/"],
-  model: "anthropic/claude-opus-4-6",
+  model: "anthropic/claude-opus-4-7",
 });
 
-// Every dream against the agent uses (and persists) its memory filesystem,
-// worker agents, reflection cursors, and targets; run artifacts land under
-// <rootDir>/runs/<dream-id>.
+// Every dream against the agent id reflects on clones of its memfs checkout,
+// and the AGENT ITSELF synthesizes the batch diffs into its memory (so the
+// learnings land through the harness's memory machinery). The reflector
+// worker, reflection cursors, and bound targets persist with the identity;
+// run artifacts land in the agent's harness directory.
 const result = await dream({
   client,
-  agent: "./dream-agent",
+  agent: agent.agentId,
   sources: [
     { type: "claude" },                          // all local Claude Code sessions
     { type: "codex", locator: "<session-id>" },  // that Codex session onwards

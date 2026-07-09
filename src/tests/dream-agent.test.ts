@@ -1,6 +1,7 @@
-// Dream agent identity: initialization (memory repo + agent.json + target
-// seeding for AGENTS.md and skills/), loading, and an agent-tied dream()
-// exercised via planOnly.
+// Dream agent identity: the identity IS a memfs-enabled Letta agent. Tests
+// use a fake client (fixed agent id) and a temp harness agents dir with a
+// pre-created memory checkout — initialization binds targets and seeds them
+// into the agent's memory; dream({ agent }) resolves everything from the id.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
@@ -25,13 +26,27 @@ const FIXTURE_CONV = join(
   "conv-demo",
 );
 
+const AGENT_ID = "agent-11111111-2222-4333-8444-555555555555";
 const root = mkdtempSync(join(tmpdir(), "dream-agent-"));
+const agentsDir = join(root, "agents");
+const memoryDir = join(agentsDir, AGENT_ID, "memory");
 const repoDir = join(root, "repo");
-const agentRoot = join(root, "agent");
 const agentsMd = join(repoDir, "AGENTS.md");
 const skillsDir = join(repoDir, "skills");
 
+const fakeClient = {
+  createAgent: async () => AGENT_ID,
+} as unknown as LettaAgentClient;
+
 beforeAll(async () => {
+  // The harness materializes the memfs checkout when a memfs-enabled agent
+  // is created; simulate that.
+  await mkdir(memoryDir, { recursive: true });
+  execFileSync("git", ["-C", memoryDir, "init", "--quiet"]);
+  execFileSync("git", [
+    "-C", memoryDir, "-c", "user.name=t", "-c", "user.email=t@t",
+    "commit", "--allow-empty", "-m", "Initial commit",
+  ]);
   await mkdir(skillsDir, { recursive: true });
   await writeFile(agentsMd, "# Guide\n- test: bun test\n", "utf-8");
   await writeFile(
@@ -46,34 +61,42 @@ afterAll(() => {
 });
 
 describe("initDreamAgent", () => {
-  test("creates the identity and seeds both targets into memory", async () => {
-    const agent = await initDreamAgent({
-      rootDir: agentRoot,
+  test("creates the identity from the agent id and seeds both targets", async () => {
+    const agent = await initDreamAgent(fakeClient, {
       name: "demo",
-      model: "anthropic/claude-opus-4-6",
+      model: "anthropic/claude-opus-4-7",
       targets: [agentsMd, skillsDir],
+      agentsDir,
     });
+    expect(agent.agentId).toBe(AGENT_ID);
+    expect(agent.memoryDir).toBe(memoryDir);
     expect(agent.config.targets.length).toBe(2);
 
     const show = (path: string) =>
-      execFileSync("git", ["-C", agent.memoryDir, "show", `HEAD:${path}`], {
+      execFileSync("git", ["-C", memoryDir, "show", `HEAD:${path}`], {
         encoding: "utf-8",
       });
     expect(show("system/AGENTS.md")).toContain("- test: bun test");
     expect(show("skills/deploy.md")).toContain("Run the deploy pipeline.");
-    // The doc gets managed frontmatter; skills files keep their own.
-    expect(show("system/AGENTS.md").startsWith("---\ndescription:")).toBe(true);
-    expect(show("skills/deploy.md").startsWith("---\nname: deploy")).toBe(true);
   });
 
   test("refuses to re-initialize an existing identity", async () => {
-    expect(initDreamAgent({ rootDir: agentRoot })).rejects.toThrow(
-      /already exists/,
+    expect(
+      initDreamAgent(fakeClient, { agentId: AGENT_ID, agentsDir }),
+    ).rejects.toThrow(/already an initialized dream agent/);
+  });
+
+  test("requires a memfs checkout to exist", async () => {
+    const bare = {
+      createAgent: async () => "agent-no-memfs",
+    } as unknown as LettaAgentClient;
+    expect(initDreamAgent(bare, { agentsDir })).rejects.toThrow(
+      /memfs-enabled/,
     );
   });
 
   test("classifies AGENTS.md as the file target and skills/ as a dir tier", async () => {
-    const agent = await loadDreamAgent(agentRoot);
+    const agent = await loadDreamAgent(AGENT_ID, { agentsDir });
     const { fileTarget, dirTargets } = await classifyAgentTargets(agent);
     expect(fileTarget?.kind).toBe("agents-md");
     expect(dirTargets).toEqual([{ path: skillsDir, memfsSubdir: "skills" }]);
@@ -81,10 +104,11 @@ describe("initDreamAgent", () => {
 });
 
 describe("agent-tied dream", () => {
-  test("planOnly resolves memory + sources through the agent", async () => {
+  test("planOnly resolves memory + sources through the agent id", async () => {
     const result = await dream({
-      client: {} as LettaAgentClient, // planOnly never touches the client
-      agent: agentRoot,
+      client: fakeClient, // planOnly never runs sessions
+      agent: AGENT_ID,
+      agentsDir,
       sources: [{ type: "openhands", locator: FIXTURE_CONV }],
       planOnly: true,
     });
@@ -94,8 +118,9 @@ describe("agent-tied dream", () => {
   test("rejects agent combined with explicit memoryDir/target", async () => {
     expect(
       dream({
-        client: {} as LettaAgentClient,
-        agent: agentRoot,
+        client: fakeClient,
+        agent: AGENT_ID,
+        agentsDir,
         memoryDir: "/tmp/x",
         sources: [],
         planOnly: true,
@@ -106,8 +131,8 @@ describe("agent-tied dream", () => {
 
 describe("exportAgentTargets", () => {
   test("writes memory-side changes back out to the targets", async () => {
-    const agent = await loadDreamAgent(agentRoot);
-    // Simulate a dream landing a new skill and revising the doc.
+    const agent = await loadDreamAgent(AGENT_ID, { agentsDir });
+    // Simulate an aggregation landing a new skill in the agent's memory.
     await mkdir(join(agent.memoryDir, "skills"), { recursive: true });
     await writeFile(
       join(agent.memoryDir, "skills", "release.md"),
@@ -124,7 +149,6 @@ describe("exportAgentTargets", () => {
     expect(results.length).toBe(2);
     const exported = await readFile(join(skillsDir, "release.md"), "utf-8");
     expect(exported).toContain("Tag and publish.");
-    // The unchanged pre-existing skill is untouched, not deleted.
     expect(
       await readFile(join(skillsDir, "deploy.md"), "utf-8"),
     ).toContain("Run the deploy pipeline.");

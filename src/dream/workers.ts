@@ -29,15 +29,21 @@ export async function ensureDreamWorkers(
 ): Promise<DreamWorkers> {
   const log = options.log ?? (() => {});
 
+  // Creation parameters mirror letta-code's dream workers exactly: hidden
+  // subagent-style agents with NO server-side base tools and no memfs of
+  // their own — reflection edits per-batch clones (via $MEMORY_DIR),
+  // aggregation edits the target, and a shared memfs would make concurrent
+  // sessions contend on its git state.
   let reflectorAgentId = options.reflectorAgentId;
   if (!reflectorAgentId) {
     reflectorAgentId = await client.createAgent({
+      name: "dream-reflector",
+      description: "Dream pipeline reflector",
       systemPrompt: REFLECTION_SYSTEM_PROMPT,
       ...(options.model ? { model: options.model } : {}),
-      tags: ["role:dream-reflector"],
-      // Workers carry no memfs of their own: reflection edits per-batch
-      // clones and aggregation edits the caller's target, and a shared memfs
-      // would make concurrent sessions contend on its git state.
+      tags: ["type:reflection", "role:dream-reflector"],
+      hidden: true,
+      baseTools: [],
       memfs: false,
     });
     log(`[reflector] created ${reflectorAgentId}`);
@@ -46,9 +52,20 @@ export async function ensureDreamWorkers(
   let aggregatorAgentId = options.aggregatorAgentId;
   if (!aggregatorAgentId) {
     aggregatorAgentId = await client.createAgent({
-      persona: AGGREGATOR_PERSONA,
+      name: "dream-aggregator",
+      description: "Dream pipeline aggregator",
+      memory: [
+        {
+          label: "persona",
+          value: AGGREGATOR_PERSONA,
+          description:
+            "Who I am: a memory aggregator agent merging reflection outputs into one cohesive memory filesystem.",
+        },
+      ],
       ...(options.model ? { model: options.model } : {}),
-      tags: ["role:dream-aggregator"],
+      tags: ["type:aggregation", "role:dream-aggregator"],
+      hidden: true,
+      baseTools: [],
       memfs: false,
     });
     log(`[aggregator] created ${aggregatorAgentId}`);
