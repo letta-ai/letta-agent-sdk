@@ -92,10 +92,7 @@ export async function runDreamAggregation(params: {
   const aggregateDir = join(params.runRoot, "aggregate");
   await mkdir(aggregateDir, { recursive: true });
   const guard = await installMemfsGuard(params.memoryDir, params.memfsPolicy);
-  const baseRevision = await gitOutput(params.memoryDir, [
-    "rev-parse",
-    "HEAD",
-  ]);
+  const baseRevision = await gitOutput(params.memoryDir, ["rev-parse", "HEAD"]);
 
   const builtPrompt = buildAggregatorUserPrompt({
     batchesDir: join(params.runRoot, "batches"),
@@ -140,7 +137,9 @@ export async function runDreamAggregation(params: {
   // The model can end its turn narrating its plan instead of executing it.
   // While nothing has landed on the target, nudge the same conversation to
   // keep going — its plan and diff survey are already in context.
-  const passes: { prompt: string; run: typeof run }[] = [{ prompt: userPrompt, run }];
+  const passes: { prompt: string; run: typeof run }[] = [
+    { prompt: userPrompt, run },
+  ];
   for (
     let nudge = 0;
     nudge < 2 &&
@@ -149,7 +148,9 @@ export async function runDreamAggregation(params: {
     (await landedCommits()) === 0;
     nudge++
   ) {
-    log("[aggregate] turn ended with no commits on target — nudging to continue");
+    log(
+      "[aggregate] turn ended with no commits on target — nudging to continue",
+    );
     run = await runAgentToCompletion(params.client, {
       agentId: params.aggregatorAgentId,
       userPrompt: AGGREGATOR_CONTINUE_PROMPT,
@@ -171,6 +172,57 @@ export async function runDreamAggregation(params: {
       JSON.stringify(records, null, 1),
       "utf-8",
     );
+  }
+  const successfulPass = [...passes]
+    .reverse()
+    .find((pass) => pass.run.success)?.run;
+  const executionSucceeded = successfulPass !== undefined;
+
+  // The aggregator may finish after applying the synthesis but before its
+  // requested git commit. Preserve those edits only after the same MemFS
+  // policy check used for a normal landed commit. A failed continuation does
+  // not invalidate work completed by an earlier successful pass.
+  let recoveryError: string | undefined;
+  if ((await landedCommits()) === 0 && executionSucceeded) {
+    const status = await gitOutput(params.memoryDir, [
+      "status",
+      "--porcelain",
+      "--untracked-files=all",
+    ]).catch(() => "");
+    if (status !== "") {
+      const recoveryPolicyCheck = await validateMemfsChanges(
+        params.memoryDir,
+        baseRevision,
+        params.memfsPolicy,
+        { baselineDirectories: guard.baselineDirectories },
+      );
+      if (!recoveryPolicyCheck.valid) {
+        recoveryError =
+          `MemFS write policy rejected ${recoveryPolicyCheck.violations.length} ` +
+          `uncommitted aggregation change(s): ${recoveryPolicyCheck.violations
+            .map((violation) => `${violation.path} (${violation.reason})`)
+            .join("; ")}`;
+      } else {
+        try {
+          await gitOutput(params.memoryDir, ["add", "-A"]);
+          await gitOutput(params.memoryDir, [
+            "-c",
+            "user.name=Dream Aggregator",
+            "-c",
+            "user.email=dream-aggregator@letta.com",
+            "commit",
+            "-m",
+            `feat(aggregation): recover ${withContent.length} reflection outputs`,
+          ]);
+          log(
+            "[aggregate] recovered and committed uncommitted synthesis edits",
+          );
+        } catch (error) {
+          recoveryError =
+            error instanceof Error ? error.message : String(error);
+        }
+      }
+    }
   }
   const gitLog = await gitOutput(params.memoryDir, [
     "log",
@@ -202,10 +254,12 @@ export async function runDreamAggregation(params: {
         .map((violation) => `${violation.path} (${violation.reason})`)
         .join("; ")}`;
   const outcome: DreamAggregationOutcome = {
-    success: run.success && landed && policyCheck.valid,
-    report: run.report,
+    success:
+      executionSucceeded && landed && policyCheck.valid && !recoveryError,
+    report: run.report || successfulPass?.report || "",
     error:
-      run.error ??
+      recoveryError ??
+      (!executionSucceeded ? run.error : undefined) ??
       policyError ??
       (landed
         ? undefined
@@ -221,9 +275,12 @@ export async function runDreamAggregation(params: {
         conversationId: outcome.conversationId,
         success: outcome.success,
         error: outcome.error,
-        durationMs: passes.reduce((total, pass) => total + pass.run.durationMs, 0),
+        durationMs: passes.reduce(
+          (total, pass) => total + pass.run.durationMs,
+          0,
+        ),
         inputs: withContent.map((r) => `batch-${r.batchIndex}`),
-        report: run.report,
+        report: outcome.report,
       },
       null,
       2,
