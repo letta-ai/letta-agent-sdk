@@ -21,5 +21,5 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false
   },
-  "include": ["src/**/*", "viz/**/*", "build.ts"]
+  "include": ["src/**/*", "build.ts"]
 }
