@@ -4,7 +4,6 @@
 //   bun rerun-aggregate.ts <dream-agent-id> <run-root>
 
 import { readFile, readdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { LettaAgentClient, loadDreamAgent } from "./src/index.js";
 import { runDreamAggregation } from "./src/dream/aggregate.js";
@@ -15,17 +14,6 @@ const [dreamAgentId, runRoot] = process.argv.slice(2);
 if (!dreamAgentId || !runRoot) {
   throw new Error("usage: bun rerun-aggregate.ts <dream-agent-id> <run-root>");
 }
-
-const patchedCliPath = join(
-  homedir(),
-  "repos",
-  "letta-code",
-  ".claude",
-  "worktrees",
-  "dream-multi-harness",
-  "letta.js",
-);
-process.env.LETTA_CLI_PATH = patchedCliPath;
 
 const agent = await loadDreamAgent(dreamAgentId);
 const batchesDir = join(runRoot, "batches");
