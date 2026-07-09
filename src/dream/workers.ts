@@ -44,6 +44,9 @@ export async function ensureDreamWorkers(
       tags: ["type:reflection", "role:dream-reflector"],
       hidden: true,
       baseTools: [],
+      // Reflection must derive its output from the provided trajectories and
+      // prompt, not from Letta Code's bundled/global/agent/project skills.
+      skillSources: [],
       memfs: false,
     });
     log(`[reflector] created ${reflectorAgentId}`);

@@ -1,22 +1,21 @@
-// Dream agent identity: the identity IS a memfs-enabled Letta agent. Tests
-// use a fake client (fixed agent id) and a temp harness agents dir with a
-// pre-created memory checkout — initialization binds targets and seeds them
-// into the agent's memory; dream({ agent }) resolves everything from the id.
+// Dream-agent initialization from an explicit MemFS structure, plus the
+// transcript-list dream API tied to that agent id.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LettaAgentClient } from "../client.js";
 import {
-  classifyAgentTargets,
-  exportAgentTargets,
   initDreamAgent,
   loadDreamAgent,
+  prepareDreamAgentMemfs,
 } from "../dream/agent.js";
 import { dream } from "../dream/index.js";
+import { createOpenHandsSource } from "../dream/sources/openhands.js";
+import type { NormalizedSession } from "../dream/types.js";
 
 const FIXTURE_CONV = join(
   import.meta.dir,
@@ -30,30 +29,47 @@ const AGENT_ID = "agent-11111111-2222-4333-8444-555555555555";
 const root = mkdtempSync(join(tmpdir(), "dream-agent-"));
 const agentsDir = join(root, "agents");
 const memoryDir = join(agentsDir, AGENT_ID, "memory");
-const repoDir = join(root, "repo");
-const agentsMd = join(repoDir, "AGENTS.md");
-const skillsDir = join(repoDir, "skills");
 
 const fakeClient = {
   createAgent: async () => AGENT_ID,
 } as unknown as LettaAgentClient;
 
+let transcript: NormalizedSession;
+
 beforeAll(async () => {
-  // The harness materializes the memfs checkout when a memfs-enabled agent
-  // is created; simulate that.
-  await mkdir(memoryDir, { recursive: true });
+  await mkdir(join(memoryDir, ".letta"), { recursive: true });
+  await writeFile(join(memoryDir, ".letta/config.json"), '{"version":1}\n');
   execFileSync("git", ["-C", memoryDir, "init", "--quiet"]);
+  execFileSync("git", ["-C", memoryDir, "add", "-A"]);
   execFileSync("git", [
-    "-C", memoryDir, "-c", "user.name=t", "-c", "user.email=t@t",
-    "commit", "--allow-empty", "-m", "Initial commit",
+    "-C",
+    memoryDir,
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@t",
+    "commit",
+    "-m",
+    "Initial commit",
   ]);
-  await mkdir(skillsDir, { recursive: true });
-  await writeFile(agentsMd, "# Guide\n- test: bun test\n", "utf-8");
-  await writeFile(
-    join(skillsDir, "deploy.md"),
-    "---\nname: deploy\n---\nRun the deploy pipeline.\n",
-    "utf-8",
-  );
+
+  await initDreamAgent(fakeClient, {
+    name: "demo",
+    model: "anthropic/claude-opus-4-8",
+    agentsDir,
+    memfs: {
+      directories: ["skills"],
+      files: {
+        "system/letta-code/AGENTS.md": "# Guide\n- test: bun test\n",
+      },
+    },
+    guard: { allowedNewFilePrefixes: ["skills"] },
+  });
+
+  const source = createOpenHandsSource();
+  const [session] = await source.discover(FIXTURE_CONV);
+  if (!session) throw new Error("expected fixture conversation");
+  transcript = await source.normalize(session);
 });
 
 afterAll(() => {
@@ -61,23 +77,64 @@ afterAll(() => {
 });
 
 describe("initDreamAgent", () => {
-  test("creates the identity from the agent id and seeds both targets", async () => {
-    const agent = await initDreamAgent(fakeClient, {
-      name: "demo",
-      model: "anthropic/claude-opus-4-7",
-      targets: [agentsMd, skillsDir],
-      agentsDir,
-    });
+  test("seeds files, preserves empty directories, and stores the guard", async () => {
+    const agent = await loadDreamAgent(AGENT_ID, { agentsDir });
     expect(agent.agentId).toBe(AGENT_ID);
     expect(agent.memoryDir).toBe(memoryDir);
-    expect(agent.config.targets.length).toBe(2);
-
-    const show = (path: string) =>
-      execFileSync("git", ["-C", memoryDir, "show", `HEAD:${path}`], {
+    expect(
+      await readFile(join(memoryDir, "system/letta-code/AGENTS.md"), "utf-8"),
+    ).toContain("- test: bun test");
+    expect((await lstat(join(memoryDir, "skills"))).isDirectory()).toBe(true);
+    expect(agent.config.memfs.policy.existingPaths).toEqual([
+      "system/letta-code/AGENTS.md",
+    ]);
+    expect(agent.config.memfs.policy.allowedNewFilePrefixes).toEqual([
+      "skills",
+    ]);
+    expect(
+      execFileSync(
+        "git",
+        [
+          "-C",
+          memoryDir,
+          "ls-files",
+          "--error-unmatch",
+          "--",
+          "system/letta-code/AGENTS.md",
+        ],
+        { encoding: "utf-8" },
+      ).trim(),
+    ).toBe("system/letta-code/AGENTS.md");
+    expect(
+      execFileSync("git", ["-C", memoryDir, "status", "--porcelain"], {
         encoding: "utf-8",
-      });
-    expect(show("system/AGENTS.md")).toContain("- test: bun test");
-    expect(show("skills/deploy.md")).toContain("Run the deploy pipeline.");
+      }).trim(),
+    ).toBe("");
+    expect(
+      execFileSync("git", ["-C", memoryDir, "config", "--get", "core.hooksPath"], {
+        encoding: "utf-8",
+      }).trim(),
+    ).toContain("dream-hooks");
+  });
+
+  test("installed guard rejects new top-level files", async () => {
+    await writeFile(join(memoryDir, "outside.md"), "not allowed\n");
+    execFileSync("git", ["-C", memoryDir, "add", "outside.md"]);
+    expect(() =>
+      execFileSync("git", [
+        "-C",
+        memoryDir,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-m",
+        "bad",
+      ], { stdio: "pipe" }),
+    ).toThrow();
+    execFileSync("git", ["-C", memoryDir, "restore", "--staged", "outside.md"]);
+    await rm(join(memoryDir, "outside.md"));
   });
 
   test("refuses to re-initialize an existing identity", async () => {
@@ -95,62 +152,86 @@ describe("initDreamAgent", () => {
     );
   });
 
-  test("classifies AGENTS.md as the file target and skills/ as a dir tier", async () => {
-    const agent = await loadDreamAgent(AGENT_ID, { agentsDir });
-    const { fileTarget, dirTargets } = await classifyAgentTargets(agent);
-    expect(fileTarget?.kind).toBe("agents-md");
-    expect(dirTargets).toEqual([{ path: skillsDir, memfsSubdir: "skills" }]);
+  test("refuses to use a checkout whose seed was replaced after initialization", async () => {
+    const racedAgentId = "agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const racedMemoryDir = join(agentsDir, racedAgentId, "memory");
+    await mkdir(join(racedMemoryDir, ".letta"), { recursive: true });
+    await writeFile(join(racedMemoryDir, ".letta/config.json"), '{"version":1}\n');
+    execFileSync("git", ["-C", racedMemoryDir, "init", "--quiet"]);
+    execFileSync("git", ["-C", racedMemoryDir, "add", "-A"]);
+    execFileSync("git", [
+      "-C",
+      racedMemoryDir,
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "commit",
+      "-m",
+      "Initial commit",
+    ]);
+
+    const racedClient = {
+      createAgent: async () => racedAgentId,
+    } as unknown as LettaAgentClient;
+    const agent = await initDreamAgent(racedClient, {
+      agentsDir,
+      memfs: {
+        files: {
+          "system/letta-code/AGENTS.md": "# Guide\n",
+        },
+      },
+      guard: { allowedNewFilePrefixes: ["skills"] },
+    });
+    execFileSync("git", [
+      "-C",
+      racedMemoryDir,
+      "rm",
+      "--cached",
+      "--",
+      "system/letta-code/AGENTS.md",
+    ]);
+
+    expect(prepareDreamAgentMemfs(agent)).rejects.toThrow(
+      /seeded path\(s\) are not tracked/,
+    );
   });
 });
 
-describe("agent-tied dream", () => {
-  test("planOnly resolves memory + sources through the agent id", async () => {
+describe("explicit-transcript dream API", () => {
+  test("plans from supplied transcript snapshots and agent id", async () => {
     const result = await dream({
-      client: fakeClient, // planOnly never runs sessions
-      agent: AGENT_ID,
+      client: fakeClient,
+      agentId: AGENT_ID,
       agentsDir,
-      sources: [{ type: "openhands", locator: FIXTURE_CONV }],
+      transcripts: [transcript],
       planOnly: true,
     });
     expect(result.kind).toBe("plan");
+    if (result.kind === "plan") expect(result.transcripts).toHaveLength(1);
   });
 
-  test("rejects agent combined with explicit memoryDir/target", async () => {
+  test("rejects duplicate transcript identities", async () => {
     expect(
       dream({
         client: fakeClient,
-        agent: AGENT_ID,
+        agentId: AGENT_ID,
         agentsDir,
-        memoryDir: "/tmp/x",
-        sources: [],
+        transcripts: [transcript, transcript],
         planOnly: true,
       }),
-    ).rejects.toThrow(/omit them/);
+    ).rejects.toThrow(/duplicate transcript/);
   });
-});
 
-describe("exportAgentTargets", () => {
-  test("writes memory-side changes back out to the targets", async () => {
-    const agent = await loadDreamAgent(AGENT_ID, { agentsDir });
-    // Simulate an aggregation landing a new skill in the agent's memory.
-    await mkdir(join(agent.memoryDir, "skills"), { recursive: true });
-    await writeFile(
-      join(agent.memoryDir, "skills", "release.md"),
-      "---\nname: release\n---\nTag and publish.\n",
-      "utf-8",
-    );
-    execFileSync("git", ["-C", agent.memoryDir, "add", "-A"]);
-    execFileSync("git", [
-      "-C", agent.memoryDir, "-c", "user.name=t", "-c", "user.email=t@t",
-      "commit", "-m", "test: land skill",
-    ]);
-
-    const results = await exportAgentTargets(agent);
-    expect(results.length).toBe(2);
-    const exported = await readFile(join(skillsDir, "release.md"), "utf-8");
-    expect(exported).toContain("Tag and publish.");
+  test("returns nothing_to_dream for an empty transcript list", async () => {
     expect(
-      await readFile(join(skillsDir, "deploy.md"), "utf-8"),
-    ).toContain("Run the deploy pipeline.");
+      await dream({
+        client: fakeClient,
+        agentId: AGENT_ID,
+        agentsDir,
+        transcripts: [],
+        planOnly: true,
+      }),
+    ).toEqual({ kind: "nothing_to_dream" });
   });
 });

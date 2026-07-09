@@ -17,11 +17,14 @@ import type { LettaAgentClient } from "../client.js";
 import type { DreamBatch } from "./batching.js";
 import { cloneMemoryTree, gitOutput, inspectMemoryTree } from "./clone.js";
 import {
+  configureMemfsCloneGuard,
+  validateMemfsChanges,
+  type MemfsWritePolicy,
+} from "./memfs.js";
+import {
   buildReflectionContinuePrompt,
   buildReflectionUserPrompt,
-  buildTargetReflectionInstruction,
 } from "./prompts.js";
-import { type DreamTarget, targetMemfsRelPath } from "./targets.js";
 import { runAgentToCompletion } from "./runner.js";
 import { normalizeSdkMessages } from "./sdk-messages.js";
 import { sessionFileName } from "./select.js";
@@ -50,16 +53,19 @@ export interface BatchReflectionResult {
 export interface RunBatchReflectionsParams {
   client: LettaAgentClient;
   reflectorAgentId: string;
+  /** Dream agent whose memfs is being reflected on. */
+  parentAgentId: string;
   /** The target memory filesystem batches clone. */
   memoryDir: string;
   runRoot: string;
   batches: DreamBatch[];
   /** sessionKey(session) → normalized-v1 JSON (already serialized). */
   normalizedJsonByKey: Map<string, string>;
+  /** Write policy installed on every isolated clone and checked afterward. */
+  memfsPolicy: MemfsWritePolicy;
   concurrency: number;
-  instruction?: string;
-  /** Doc each batch maintains in its clone at system/<fileName>. */
-  target?: DreamTarget;
+  /** Additional scope/instructions provided only to reflection agents. */
+  reflectionPrompt?: string;
   log?: (line: string) => void;
 }
 
@@ -74,6 +80,11 @@ async function runOneBatch(
   const reportPath = join(batchDir, "report.json");
   await mkdir(inputDir, { recursive: true });
   const baseRevision = await cloneMemoryTree(params.memoryDir, outputDir);
+  const guard = await configureMemfsCloneGuard(
+    params.memoryDir,
+    outputDir,
+    params.memfsPolicy,
+  );
 
   // Stage this batch's normalized sessions into its own input/ directory so
   // the batch is self-contained and the aggregator can consult the original
@@ -90,24 +101,15 @@ async function runOneBatch(
     sessionFileNames.push(fileName);
   }
 
-  const instruction = [
-    params.instruction,
-    params.target
-      ? buildTargetReflectionInstruction({
-          kind: params.target.kind,
-          docPath: join(outputDir, targetMemfsRelPath(params.target)),
-        })
-      : undefined,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
   const userPrompt = buildReflectionUserPrompt({
     batchIndex: batch.index,
     inputDir,
     sessionFileNames,
     memoryDir: outputDir,
     timeRange: { start: batch.startTime, end: batch.endTime },
-    ...(instruction ? { instruction } : {}),
+    ...(params.reflectionPrompt
+      ? { instruction: params.reflectionPrompt }
+      : {}),
   });
 
   const label = `reflect:batch-${batch.index}`;
@@ -129,6 +131,9 @@ async function runOneBatch(
     MEMORY_DIR: outputDir,
     LETTA_MEMORY_DIR: outputDir,
     LETTA_MEMORY_DIR_EXPLICIT: "1",
+    // The guard accepts memory clones under this dream agent's state tree
+    // only when the worker is explicitly scoped as its child.
+    LETTA_PARENT_AGENT_ID: params.parentAgentId,
   };
   let run = await runAgentToCompletion(params.client, {
     agentId: params.reflectorAgentId,
@@ -136,6 +141,7 @@ async function runOneBatch(
     cwd: batchDir,
     label,
     env: memoryEnv,
+    skillSources: [],
     onProgress: log,
   });
   for (
@@ -155,6 +161,7 @@ async function runOneBatch(
       cwd: batchDir,
       label,
       env: memoryEnv,
+      skillSources: [],
       onProgress: log,
     });
   }
@@ -165,6 +172,10 @@ async function runOneBatch(
   const passes: { prompt: string; run: typeof run }[] = [
     { prompt: userPrompt, run },
   ];
+  const explicitlyNoChanges = () =>
+    /\b(no commit|no relevant trajector(?:y|ies)|no durable learnings|nothing (?:to|worth) persist)/i.test(
+      run.report,
+    );
   for (
     let nudge = 0;
     nudge < 2 && run.success && run.conversationId !== null;
@@ -172,6 +183,10 @@ async function runOneBatch(
   ) {
     const state = await inspectMemoryTree(outputDir, baseRevision);
     if (state.commitCount > 0 || state.dirty) break;
+    // A clean no-op is a valid reflection outcome. In particular, a scoped
+    // prompt may require irrelevant transcripts to be skipped without a
+    // commit; do not nudge the model into inventing memory in that case.
+    if (explicitlyNoChanges()) break;
     const continuePrompt = buildReflectionContinuePrompt({
       memoryDir: outputDir,
     });
@@ -183,6 +198,7 @@ async function runOneBatch(
       label,
       resumeConversationId: run.conversationId,
       env: memoryEnv,
+      skillSources: [],
       onProgress: log,
     });
     passes.push({ prompt: continuePrompt, run });
@@ -229,17 +245,29 @@ async function runOneBatch(
     // A missing diff just reads as an empty batch to the aggregator.
   }
 
+  const policyCheck = await validateMemfsChanges(
+    outputDir,
+    baseRevision,
+    params.memfsPolicy,
+    { baselineDirectories: guard.baselineDirectories },
+  );
+  const policyError = policyCheck.valid
+    ? undefined
+    : `MemFS write policy rejected ${policyCheck.violations.length} change(s): ${policyCheck.violations
+        .map((violation) => `${violation.path} (${violation.reason})`)
+        .join("; ")}`;
+
   const result: BatchReflectionResult = {
     batchIndex: batch.index,
     agentId: run.agentId,
     conversationId: run.conversationId ?? undefined,
-    sessionIds: batch.sessions.map((s) => s.sessionId),
+    sessionIds: batch.sessions.map((s) => `${s.harness}:${s.sessionId}`),
     timeRange: { start: batch.startTime, end: batch.endTime },
     outputDir,
     reportPath,
     baseRevision,
-    success: run.success,
-    error: run.error,
+    success: run.success && policyCheck.valid,
+    error: run.error ?? policyError,
     commitCount,
     dirty,
     durationMs: run.durationMs,

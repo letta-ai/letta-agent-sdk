@@ -1,17 +1,17 @@
-// OpenHands reflection cursors: persistence in the memory repo, and
-// dream()'s cursor-gated selection (trim to new records; drop up-to-date
-// conversations) exercised via planOnly against the openhands fixture store.
+// OpenHands cursor persistence and transcript trimming through dream(planOnly).
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LettaAgentClient } from "../client.js";
+import { initDreamAgent } from "../dream/agent.js";
 import { loadDreamCursors, saveDreamCursors } from "../dream/cursors.js";
 import { dream } from "../dream/index.js";
 import { createOpenHandsSource } from "../dream/sources/openhands.js";
+import type { NormalizedSession } from "../dream/types.js";
 
 const FIXTURE_CONV = join(
   import.meta.dir,
@@ -20,31 +20,38 @@ const FIXTURE_CONV = join(
   "openhands",
   "conv-demo",
 );
-
+const AGENT_ID = "agent-cursor-test";
 const root = mkdtempSync(join(tmpdir(), "dream-cursors-"));
-const memoryDir = join(root, "memory");
-const runRoot = join(root, "run");
-const client = {} as LettaAgentClient; // planOnly never touches the client
+const agentsDir = join(root, "agents");
+const memoryDir = join(agentsDir, AGENT_ID, "memory");
+const stateDir = join(agentsDir, AGENT_ID, "dream");
+const client = {
+  createAgent: async () => AGENT_ID,
+} as unknown as LettaAgentClient;
 
 let sessionKey: string;
 let timestamps: string[] = [];
+let transcript: NormalizedSession;
 
 beforeAll(async () => {
-  await mkdir(memoryDir, { recursive: true });
+  await mkdir(join(memoryDir, ".letta"), { recursive: true });
+  await writeFile(join(memoryDir, ".letta/config.json"), '{"version":1}\n');
   execFileSync("git", ["-C", memoryDir, "init", "--quiet"]);
+  execFileSync("git", ["-C", memoryDir, "add", "-A"]);
   execFileSync("git", [
     "-C", memoryDir, "-c", "user.name=t", "-c", "user.email=t@t",
-    "commit", "--allow-empty", "-m", "init",
+    "commit", "-m", "init",
   ]);
+  await initDreamAgent(client, { agentsDir, memfs: {} });
 
   const source = createOpenHandsSource();
   const [session] = await source.discover(FIXTURE_CONV);
   if (!session) throw new Error("expected fixture conversation");
   sessionKey = `openhands:${session.sessionId}`;
-  const { records } = await source.normalize(session);
-  timestamps = records
-    .filter((r) => r.role !== "meta" && r.timestamp)
-    .map((r) => r.timestamp as string);
+  transcript = await source.normalize(session);
+  timestamps = transcript.records
+    .filter((record) => record.role !== "meta" && record.timestamp)
+    .map((record) => record.timestamp as string);
 });
 
 afterAll(() => {
@@ -54,59 +61,52 @@ afterAll(() => {
 async function plan() {
   return dream({
     client,
-    sources: [{ type: "openhands", locator: FIXTURE_CONV }],
-    memoryDir,
-    runRoot,
+    agentId: AGENT_ID,
+    agentsDir,
+    transcripts: [transcript],
     planOnly: true,
   });
 }
 
 describe("cursor persistence", () => {
-  test("save commits to the memory repo and load round-trips", async () => {
-    await saveDreamCursors(memoryDir, {
+  test("save and load round-trip in SDK state", async () => {
+    await saveDreamCursors(stateDir, {
       "openhands:x": { reflectedThrough: "2026-01-01T00:00:00Z" },
     });
-    expect(await loadDreamCursors(memoryDir)).toEqual({
+    expect(await loadDreamCursors(stateDir)).toEqual({
       "openhands:x": { reflectedThrough: "2026-01-01T00:00:00Z" },
     });
-    const log = execFileSync("git", ["-C", memoryDir, "log", "--oneline"], {
-      encoding: "utf-8",
-    });
-    expect(log).toContain("dream: advance reflection cursors");
-    // Clean up for the selection tests below.
-    await saveDreamCursors(memoryDir, {});
+    await saveDreamCursors(stateDir, {});
   });
 });
 
-describe("cursor-gated selection", () => {
-  test("no cursor: the whole conversation is selected", async () => {
+describe("cursor-gated planning", () => {
+  test("no cursor selects the whole conversation", async () => {
     const result = await plan();
     expect(result.kind).toBe("plan");
-    if (result.kind !== "plan") return;
-    expect(result.sessions.length).toBe(1);
+    if (result.kind === "plan") expect(result.transcripts).toHaveLength(1);
   });
 
-  test("mid-stream cursor: only newer records are staged (smaller batch)", async () => {
+  test("mid-stream cursor stages only newer records", async () => {
     const full = await plan();
     if (full.kind !== "plan") throw new Error("expected plan");
-    const fullTokens = full.sessions[0]?.estTokens ?? 0;
-
+    const fullTokens = full.transcripts[0]?.estTokens ?? 0;
     const middle = timestamps[Math.floor(timestamps.length / 2)];
     if (!middle) throw new Error("expected timestamps");
-    await saveDreamCursors(memoryDir, {
+    await saveDreamCursors(stateDir, {
       [sessionKey]: { reflectedThrough: middle },
     });
     const trimmed = await plan();
     expect(trimmed.kind).toBe("plan");
     if (trimmed.kind !== "plan") return;
-    expect(trimmed.sessions.length).toBe(1);
-    expect(trimmed.sessions[0]?.estTokens ?? 0).toBeLessThan(fullTokens);
+    expect(trimmed.transcripts).toHaveLength(1);
+    expect(trimmed.transcripts[0]?.estTokens ?? 0).toBeLessThan(fullTokens);
   });
 
-  test("cursor at the end: nothing to dream", async () => {
+  test("cursor at the end leaves nothing to dream", async () => {
     const last = timestamps[timestamps.length - 1];
     if (!last) throw new Error("expected timestamps");
-    await saveDreamCursors(memoryDir, {
+    await saveDreamCursors(stateDir, {
       [sessionKey]: { reflectedThrough: last },
     });
     expect((await plan()).kind).toBe("nothing_to_dream");

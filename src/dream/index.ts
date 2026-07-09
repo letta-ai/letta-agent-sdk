@@ -1,12 +1,11 @@
-// Dreaming: batch memory formation over recorded coding-agent sessions.
+// Dreaming: form durable agent memory from an explicit list of normalized
+// transcripts.
 //
-//   normalize → batch → reflect (parallel sessions, isolated memfs clones)
-//             → aggregate (one diff-synthesis pass onto the target memfs)
+//   collectTranscripts() -> initDreamAgent() -> dream()
 //
-// The caller owns the target memory filesystem (a git repo — e.g. an agent's
-// memfs checkout, or a worktree of one when the caller wants isolation) and
-// the run directory, which records every batch's inputs, edited clone, diff,
-// trajectory, and report for inspection.
+// dream() deliberately does not discover or normalize source stores. The
+// caller supplies immutable transcript snapshots, which makes selection easy
+// to inspect and makes a run reproducible after its source files change.
 
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,58 +16,62 @@ import {
   type DreamBatch,
   packDreamBatches,
 } from "./batching.js";
-import { type DreamAggregationOutcome, runDreamAggregation } from "./aggregate.js";
-import { getTrajectorySource } from "./registry.js";
+import {
+  type DreamAggregationOutcome,
+  runDreamAggregation,
+} from "./aggregate.js";
 import {
   type BatchReflectionResult,
   runBatchReflections,
 } from "./reflect.js";
 import {
-  type DreamSourceSpec,
-  selectDreamSessions,
-  sessionKey,
-} from "./select.js";
-import {
-  classifyAgentTargets,
-  exportAgentTargets,
   loadDreamAgent,
+  prepareDreamAgentMemfs,
   saveDreamAgentConfig,
-  syncAgentTargetsIntoMemory,
 } from "./agent.js";
 import { loadDreamCursors, saveDreamCursors } from "./cursors.js";
+import { AGGREGATOR_PERSONA } from "./prompts.js";
+import { redactSensitiveText } from "./redact.js";
+import { sessionKey } from "./select.js";
+import type {
+  DiscoveredSession,
+  NormalizedSession,
+} from "./types.js";
 import {
-  AGGREGATOR_PERSONA,
-  buildTargetsOnlyConstraint,
-} from "./prompts.js";
-import { targetMemfsRelPath } from "./targets.js";
-import {
-  readExistingTarget,
-  readTargetFromMemory,
-  resolveDreamTarget,
-  syncTargetIntoMemory,
-  writeTarget,
-} from "./targets.js";
-import type { DiscoveredSession } from "./types.js";
-import { estimateTokens } from "./types.js";
+  estimateTokens,
+} from "./types.js";
+import { validateRecords } from "./normalize-core.js";
 import { ensureDreamWorkers } from "./workers.js";
 
 export type { DreamBatch } from "./batching.js";
 export type { DreamAggregationOutcome } from "./aggregate.js";
 export type { BatchReflectionResult } from "./reflect.js";
-export { type DreamSourceSpec, selectDreamSessions } from "./select.js";
 export { packDreamBatches } from "./batching.js";
 export {
   AGGREGATOR_PERSONA,
   REFLECTION_SYSTEM_PROMPT,
 } from "./prompts.js";
 export { getTrajectorySource, listTrajectorySourceTypes } from "./registry.js";
-export { type DreamTarget, resolveDreamTarget } from "./targets.js";
 export {
   type DreamAgentConfig,
+  type DreamAgentGuardOptions,
+  type InitDreamAgentOptions,
   type LoadedDreamAgent,
   initDreamAgent,
   loadDreamAgent,
 } from "./agent.js";
+export {
+  type MemfsOperation,
+  type MemfsOperationRule,
+  type MemfsStructure,
+  type MemfsWritePolicy,
+} from "./memfs.js";
+export {
+  collectTranscripts,
+  type CollectTranscriptsOptions,
+  type Transcript,
+  type TranscriptSourceSpec,
+} from "./transcripts.js";
 export type {
   DiscoveredSession,
   NormalizedRecord,
@@ -78,77 +81,44 @@ export type {
 
 export interface DreamOptions {
   client: LettaAgentClient;
-  /** What to reflect on. */
-  sources: DreamSourceSpec[];
-  /**
-   * A dream agent id (see initDreamAgent). When set, the memory filesystem
-   * is the agent's own memfs checkout, run artifacts land under its harness
-   * directory, the reflector worker and targets come from — and persist to —
-   * the agent's pipeline state, and AGGREGATION RUNS ON THE AGENT ITSELF so
-   * synthesized changes land in its memory through the harness's memory
-   * machinery. memoryDir/runRoot/target must be omitted.
-   */
-  agent?: string;
-  /** Override the harness agents directory when using `agent` (tests). */
+  /** Initialized dream-agent id returned by initDreamAgent(). */
+  agentId: string;
+  /** Immutable normalized transcript snapshots to reflect on. */
+  transcripts: readonly NormalizedSession[];
+  /** Additional instruction provided to every reflection batch only. */
+  reflectionPrompt?: string;
+  /** Override the harness agents directory (tests). */
   agentsDir?: string;
-  /**
-   * The target memory filesystem: a git repository the aggregation lands on.
-   * Pass a worktree of the real memfs when isolation from concurrent edits
-   * is needed. Required unless `agent` is set.
-   */
-  memoryDir?: string;
-  /** Directory to record the run under (created if missing). Required unless `agent` is set. */
-  runRoot?: string;
-  /** Reuse an existing reflector agent (one is created when omitted). */
-  reflectorAgentId?: string;
-  /** Reuse an existing aggregator agent (one is created when omitted). */
-  aggregatorAgentId?: string;
-  /** Model for created worker agents (backend default when omitted). */
-  model?: string;
-  /** Extra instruction threaded into every pass. */
-  instruction?: string;
-  /**
-   * Path of a doc (e.g. "./AGENTS.md") maintained from memory: synced into
-   * the memfs at system/<name> before reflection (the on-disk copy is the
-   * source of truth), revised by the reflection batches, synthesized by the
-   * aggregator, and exported back to this path afterwards. A run that yields
-   * no durable guidance leaves the doc untouched.
-   */
-  target?: string;
-  /** Keep only the N most recent selected sessions (no cap when omitted). */
-  maxSessions?: number;
   /** Per-batch token budget (default 60k, measured on normalized content). */
   batchTokenBudget?: number;
-  /** Max sessions per batch (default 10). */
-  maxSessionsPerBatch?: number;
-  /** Cap on concurrent batch reflections; default: every batch at once. */
+  /** Maximum transcripts in one batch (default 10). */
+  maxTranscriptsPerBatch?: number;
+  /** Concurrent reflection sessions; default: every batch at once. */
   concurrency?: number;
-  /** When true, stop after planning (no agents run). */
+  /** Preview cursor filtering and batch packing without running agents. */
   planOnly?: boolean;
   log?: (line: string) => void;
 }
 
-/**
- * Harnesses whose sessions are long-lived streams tracked by a reflection
- * cursor (see cursors.ts). Finite per-run session files (claude, codex) are
- * deliberately not tracked.
- */
+/** Long-lived streams tracked incrementally between dreams. */
 const CURSOR_TRACKED_HARNESSES = new Set(["openhands"]);
 
 export type DreamResult =
   | { kind: "nothing_to_dream" }
-  | { kind: "plan"; sessions: DiscoveredSession[]; batches: DreamBatch[] }
+  | {
+      kind: "plan";
+      transcripts: DiscoveredSession[];
+      batches: DreamBatch[];
+    }
   | {
       kind: "completed";
       runRoot: string;
       success: boolean;
-      sessions: DiscoveredSession[];
+      transcripts: DiscoveredSession[];
       batches: BatchReflectionResult[];
       aggregation: DreamAggregationOutcome;
       reflectorAgentId: string;
       aggregatorAgentId: string;
-      /** Present when a target doc was requested: whether it was (re)written. */
-      target?: { path: string; written: boolean };
     };
 
 function dreamRunId(): string {
@@ -160,58 +130,59 @@ function dreamRunId(): string {
   return `dream-${stamp}`;
 }
 
+function orderedTranscripts(
+  transcripts: readonly NormalizedSession[],
+): NormalizedSession[] {
+  return [...transcripts].sort((a, b) =>
+    a.session.startTime.localeCompare(b.session.startTime) ||
+    a.session.endTime.localeCompare(b.session.endTime) ||
+    a.session.harness.localeCompare(b.session.harness) ||
+    a.session.sessionId.localeCompare(b.session.sessionId)
+  );
+}
+
+function validateTranscripts(
+  transcripts: readonly NormalizedSession[],
+): void {
+  const seen = new Set<string>();
+  for (const transcript of transcripts) {
+    const key = sessionKey(transcript.session);
+    if (seen.has(key)) {
+      throw new Error(`dream(): duplicate transcript ${key}`);
+    }
+    seen.add(key);
+    const problem = validateRecords(transcript.records);
+    if (problem) {
+      throw new Error(`dream(): invalid transcript ${key}: ${problem}`);
+    }
+  }
+}
+
 export async function dream(options: DreamOptions): Promise<DreamResult> {
   const log = options.log ?? (() => {});
+  validateTranscripts(options.transcripts);
 
-  // An agent identity supplies (and persists) everything a bare run takes
-  // as explicit options.
-  const agentState = options.agent
-    ? await loadDreamAgent(options.agent, {
-        ...(options.agentsDir ? { agentsDir: options.agentsDir } : {}),
-      })
-    : undefined;
-  if (agentState && (options.memoryDir || options.runRoot || options.target)) {
-    throw new Error(
-      "dream(): `agent` already provides memoryDir/runRoot/target — omit them",
-    );
-  }
-  const memoryDir = agentState?.memoryDir ?? options.memoryDir;
-  const runRoot =
-    options.runRoot ?? (agentState && join(agentState.runsDir, dreamRunId()));
-  if (!memoryDir || !runRoot) {
-    throw new Error("dream() requires either `agent` or memoryDir + runRoot");
-  }
-  // Pipeline state (cursors) lives beside the agent's memory checkout, never
-  // committed into the real memfs behind the harness's back; standalone runs
-  // keep it inside their own memory repo.
-  const cursorDir = agentState?.stateDir ?? memoryDir;
+  const agent = await loadDreamAgent(options.agentId, {
+    ...(options.agentsDir ? { agentsDir: options.agentsDir } : {}),
+  });
+  const memoryDir = agent.memoryDir;
+  const cursorDir = agent.stateDir;
 
-  let sessions = await selectDreamSessions(options.sources);
-  if (sessions.length === 0) {
+  if (options.transcripts.length === 0) {
     return { kind: "nothing_to_dream" };
   }
-  // Selection is time-ordered ascending, so the tail is the most recent.
-  // Apply the cap before normalization — a bare machine-wide source can
-  // select far more sessions than the caller wants to pay to normalize.
-  if (options.maxSessions !== undefined && options.maxSessions > 0) {
-    sessions = sessions.slice(-options.maxSessions);
-  }
+  await prepareDreamAgentMemfs(agent);
 
-  // Normalize up front and pack on the size of the normalized content: raw
-  // store files shrink non-uniformly under normalization, so packing on raw
-  // sizes skews batches — and this makes planOnly match reality.
-  //
-  // Cursor-tracked harnesses (openhands: long-lived, append-only
-  // conversations) are trimmed to the records past their reflection cursor;
-  // a conversation with nothing new is dropped entirely.
   const cursors = await loadDreamCursors(cursorDir);
   const lastReflectedTsByKey = new Map<string, string>();
   const normalizedJsonByKey = new Map<string, string>();
-  const measuredSessions: DiscoveredSession[] = [];
-  for (const session of sessions) {
-    const source = getTrajectorySource(session.harness);
-    let { records } = await source.normalize(session);
+  const measuredTranscripts: DiscoveredSession[] = [];
+
+  for (const transcript of orderedTranscripts(options.transcripts)) {
+    const session = transcript.session;
     const key = sessionKey(session);
+    let records = [...transcript.records];
+
     if (CURSOR_TRACKED_HARNESSES.has(session.harness)) {
       const cursor = cursors[key];
       if (cursor) {
@@ -237,122 +208,91 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
         ?.timestamp;
       if (lastTs) lastReflectedTsByKey.set(key, lastTs);
     }
-    const json = JSON.stringify(records, null, 1);
+
+    // Run artifacts and reflection prompts should never retain credentials
+    // that a recorded shell/env command happened to print.
+    const json = redactSensitiveText(JSON.stringify(records, null, 1));
     normalizedJsonByKey.set(key, json);
-    measuredSessions.push({ ...session, estTokens: estimateTokens(json) });
+    measuredTranscripts.push({
+      ...session,
+      estTokens: estimateTokens(json),
+    });
   }
-  if (measuredSessions.length === 0) {
+
+  if (measuredTranscripts.length === 0) {
     return { kind: "nothing_to_dream" };
   }
 
   const batches = packDreamBatches(
-    measuredSessions,
+    measuredTranscripts,
     options.batchTokenBudget ?? DEFAULT_BATCH_TOKEN_BUDGET,
-    options.maxSessionsPerBatch ?? DEFAULT_MAX_SESSIONS_PER_BATCH,
+    options.maxTranscriptsPerBatch ?? DEFAULT_MAX_SESSIONS_PER_BATCH,
   );
   if (options.planOnly) {
-    return { kind: "plan", sessions: measuredSessions, batches };
+    return {
+      kind: "plan",
+      transcripts: measuredTranscripts,
+      batches,
+    };
   }
 
-  // Seed the targets into the memfs before any batch clones are taken, so
-  // every clone starts from the current on-disk (shared) state.
-  let target = options.target ? resolveDreamTarget(options.target) : undefined;
-  let scopeConstraint: string | undefined;
-  if (agentState) {
-    await syncAgentTargetsIntoMemory(agentState);
-    const classified = await classifyAgentTargets(agentState);
-    target = classified.fileTarget;
-    if (agentState.config.targetsOnly) {
-      scopeConstraint = buildTargetsOnlyConstraint({
-        targetPaths: [
-          ...(classified.fileTarget
-            ? [
-                `${targetMemfsRelPath(classified.fileTarget)} (under the memory root)`,
-              ]
-            : []),
-          ...classified.dirTargets.map(
-            (d) => `${d.memfsSubdir}/ (under the memory root)`,
-          ),
-        ],
-      });
-    }
-  } else if (target) {
-    const existing = await readExistingTarget(target);
-    if (existing !== null) {
-      const { synced } = await syncTargetIntoMemory(
-        memoryDir,
-        target,
-        existing,
-      );
-      if (synced) log(`[target] synced ${target.fileName} into memory`);
-    }
-  }
-
-  const effectiveInstruction =
-    [options.instruction, scopeConstraint].filter(Boolean).join("\n\n") ||
-    undefined;
-
+  await mkdir(agent.runsDir, { recursive: true });
+  const runRoot = join(agent.runsDir, dreamRunId());
   await mkdir(runRoot, { recursive: true });
-  // The dream agent aggregates its own memory; only the reflector is a
-  // separate worker. Its id persists in the pipeline state so every dream
-  // against this agent reuses it.
+
   const workers = await ensureDreamWorkers(options.client, {
-    reflectorAgentId:
-      options.reflectorAgentId ?? agentState?.config.reflectorAgentId,
-    aggregatorAgentId:
-      options.aggregatorAgentId ?? agentState?.agentId,
-    model: options.model ?? agentState?.config.model,
+    reflectorAgentId: agent.config.reflectorAgentId,
+    aggregatorAgentId: agent.agentId,
+    model: agent.config.model,
     log,
   });
-  if (
-    agentState &&
-    agentState.config.reflectorAgentId !== workers.reflectorAgentId
-  ) {
-    agentState.config.reflectorAgentId = workers.reflectorAgentId;
-    await saveDreamAgentConfig(agentState);
+  if (agent.config.reflectorAgentId !== workers.reflectorAgentId) {
+    agent.config.reflectorAgentId = workers.reflectorAgentId;
+    await saveDreamAgentConfig(agent);
   }
-  log(
-    `Selected ${measuredSessions.length} session(s) in ${batches.length} batch(es)`,
-  );
 
+  log(
+    `Selected ${measuredTranscripts.length} transcript(s) in ${batches.length} batch(es)`,
+  );
   const batchResults = await runBatchReflections({
     client: options.client,
     reflectorAgentId: workers.reflectorAgentId,
+    parentAgentId: agent.agentId,
     memoryDir,
     runRoot,
     batches,
     normalizedJsonByKey,
+    memfsPolicy: agent.config.memfs.policy,
     concurrency: options.concurrency ?? batches.length,
-    instruction: effectiveInstruction,
-    ...(target ? { target } : {}),
+    ...(options.reflectionPrompt
+      ? { reflectionPrompt: options.reflectionPrompt }
+      : {}),
     log,
   });
 
   const aggregation = await runDreamAggregation({
     client: options.client,
-    aggregatorAgentId: workers.aggregatorAgentId,
+    aggregatorAgentId: agent.agentId,
     memoryDir,
     runRoot,
     reflections: batchResults,
-    instruction: effectiveInstruction,
-    ...(target ? { target } : {}),
-    // When the dream agent aggregates its own memory it carries no dedicated
-    // aggregator persona block — fold the persona into the prompt instead.
-    ...(agentState ? { personaPreamble: AGGREGATOR_PERSONA } : {}),
+    memfsPolicy: agent.config.memfs.policy,
+    personaPreamble: AGGREGATOR_PERSONA,
     log,
   });
 
-  // Advance reflection cursors only for sessions whose batch succeeded AND
-  // whose learnings actually landed — a failed batch or aggregation leaves
-  // its cursors untouched so the next run re-processes.
-  if (aggregation.success && lastReflectedTsByKey.size > 0) {
-    const reflectedSessionIds = new Set(
-      batchResults.filter((b) => b.success).flatMap((b) => b.sessionIds),
+  const everyBatchSucceeded = batchResults.every((batch) => batch.success);
+  const success = everyBatchSucceeded && aggregation.success;
+
+  if (success && lastReflectedTsByKey.size > 0) {
+    const reflectedKeys = new Set(
+      batchResults
+        .filter((batch) => batch.success)
+        .flatMap((batch) => batch.sessionIds),
     );
     let advanced = 0;
     for (const [key, reflectedThrough] of lastReflectedTsByKey) {
-      const sessionId = key.slice(key.indexOf(":") + 1);
-      if (!reflectedSessionIds.has(sessionId)) continue;
+      if (!reflectedKeys.has(key)) continue;
       cursors[key] = { reflectedThrough };
       advanced += 1;
     }
@@ -362,46 +302,14 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
     }
   }
 
-  // Export what aggregation committed back out to the targets. A failed
-  // aggregation (or an absent doc) leaves the on-disk targets untouched.
-  let targetOutcome: { path: string; written: boolean } | undefined;
-  if (agentState) {
-    if (aggregation.success) {
-      for (const entry of await exportAgentTargets(agentState)) {
-        log(
-          `[target] ${entry.path}: ${
-            typeof entry.written === "number"
-              ? `${entry.written} file(s) written`
-              : entry.written
-                ? "updated"
-                : "unchanged"
-          }`,
-        );
-        if (typeof entry.written === "boolean") {
-          targetOutcome = { path: entry.path, written: entry.written };
-        }
-      }
-    }
-  } else if (target) {
-    const rendered = aggregation.success
-      ? await readTargetFromMemory(memoryDir, target)
-      : null;
-    if (rendered !== null) {
-      await writeTarget(target, rendered);
-      log(`[target] wrote ${target.path}`);
-    }
-    targetOutcome = { path: target.path, written: rendered !== null };
-  }
-
   return {
     kind: "completed",
     runRoot,
-    success: aggregation.success,
-    sessions: measuredSessions,
+    success,
+    transcripts: measuredTranscripts,
     batches: batchResults,
     aggregation,
     reflectorAgentId: workers.reflectorAgentId,
-    aggregatorAgentId: workers.aggregatorAgentId,
-    ...(targetOutcome ? { target: targetOutcome } : {}),
+    aggregatorAgentId: agent.agentId,
   };
 }

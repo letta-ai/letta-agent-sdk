@@ -12,11 +12,6 @@ import aggregatorUserMd from "./prompts/aggregator-user.md";
 import reflectionContinueMd from "./prompts/reflection-continue.md";
 import reflectionSystemMd from "./prompts/reflection-system.md";
 import reflectionUserMd from "./prompts/reflection-user.md";
-import targetAggregatorMd from "./prompts/target-aggregator.md";
-import targetsOnlyMd from "./prompts/targets-only.md";
-import targetGuidanceAgentsMd from "./prompts/target-guidance-agents-md.md";
-import targetGuidanceGenericMd from "./prompts/target-guidance-generic.md";
-import targetReflectionMd from "./prompts/target-reflection.md";
 
 export const REFLECTION_SYSTEM_PROMPT: string = reflectionSystemMd.trim();
 export const AGGREGATOR_PERSONA: string = aggregatorPersonaMd.trim();
@@ -69,53 +64,15 @@ export function buildReflectionContinuePrompt(input: {
   return render(reflectionContinueMd, { memoryDir: input.memoryDir });
 }
 
-function targetGuidance(kind: "agents-md" | "generic"): string {
-  return (
-    kind === "agents-md" ? targetGuidanceAgentsMd : targetGuidanceGenericMd
-  ).trim();
-}
-
-/** Directive for a reflection batch to maintain the target doc in its clone. */
-export function buildTargetReflectionInstruction(input: {
-  kind: "agents-md" | "generic";
-  docPath: string;
-}): string {
-  return render(targetReflectionMd, {
-    docPath: input.docPath,
-    guidance: targetGuidance(input.kind),
-  });
-}
-
-/** Constraint confining ALL memory edits to the bound target paths. */
-export function buildTargetsOnlyConstraint(input: {
-  targetPaths: string[];
-}): string {
-  return render(targetsOnlyMd, {
-    targetList: input.targetPaths.map((p) => `- ${p}`).join("\n"),
-  });
-}
-
-/** Directive for the aggregator to synthesize the target doc onto the memfs. */
-export function buildTargetAggregatorInstruction(input: {
-  kind: "agents-md" | "generic";
-  docPath: string;
-}): string {
-  return render(targetAggregatorMd, {
-    docPath: input.docPath,
-    guidance: targetGuidance(input.kind),
-  });
-}
-
 export function buildAggregatorUserPrompt(input: {
   batchesDir: string;
   batchCount: number;
   memoryDir: string;
-  instruction?: string;
 }): string {
   return render(aggregatorUserMd, {
     count: input.batchCount,
     batchesDir: input.batchesDir,
     memoryDir: input.memoryDir,
-    instructionSection: instructionSection(input.instruction),
+    instructionSection: "",
   });
 }

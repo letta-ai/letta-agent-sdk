@@ -6,6 +6,7 @@
 // repos, so any number of batches can run concurrently.
 
 import { execFile } from "node:child_process";
+import { rm } from "node:fs/promises";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -50,4 +51,16 @@ export async function inspectMemoryTree(
   } catch {
     return { commitCount: 0, dirty: false };
   }
+}
+
+/** Record an immutable checkout of the final memory tree with a run. */
+export async function snapshotMemoryTree(
+  memoryDir: string,
+  outputDir: string,
+): Promise<void> {
+  await rm(outputDir, { recursive: true, force: true });
+  await execFileAsync(
+    "git",
+    ["clone", "--quiet", "--no-hardlinks", memoryDir, outputDir],
+  );
 }

@@ -6,7 +6,7 @@
 // sandbox on this path.
 
 import type { LettaAgentClient } from "../client.js";
-import type { SDKMessage } from "../types.js";
+import type { SDKMessage, SkillSource } from "../types.js";
 
 export interface RunAgentOptions {
   agentId: string;
@@ -18,6 +18,8 @@ export interface RunAgentOptions {
   resumeConversationId?: string;
   /** Extra env for the session's harness process (see session options). */
   env?: Record<string, string>;
+  /** Restrict Letta Code skills for this runtime. [] disables every source. */
+  skillSources?: SkillSource[];
   onProgress?: (line: string) => void;
 }
 
@@ -44,6 +46,9 @@ export async function runAgentToCompletion(
     cwd: options.cwd,
     dreaming: { trigger: "off" as const },
     ...(options.env ? { env: options.env } : {}),
+    ...(options.skillSources !== undefined
+      ? { skillSources: options.skillSources }
+      : {}),
   };
   const session = options.resumeConversationId
     ? client.resumeSession(options.resumeConversationId, sessionOptions)

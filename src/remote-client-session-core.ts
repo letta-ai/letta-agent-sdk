@@ -25,6 +25,7 @@ import type {
   SDKStreamEventPayload,
   SendCommandOptions,
   SendMessage,
+  SkillSource,
   UpdateModelOptions,
   UpdateModelResult,
 } from "./types.js";
@@ -105,6 +106,8 @@ export type RuntimeSessionInit = {
   model?: string | null;
   modelSettings?: Record<string, unknown> | null;
   tools?: string[];
+  /** Effective runtime skill source override, when explicitly requested. */
+  skillSources?: SkillSource[];
 };
 
 type RemoteClientSessionCoreConfig = {
@@ -573,6 +576,9 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
         model: this._model,
       };
       if (this.toolNames !== undefined) initMessage.tools = this.toolNames;
+      if (init.skillSources !== undefined) {
+        initMessage.skillSources = init.skillSources;
+      }
       return initMessage;
     } catch (error) {
       this.close();

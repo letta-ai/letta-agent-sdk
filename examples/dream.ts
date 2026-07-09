@@ -1,71 +1,54 @@
-// Dream over recorded coding sessions: reflect in parallel batches, then
-// synthesize the learnings into a dream agent's own memory filesystem.
-//
-//   bun examples/dream.ts init [target ...]     initialize a new dream agent
-//   bun examples/dream.ts <agent-id>            dream against it
-//
-// A dream agent IS a memfs-enabled Letta agent — the identity is its agent
-// id. Targets are bound at init: e.g. ./AGENTS.md (maintained at
-// system/AGENTS.md) and ./skills/ (mirrored as the memfs skills/ tier).
-// Aggregation runs on the agent itself, so learnings land in its memory.
+// Minimal end-to-end use of the three-part dreaming API.
 
-import { LettaAgentClient, dream, initDreamAgent } from "../src/index.js";
+import {
+  LettaAgentClient,
+  collectTranscripts,
+  dream,
+  initDreamAgent,
+} from "../src/index.js";
 
-const [command, ...rest] = process.argv.slice(2);
-if (!command) {
-  console.error("usage: bun examples/dream.ts init [target ...] | <agent-id>");
-  process.exit(64);
-}
+const after =
+  process.env.DREAM_AFTER ??
+  new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-// Dreaming edits local files (memory clones under the run dirs), so the
-// harness must run on this machine; harnessBackend "api" keeps the agents on
-// Letta Cloud. The "cloud" backend would run sessions in a managed remote
-// sandbox that cannot see these directories.
 const client = new LettaAgentClient({
   backend: "local",
   appServer: { harnessBackend: "api" },
 });
 
-if (command === "init") {
-  const agent = await initDreamAgent(client, { targets: rest });
-  console.log(`dream agent: ${agent.agentId}`);
-  console.log(`memory:      ${agent.memoryDir}`);
-  process.exit(0);
-}
+// 1. Discover and normalize a bounded set of recent transcripts.
+const transcripts = await collectTranscripts({
+  after,
+  sources: [
+    { type: "claude", limit: 5 },
+    { type: "codex", limit: 5 },
+  ],
+});
 
-const agentId = command;
-const sources = [{ type: "claude" }, { type: "codex" }];
+// 2. Create the dream agent from an explicit, guarded MemFS structure.
+const agent = await initDreamAgent(client, {
+  model: "anthropic/claude-opus-4-8",
+  memfs: {
+    directories: ["skills"],
+    files: {
+      "system/project/AGENTS.md":
+        "---\ndescription: Project guidance\n---\n\n# Project guidance\n",
+    },
+  },
+  guard: { allowedNewFilePrefixes: ["skills"] },
+});
 
-// Preview the plan first (no agents run).
-const plan = await dream({ client, agent: agentId, sources, planOnly: true });
-if (plan.kind !== "plan") {
-  console.log("nothing to dream");
-  process.exit(0);
-}
-console.log(
-  `would reflect on ${plan.sessions.length} session(s) in ${plan.batches.length} batch(es)`,
-);
-
-// The real run: every batch reflects concurrently against its own clone of
-// the agent's memory; the agent itself synthesizes the diffs into its memfs,
-// then the bound targets are exported back out.
+// 3. Reflect on exactly those transcript snapshots.
 const result = await dream({
   client,
-  agent: agentId,
-  sources,
-  log: (line) => console.log(line),
+  agentId: agent.agentId,
+  transcripts,
+  reflectionPrompt: "Only retain durable learnings relevant to this project.",
+  log: console.log,
 });
 
 if (result.kind === "completed") {
-  console.log(
-    `${result.success ? "done" : "failed"} — ${result.aggregation.commitCount} commit(s) on the agent's memory`,
-  );
-  console.log(`run artifacts: ${result.runRoot}`);
-  if (result.target) {
-    console.log(
-      result.target.written
-        ? `target doc updated: ${result.target.path}`
-        : `target doc unchanged: ${result.target.path}`,
-    );
-  }
+  console.log(`${result.success ? "done" : "failed"}: ${result.runRoot}`);
+} else {
+  console.log(result.kind);
 }

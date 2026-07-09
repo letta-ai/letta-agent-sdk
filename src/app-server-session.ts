@@ -170,9 +170,6 @@ function assertRemoteCreateAgentOptionsSupported(options: CreateAgentOptions): v
   if (options.canUseTool !== undefined) {
     throw new Error("App-server createAgent() does not yet support canUseTool callbacks.");
   }
-  if (options.skillSources !== undefined) {
-    throw new Error("App-server createAgent() does not yet support skillSources overrides.");
-  }
   if (options.systemInfoReminder !== undefined) {
     throw new Error("App-server createAgent() does not yet support systemInfoReminder overrides.");
   }
@@ -190,9 +187,6 @@ export function assertRemoteSessionOptionsSupported(
   }
   if (options.allowedTools !== undefined || options.disallowedTools !== undefined) {
     throw new Error(`App-server ${action}() does not yet support allowedTools/disallowedTools.`);
-  }
-  if (options.skillSources !== undefined) {
-    throw new Error(`App-server ${action}() does not yet support skillSources overrides.`);
   }
   if (options.systemInfoReminder !== undefined) {
     throw new Error(`App-server ${action}() does not yet support systemInfoReminder overrides.`);
@@ -754,12 +748,14 @@ export class AppServerSession extends RemoteClientSessionCore {
       }
 
       const tools = agentToolNames(response.agent);
+      const skillSources = this.currentOptions().skillSources;
       return {
         controller: new AppServerRuntimeController(client, this.remoteOptions),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
         modelSettings: response.agent?.model_settings ?? null,
         ...(tools !== undefined ? { tools } : {}),
+        ...(skillSources !== undefined ? { skillSources: [...skillSources] } : {}),
       };
     } catch (error) {
       this.removeExternalToolHandler?.();
@@ -821,6 +817,12 @@ export class AppServerSession extends RemoteClientSessionCore {
     const mode = mapPermissionMode(options.permissionMode);
     if (mode) command.mode = mode;
     if (options.cwd !== undefined) command.cwd = options.cwd;
+    // Keep the distinction between omitted (use harness defaults) and []
+    // (disable bundled/global/agent/project skills). The app-server runtime is
+    // session-scoped, so this must be sent on creation and every resume.
+    if (options.skillSources !== undefined) {
+      command.skill_sources = [...new Set(options.skillSources)];
+    }
     const groups = externalToolGroups(options.tools);
     if (groups) command.external_tools = groups;
 

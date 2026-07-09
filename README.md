@@ -277,54 +277,82 @@ const sync = await session.sendCommand(
 
 ## Dreaming
 
-Form long-term memory from recorded coding sessions — Claude Code, Codex, OpenHands, Letta conversations, or pre-normalized transcripts. Sessions are normalized to a shared format, packed into time-ordered batches, reflected on by concurrent agent sessions (each editing an isolated git clone of the target memory filesystem), and synthesized into the target by one aggregation pass that works from the batches' diffs.
+The dreaming API has three explicit components: collect normalized transcript
+snapshots, initialize a guarded memory filesystem, then run a dream over the
+exact transcript list. Reflection batches edit isolated clones and a final
+aggregation pass synthesizes their diffs into the dream agent's MemFS.
 
 ```typescript
-import { LettaAgentClient, dream, initDreamAgent } from "@letta-ai/letta-agent-sdk";
+import {
+  LettaAgentClient,
+  collectTranscripts,
+  dream,
+  initDreamAgent,
+} from "@letta-ai/letta-agent-sdk";
 
-// Dreaming edits local files, so the harness must run on this machine.
-// harnessBackend "api" keeps the worker agents (and models like
-// letta/auto-memory) on Letta Cloud; omit it to stay fully local.
 const client = new LettaAgentClient({
   backend: "local",
   appServer: { harnessBackend: "api" },
 });
 
-// One-time: initialize a dream agent — a memfs-enabled Letta agent whose
-// own memory filesystem is the dream target; the identity is its agent id.
-// Targets are bound here: an AGENTS.md doc maintained at system/AGENTS.md,
-// and a skills/ directory mirrored as the memfs skills/ tier.
-const agent = await initDreamAgent(client, {
-  targets: ["./AGENTS.md", "./skills/"],
-  model: "anthropic/claude-opus-4-7",
-});
-
-// Every dream against the agent id reflects on clones of its memfs checkout,
-// and the AGENT ITSELF synthesizes the batch diffs into its memory (so the
-// learnings land through the harness's memory machinery). The reflector
-// worker, reflection cursors, and bound targets persist with the identity;
-// run artifacts land in the agent's harness directory.
-const result = await dream({
-  client,
-  agent: agent.agentId,
+// 1. Collect immutable snapshots after an exclusive cutoff. Limits apply per
+// source, so this selects the five newest eligible sessions from each store.
+const transcripts = await collectTranscripts({
+  after: "2026-07-01T00:00:00Z",
   sources: [
-    { type: "claude" },                          // all local Claude Code sessions
-    { type: "codex", locator: "<session-id>" },  // that Codex session onwards
+    { type: "claude", limit: 5 },
+    { type: "codex", limit: 5 },
   ],
 });
 
+// 2. Initialize the complete starting MemFS. Seeded files may be modified but
+// not deleted. New files and directories are allowed only below skills/.
+const agent = await initDreamAgent(client, {
+  model: "anthropic/claude-opus-4-8",
+  memfs: {
+    directories: ["skills"],
+    files: {
+      "system/project/AGENTS.md":
+        "---\ndescription: Project guidance\n---\n\n# Project guidance\n",
+    },
+  },
+  guard: {
+    allowedNewFilePrefixes: ["skills"],
+  },
+});
+
+// 3. Run against the exact snapshots. The optional prompt is appended to each
+// reflection batch, not to the aggregation pass.
+const result = await dream({
+  client,
+  agentId: agent.agentId,
+  transcripts,
+  reflectionPrompt: "Only retain learnings relevant to this project.",
+});
+
 if (result.kind === "completed") {
-  console.log(result.aggregation.report);
+  console.log(result.success, result.runRoot, result.aggregation.report);
 }
 ```
 
-Prefer the agent form; the lower-level knobs (`memoryDir` + `runRoot` + `target`, plus explicit `reflectorAgentId`/`aggregatorAgentId`) remain for callers managing their own layout.
+Available transcript sources include `claude`, `codex`, `openhands`, `letta`,
+and already-normalized `transcript` files. `after` compares against each
+session's end time and is exclusive; `limit` keeps the latest eligible sessions
+for that source spec. Use `planOnly: true` to inspect transcript selection and
+batch packing without running agents.
 
-Source types: `claude`, `codex` (local stores; a locator acts as a time cursor), `openhands:<dir>`, `letta:<agent-id>/<conversation-id>` (recorded Letta conversation transcripts), `transcript:<file|dir>` (normalized files). Use `planOnly: true` to preview session selection and batch packing without running agents, and pass `reflectorAgentId`/`aggregatorAgentId` to reuse worker agents across runs. Every run records per-batch `input/`, the edited memory clone, `diff.patch`, `trajectory.json`, and `report.json` under `runRoot`. See `examples/dream.ts`.
+The pre-commit guard is installed on the canonical MemFS and every reflection
+clone. The SDK also validates every commit and the final working tree after
+each run, so `--no-verify` cannot bypass the policy. For finer control, pass
+`guard.allowedOperations` rules for exact or recursive paths. Every run records
+batch inputs, output clones, diffs, normalized worker trajectories, reports,
+and an immutable final aggregate snapshot under `runRoot`. See
+[`examples/dream.ts`](./examples/dream.ts).
 
-OpenHands conversations are long-lived streams, so they carry a reflection cursor: after a successful run, each conversation's last-reflected position is committed to the memory repo (`.dream/cursors.json`), and later runs reflect only on events past it — a conversation with nothing new is skipped entirely. Claude/Codex sessions are finite files and are re-processed as selected.
-
-Targets — bound at `initDreamAgent` (or via the low-level `target` option) — maintain a doc (e.g. an [AGENTS.md](https://agents.md)) from memory: the on-disk copy is synced into the memfs at `system/<name>` before reflection (the repo copy is the source of truth), each batch revises it alongside its other memory edits, the aggregator synthesizes one cohesive revision, and the result is exported back to the path with its managed frontmatter stripped. A run that yields no durable guidance leaves the doc untouched — and if the doc doesn't exist yet, it is only created when there is real content to record.
+OpenHands conversations retain incremental cursors in the dream agent's SDK
+state; later dreams skip records at or before the last successfully reflected
+timestamp. Claude and Codex sessions are finite snapshots and remain
+cursor-free.
 
 ## Links
 

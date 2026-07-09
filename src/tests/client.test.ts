@@ -973,6 +973,64 @@ describe("LettaAgentClient", () => {
     });
   });
 
+  test("forwards an empty skillSources override when creating app-server agents", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    await client.createAgent({
+      model: "anthropic/claude-sonnet-4",
+      skillSources: [],
+    });
+
+    expect(fakeControlSocket().sent[0]).toMatchObject({
+      type: "runtime_start",
+      skill_sources: [],
+      create_agent: expect.any(Object),
+    });
+  });
+
+  test("forwards skillSources on app-server session creation and resume", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const created = client.createSession("agent-123", { skillSources: [] });
+    try {
+      const init = await asAdvanced(created).initialize();
+      expect(init.skillSources).toEqual([]);
+      expect(fakeControlSocket().sent[0]).toMatchObject({
+        type: "runtime_start",
+        agent_id: "agent-123",
+        skill_sources: [],
+      });
+    } finally {
+      created.close();
+    }
+
+    FakeAppServerSocket.instances = [];
+    const resumed = client.resumeSession("agent-123", {
+      skillSources: ["project", "agent"],
+    });
+    try {
+      const init = await asAdvanced(resumed).initialize();
+      expect(init.skillSources).toEqual(["project", "agent"]);
+      expect(fakeControlSocket().sent[0]).toMatchObject({
+        type: "runtime_start",
+        agent_id: "agent-123",
+        skill_sources: ["project", "agent"],
+      });
+    } finally {
+      resumed.close();
+    }
+  });
+
   test("resumes remote conversations by resolving their agent first", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({

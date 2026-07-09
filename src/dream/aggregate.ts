@@ -8,13 +8,17 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { LettaAgentClient } from "../client.js";
-import { gitOutput } from "./clone.js";
+import { gitOutput, snapshotMemoryTree } from "./clone.js";
+import {
+  installMemfsGuard,
+  recreateMemfsDirectories,
+  validateMemfsChanges,
+  type MemfsWritePolicy,
+} from "./memfs.js";
 import {
   AGGREGATOR_CONTINUE_PROMPT,
   buildAggregatorUserPrompt,
-  buildTargetAggregatorInstruction,
 } from "./prompts.js";
-import { type DreamTarget, targetMemfsRelPath } from "./targets.js";
 import type { BatchReflectionResult } from "./reflect.js";
 import { runAgentToCompletion } from "./runner.js";
 import { normalizeSdkMessages } from "./sdk-messages.js";
@@ -36,9 +40,8 @@ export async function runDreamAggregation(params: {
   memoryDir: string;
   runRoot: string;
   reflections: BatchReflectionResult[];
-  instruction?: string;
-  /** Doc maintained in the memfs at system/<fileName>. */
-  target?: DreamTarget;
+  /** Write policy enforced on the canonical MemFS and checked afterward. */
+  memfsPolicy: MemfsWritePolicy;
   /**
    * Persona text prepended to the prompt when the aggregating agent doesn't
    * carry a dedicated aggregator persona block (a dream agent synthesizing
@@ -54,37 +57,50 @@ export async function runDreamAggregation(params: {
     (r) => r.success && (r.commitCount > 0 || r.dirty),
   );
   if (withContent.length === 0) {
-    return {
+    const outcome: DreamAggregationOutcome = {
       success: true,
       report:
         "Reflections found no durable learnings to persist; memory left unchanged.",
       commitCount: 0,
     };
+    const aggregateDir = join(params.runRoot, "aggregate");
+    await mkdir(aggregateDir, { recursive: true });
+    await writeFile(
+      join(aggregateDir, "report.json"),
+      JSON.stringify(
+        {
+          agentId: params.aggregatorAgentId,
+          success: true,
+          durationMs: 0,
+          inputs: [],
+          report: outcome.report,
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    const outputDir = join(aggregateDir, "output");
+    await snapshotMemoryTree(params.memoryDir, outputDir);
+    await recreateMemfsDirectories(
+      outputDir,
+      params.memfsPolicy.declaredDirectories ?? [],
+    );
+    return outcome;
   }
 
   const aggregateDir = join(params.runRoot, "aggregate");
   await mkdir(aggregateDir, { recursive: true });
+  const guard = await installMemfsGuard(params.memoryDir, params.memfsPolicy);
   const baseRevision = await gitOutput(params.memoryDir, [
     "rev-parse",
     "HEAD",
   ]);
 
-  const instruction = [
-    params.instruction,
-    params.target
-      ? buildTargetAggregatorInstruction({
-          kind: params.target.kind,
-          docPath: join(params.memoryDir, targetMemfsRelPath(params.target)),
-        })
-      : undefined,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
   const builtPrompt = buildAggregatorUserPrompt({
     batchesDir: join(params.runRoot, "batches"),
     batchCount: params.reflections.length,
     memoryDir: params.memoryDir,
-    ...(instruction ? { instruction } : {}),
   });
   const userPrompt = params.personaPreamble
     ? `${params.personaPreamble.trim()}\n\n${builtPrompt}`
@@ -173,10 +189,27 @@ export async function runDreamAggregation(params: {
   await writeFile(join(aggregateDir, "memfs.patch"), `${gitPatch}\n`, "utf-8");
 
   const commitCount = gitLog ? gitLog.split("\n").length : 0;
+  const landed = commitCount > 0;
+  const policyCheck = await validateMemfsChanges(
+    params.memoryDir,
+    baseRevision,
+    params.memfsPolicy,
+    { baselineDirectories: guard.baselineDirectories },
+  );
+  const policyError = policyCheck.valid
+    ? undefined
+    : `MemFS write policy rejected ${policyCheck.violations.length} change(s): ${policyCheck.violations
+        .map((violation) => `${violation.path} (${violation.reason})`)
+        .join("; ")}`;
   const outcome: DreamAggregationOutcome = {
-    success: run.success,
+    success: run.success && landed && policyCheck.valid,
     report: run.report,
-    error: run.error,
+    error:
+      run.error ??
+      policyError ??
+      (landed
+        ? undefined
+        : "Aggregation ended without committing the reflection outputs"),
     conversationId: run.conversationId ?? undefined,
     commitCount,
   };
@@ -197,6 +230,14 @@ export async function runDreamAggregation(params: {
     ),
     "utf-8",
   );
+  if (outcome.success) {
+    const outputDir = join(aggregateDir, "output");
+    await snapshotMemoryTree(params.memoryDir, outputDir);
+    await recreateMemfsDirectories(
+      outputDir,
+      params.memfsPolicy.declaredDirectories ?? [],
+    );
+  }
   log(
     `[aggregate] ${outcome.success ? "done" : `FAILED: ${outcome.error ?? "unknown error"}`} ` +
       `(${commitCount} commit(s) on target)`,

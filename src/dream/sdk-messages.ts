@@ -7,6 +7,7 @@ import type { PseudoRow } from "./normalize-core.js";
 import { normalizeSessionRows } from "./normalize-core.js";
 import type { SDKMessage } from "../types.js";
 import type { NormalizedRecord } from "./types.js";
+import { redactSensitiveText } from "./redact.js";
 
 /**
  * Convert a session's captured SDKMessages into normalized-v1 records, with
@@ -22,6 +23,7 @@ import type { NormalizedRecord } from "./types.js";
  */
 function coalesceStreamDeltas(messages: SDKMessage[]): SDKMessage[] {
   const coalesced: SDKMessage[] = [];
+  const toolCallIndex = new Map<string, number>();
   for (const msg of messages) {
     const prev = coalesced[coalesced.length - 1];
     if (
@@ -32,6 +34,41 @@ function coalesceStreamDeltas(messages: SDKMessage[]): SDKMessage[] {
     ) {
       prev.content += msg.content;
       continue;
+    }
+    if (msg.type === "tool_call") {
+      const key = `${msg.runId ?? ""}:${msg.uuid}:${msg.toolCallId}`;
+      const existingIndex = toolCallIndex.get(key);
+      const chunk =
+        msg.rawArguments ?? JSON.stringify(msg.toolInput ?? {});
+      if (existingIndex !== undefined) {
+        const existing = coalesced[existingIndex];
+        if (existing?.type === "tool_call") {
+          const raw = `${existing.rawArguments ?? ""}${chunk}`;
+          let toolInput: Record<string, unknown> = { raw };
+          try {
+            const parsed: unknown = JSON.parse(raw);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              toolInput = parsed as Record<string, unknown>;
+            }
+          } catch {
+            // Keep the accumulated raw arguments until the final chunk lands.
+          }
+          existing.rawArguments = raw;
+          existing.toolInput = toolInput;
+          if (existing.toolName === "?" && msg.toolName !== "?") {
+            existing.toolName = msg.toolName;
+          }
+          continue;
+        }
+      }
+      toolCallIndex.set(key, coalesced.length);
+      coalesced.push({ ...msg, rawArguments: chunk });
+      continue;
+    }
+    if (msg.type === "tool_result") {
+      for (const key of toolCallIndex.keys()) {
+        if (key.endsWith(`:${msg.toolCallId}`)) toolCallIndex.delete(key);
+      }
     }
     coalesced.push(
       msg.type === "reasoning" || msg.type === "assistant"
@@ -50,7 +87,7 @@ export function normalizeSdkMessages(
     {
       role: "user",
       turnType: "user_prompt",
-      content: userPrompt,
+      content: redactSensitiveText(userPrompt),
       timestamp: null,
     },
   ];
@@ -61,7 +98,7 @@ export function normalizeSdkMessages(
           rows.push({
             role: "assistant",
             turnType: "assistant_thinking",
-            content: msg.content,
+            content: redactSensitiveText(msg.content),
             timestamp: null,
           });
         }
@@ -71,7 +108,7 @@ export function normalizeSdkMessages(
           rows.push({
             role: "assistant",
             turnType: "assistant_response",
-            content: msg.content,
+            content: redactSensitiveText(msg.content),
             timestamp: null,
           });
         }
@@ -83,14 +120,16 @@ export function normalizeSdkMessages(
           timestamp: null,
           toolName: msg.toolName,
           toolCallId: msg.toolCallId,
-          toolInputJson: JSON.stringify(msg.toolInput ?? {}),
+          toolInputJson: redactSensitiveText(
+            msg.rawArguments ?? JSON.stringify(msg.toolInput ?? {}),
+          ),
         });
         break;
       case "tool_result": {
         const content =
           msg.isError && !/^error/i.test(msg.content)
-            ? `Error: ${msg.content}`
-            : msg.content;
+            ? `Error: ${redactSensitiveText(msg.content)}`
+            : redactSensitiveText(msg.content);
         rows.push({
           role: "tool_result",
           turnType: "tool_result",

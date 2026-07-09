@@ -1,1 +1,0 @@
-Maintain this markdown document as durable, forward-looking guidance distilled from the conversation(s). Prefer editing/merging existing sections over appending; remove content that new evidence contradicts.
