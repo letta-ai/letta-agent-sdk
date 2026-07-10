@@ -85,8 +85,14 @@ export interface DreamOptions {
   agentId: string;
   /** Immutable normalized transcript snapshots to reflect on. */
   transcripts: readonly NormalizedSession[];
-  /** Additional instruction provided to every reflection batch only. */
-  reflectionPrompt?: string;
+  /**
+   * Additional caller instruction for the run, provided to every reflection
+   * batch AND to the aggregation pass. The aggregator is the stage that
+   * lands the final commit on the memory filesystem, so instructions about
+   * maintaining specific files (e.g. a projected AGENTS.md) reach it too —
+   * an instruction that steered only the batches would be unreliable.
+   */
+  instruction?: string;
   /** Override the harness agents directory (tests). */
   agentsDir?: string;
   /** Per-batch token budget (default 60k, measured on normalized content). */
@@ -264,9 +270,7 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
     normalizedJsonByKey,
     memfsPolicy: agent.config.memfs.policy,
     concurrency: options.concurrency ?? batches.length,
-    ...(options.reflectionPrompt
-      ? { reflectionPrompt: options.reflectionPrompt }
-      : {}),
+    ...(options.instruction ? { instruction: options.instruction } : {}),
     log,
   });
 
@@ -278,6 +282,7 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
     reflections: batchResults,
     memfsPolicy: agent.config.memfs.policy,
     personaPreamble: AGGREGATOR_PERSONA,
+    ...(options.instruction ? { instruction: options.instruction } : {}),
     log,
   });
 

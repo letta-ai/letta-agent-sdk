@@ -112,7 +112,7 @@ async function main(): Promise<void> {
     client,
     agentId: agent.agentId,
     transcripts,
-    reflectionPrompt: REFLECTION_PROMPT,
+    instruction: REFLECTION_PROMPT,
     planOnly: true,
   });
   if (plan.kind !== "plan" || plan.transcripts.length !== 10) {
@@ -135,7 +135,7 @@ async function main(): Promise<void> {
     client,
     agentId: agent.agentId,
     transcripts,
-    reflectionPrompt: REFLECTION_PROMPT,
+    instruction: REFLECTION_PROMPT,
     log: (line) =>
       console.log(`[${new Date().toISOString().slice(11, 19)}] ${line}`),
   });
