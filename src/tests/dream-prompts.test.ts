@@ -68,7 +68,7 @@ describe("dream prompt contracts", () => {
   });
 });
 
-describe("aggregationPrompt threading", () => {
+describe("instruction threading to the aggregator", () => {
   const base = {
     batchesDir: "/run/batches",
     batchCount: 2,

@@ -49,12 +49,11 @@ export async function runDreamAggregation(params: {
    */
   personaPreamble?: string;
   /**
-   * Additional caller instruction for the aggregation pass. The aggregator
-   * is the only stage that edits the target memory, so instructions about
-   * maintaining specific files (e.g. a projected AGENTS.md) must reach it
-   * here — reflectionPrompt reaches the reflection batches only.
+   * Additional caller instruction. The aggregator is the only stage that
+   * edits the target memory, so instructions about maintaining specific
+   * files (e.g. a projected AGENTS.md) must reach it here.
    */
-  aggregationPrompt?: string;
+  instruction?: string;
   log?: (line: string) => void;
 }): Promise<DreamAggregationOutcome> {
   const log = params.log ?? (() => {});
@@ -105,9 +104,7 @@ export async function runDreamAggregation(params: {
     batchesDir: join(params.runRoot, "batches"),
     batchCount: params.reflections.length,
     memoryDir: params.memoryDir,
-    ...(params.aggregationPrompt
-      ? { instruction: params.aggregationPrompt }
-      : {}),
+    ...(params.instruction ? { instruction: params.instruction } : {}),
   });
   const userPrompt = params.personaPreamble
     ? `${params.personaPreamble.trim()}\n\n${builtPrompt}`
