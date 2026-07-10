@@ -9,12 +9,18 @@
 import aggregatorContinueMd from "./prompts/aggregator-continue.md";
 import aggregatorPersonaMd from "./prompts/aggregator-persona.md";
 import aggregatorUserMd from "./prompts/aggregator-user.md";
+import memoryRoutingContractMd from "./prompts/memory-routing-contract.md";
 import reflectionContinueMd from "./prompts/reflection-continue.md";
 import reflectionSystemMd from "./prompts/reflection-system.md";
 import reflectionUserMd from "./prompts/reflection-user.md";
 
-export const REFLECTION_SYSTEM_PROMPT: string = reflectionSystemMd.trim();
-export const AGGREGATOR_PERSONA: string = aggregatorPersonaMd.trim();
+export const MEMORY_ROUTING_CONTRACT: string = memoryRoutingContractMd.trim();
+export const REFLECTION_SYSTEM_PROMPT: string = render(reflectionSystemMd, {
+  memoryRoutingContract: MEMORY_ROUTING_CONTRACT,
+});
+export const AGGREGATOR_PERSONA: string = render(aggregatorPersonaMd, {
+  memoryRoutingContract: MEMORY_ROUTING_CONTRACT,
+});
 export const AGGREGATOR_CONTINUE_PROMPT: string = aggregatorContinueMd.trim();
 
 function render(
