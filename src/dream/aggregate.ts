@@ -48,6 +48,12 @@ export async function runDreamAggregation(params: {
    * its own memory).
    */
   personaPreamble?: string;
+  /**
+   * Additional caller instruction. The aggregator is the only stage that
+   * edits the target memory, so instructions about maintaining specific
+   * files (e.g. a projected AGENTS.md) must reach it here.
+   */
+  instruction?: string;
   /** Abort: close the aggregator session and stop nudging. */
   signal?: AbortSignal;
   log?: (line: string) => void;
@@ -100,6 +106,7 @@ export async function runDreamAggregation(params: {
     batchesDir: join(params.runRoot, "batches"),
     batchCount: params.reflections.length,
     memoryDir: params.memoryDir,
+    ...(params.instruction ? { instruction: params.instruction } : {}),
   });
   const userPrompt = params.personaPreamble
     ? `${params.personaPreamble.trim()}\n\n${builtPrompt}`

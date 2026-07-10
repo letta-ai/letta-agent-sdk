@@ -74,11 +74,13 @@ export function buildAggregatorUserPrompt(input: {
   batchesDir: string;
   batchCount: number;
   memoryDir: string;
+  /** Additional caller instruction for the aggregation pass. */
+  instruction?: string;
 }): string {
   return render(aggregatorUserMd, {
     count: input.batchCount,
     batchesDir: input.batchesDir,
     memoryDir: input.memoryDir,
-    instructionSection: "",
+    instructionSection: instructionSection(input.instruction),
   });
 }

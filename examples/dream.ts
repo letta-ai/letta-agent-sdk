@@ -166,7 +166,7 @@ const dreamOptions = {
   client,
   agentId: agent.agentId,
   transcripts,
-  reflectionPrompt: REFLECTION_PROMPT,
+  instruction: REFLECTION_PROMPT,
   maxTranscriptsPerBatch: 10,
 } as const;
 

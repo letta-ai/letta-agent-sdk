@@ -64,8 +64,8 @@ export interface RunBatchReflectionsParams {
   /** Write policy installed on every isolated clone and checked afterward. */
   memfsPolicy: MemfsWritePolicy;
   concurrency: number;
-  /** Additional scope/instructions provided only to reflection agents. */
-  reflectionPrompt?: string;
+  /** Additional caller instruction, also provided to the aggregation pass. */
+  instruction?: string;
   /** Abort: stop dispatching new batches and close in-flight sessions. */
   signal?: AbortSignal;
   log?: (line: string) => void;
@@ -109,9 +109,7 @@ async function runOneBatch(
     sessionFileNames,
     memoryDir: outputDir,
     timeRange: { start: batch.startTime, end: batch.endTime },
-    ...(params.reflectionPrompt
-      ? { instruction: params.reflectionPrompt }
-      : {}),
+    ...(params.instruction ? { instruction: params.instruction } : {}),
   });
 
   const label = `reflect:batch-${batch.index}`;

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   AGGREGATOR_PERSONA,
+  buildAggregatorUserPrompt,
   buildReflectionUserPrompt,
   MEMORY_ROUTING_CONTRACT,
   REFLECTION_SYSTEM_PROMPT,
@@ -64,5 +65,37 @@ describe("dream prompt contracts", () => {
       "authoritative absolute memory root for this batch is:\n/tmp/dream/batches/3/output",
     );
     expect(prompt).toContain("never write to a sibling or parent agent's memory");
+  });
+});
+
+describe("instruction threading to the aggregator", () => {
+  const base = {
+    batchesDir: "/run/batches",
+    batchCount: 2,
+    memoryDir: "/agents/a1/memory",
+  };
+
+  test("aggregator user prompt includes the caller instruction when provided", () => {
+    const prompt = buildAggregatorUserPrompt({
+      ...base,
+      instruction: "Maintain system/AGENTS.md in place; keep its frontmatter.",
+    });
+    expect(prompt).toContain(
+      "Additional user-provided instruction for this pass:",
+    );
+    expect(prompt).toContain(
+      "Maintain system/AGENTS.md in place; keep its frontmatter.",
+    );
+  });
+
+  test("aggregator user prompt is unchanged when no instruction is provided", () => {
+    const prompt = buildAggregatorUserPrompt(base);
+    expect(prompt).not.toContain("Additional user-provided instruction");
+    expect(prompt).not.toContain("{{instructionSection}}");
+  });
+
+  test("blank instruction is treated as absent", () => {
+    const prompt = buildAggregatorUserPrompt({ ...base, instruction: "   " });
+    expect(prompt).not.toContain("Additional user-provided instruction");
   });
 });
