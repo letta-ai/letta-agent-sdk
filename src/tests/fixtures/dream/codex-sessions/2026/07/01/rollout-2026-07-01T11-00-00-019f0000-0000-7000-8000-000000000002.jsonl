@@ -1,0 +1,11 @@
+{"timestamp":"2026-07-01T11:00:00.000Z","type":"session_meta","payload":{"id":"019f0000-0000-7000-8000-000000000002","timestamp":"2026-07-01T11:00:00.000Z","cwd":"/tmp/demo-project","originator":"codex_cli_rs","cli_version":"0.1.0","instructions":null,"source":"cli","model_provider":"openai"}}
+{"timestamp":"2026-07-01T11:00:00.100Z","type":"turn_context","payload":{"cwd":"/tmp/demo-project","approval_policy":"never","sandbox_policy":{"type":"danger-full-access"},"model":"gpt-5.2-codex","effort":"medium","summary":"auto"}}
+{"timestamp":"2026-07-01T11:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"rename the config flag","images":[]}}
+{"timestamp":"2026-07-01T11:00:01.100Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>injected context that must be skipped</environment_context>"}]}}
+{"timestamp":"2026-07-01T11:00:01.200Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"rename the config flag"}]}}
+{"timestamp":"2026-07-01T11:00:02.000Z","type":"event_msg","payload":{"type":"agent_reasoning","text":"Find usages of the flag before renaming."}}
+{"timestamp":"2026-07-01T11:00:02.500Z","type":"response_item","payload":{"type":"reasoning","summary":[],"content":null,"encrypted_content":"opaque"}}
+{"timestamp":"2026-07-01T11:00:03.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"grep -rn old_flag src/\"}","call_id":"call_001"}}
+{"timestamp":"2026-07-01T11:00:03.500Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_001","output":"src/config.ts:12: old_flag"}}
+{"timestamp":"2026-07-01T11:00:04.000Z","type":"response_item","payload":{"type":"ghost_snapshot","ghost_commit":{"id":"abc","parent":"def","preexisting_untracked_files":[],"preexisting_untracked_dirs":[]}}}
+{"timestamp":"2026-07-01T11:00:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Renamed old_flag to new_flag in config.ts."}]}}

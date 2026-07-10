@@ -676,6 +676,7 @@ describe("CloudEnvironmentSession", () => {
       model: "anthropic/claude-sonnet-4",
       cwd: "/repo",
       permissionMode: "unrestricted",
+      skillSources: [],
       dreaming: { trigger: "step-count", stepCount: 3 },
     });
     const init = await asAdvanced(session).initialize();
@@ -684,6 +685,7 @@ describe("CloudEnvironmentSession", () => {
       type: "init",
       agentId: "agent-1",
       conversationId: "default",
+      skillSources: [],
     });
     expect(requests.some((request) => new URL(request.url).pathname.includes("/sandboxes"))).toBe(false);
 
@@ -707,6 +709,7 @@ describe("CloudEnvironmentSession", () => {
       force_device_status: true,
       mode: "unrestricted",
       cwd: "/repo",
+      skill_sources: [],
     });
     expect(controlSocket.sent).toContainEqual(expect.objectContaining({
       type: "set_reflection_settings",

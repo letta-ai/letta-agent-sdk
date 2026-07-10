@@ -657,9 +657,6 @@ export function assertCloudSessionOptionsSupported(
   if (options.allowedTools !== undefined || options.disallowedTools !== undefined) {
     throw new Error(`Constellation ${action}() has not wired allowedTools/disallowedTools to the remote device protocol yet.`);
   }
-  if (options.skillSources !== undefined) {
-    throw new Error(`Constellation ${action}() has not wired skillSources to the remote device protocol yet.`);
-  }
   if (options.systemInfoReminder !== undefined) {
     throw new Error(`Constellation ${action}() has not wired systemInfoReminder to the remote device protocol yet.`);
   }
@@ -739,6 +736,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       }
 
       const tools = agentToolNames(response.agent);
+      const skillSources = this.currentOptions().skillSources;
       return {
         controller: new AppServerRuntimeController(client, {
           requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
@@ -747,6 +745,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
         modelSettings: response.agent?.model_settings ?? null,
         ...(tools !== undefined ? { tools } : {}),
+        ...(skillSources !== undefined ? { skillSources: [...skillSources] } : {}),
       };
     } catch (error) {
       this.removeExternalToolHandler?.();
@@ -779,6 +778,9 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     const mode = mapPermissionMode(options.permissionMode);
     if (mode) command.mode = mode;
     if (options.cwd !== undefined) command.cwd = options.cwd;
+    if (options.skillSources !== undefined) {
+      command.skill_sources = [...new Set(options.skillSources)];
+    }
     const groups = externalToolGroups(options.tools);
     if (groups) command.external_tools = groups;
 

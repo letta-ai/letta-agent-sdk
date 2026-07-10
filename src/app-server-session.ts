@@ -170,9 +170,6 @@ function assertRemoteCreateAgentOptionsSupported(options: CreateAgentOptions): v
   if (options.canUseTool !== undefined) {
     throw new Error("App-server createAgent() does not yet support canUseTool callbacks.");
   }
-  if (options.skillSources !== undefined) {
-    throw new Error("App-server createAgent() does not yet support skillSources overrides.");
-  }
   if (options.systemInfoReminder !== undefined) {
     throw new Error("App-server createAgent() does not yet support systemInfoReminder overrides.");
   }
@@ -190,9 +187,6 @@ export function assertRemoteSessionOptionsSupported(
   }
   if (options.allowedTools !== undefined || options.disallowedTools !== undefined) {
     throw new Error(`App-server ${action}() does not yet support allowedTools/disallowedTools.`);
-  }
-  if (options.skillSources !== undefined) {
-    throw new Error(`App-server ${action}() does not yet support skillSources overrides.`);
   }
   if (options.systemInfoReminder !== undefined) {
     throw new Error(`App-server ${action}() does not yet support systemInfoReminder overrides.`);
@@ -230,6 +224,10 @@ export function createAgentBody(
 
   if (options.model !== undefined) body.model = options.model;
   if (options.embedding !== undefined) body.embedding = options.embedding;
+  if (options.name !== undefined) body.name = options.name;
+  if (options.description !== undefined) body.description = options.description;
+  if (options.hidden !== undefined) body.hidden = options.hidden;
+  if (options.baseTools !== undefined) body.tools = options.baseTools;
 
   if (options.systemPrompt !== undefined) {
     if (typeof options.systemPrompt === "string") {
@@ -711,8 +709,8 @@ export class AppServerSession extends RemoteClientSessionCore {
   }
 
   protected override shouldEnableMemfs(options: LettaCodeClientSessionOptions | CreateAgentOptions): boolean {
-    void options;
-    return this.mode.kind === "create-agent";
+    if (this.mode.kind !== "create-agent") return false;
+    return (options as CreateAgentOptions).memfs !== false;
   }
 
   protected override async initializeRuntimeController(): Promise<RuntimeSessionInit> {
@@ -750,12 +748,14 @@ export class AppServerSession extends RemoteClientSessionCore {
       }
 
       const tools = agentToolNames(response.agent);
+      const skillSources = this.currentOptions().skillSources;
       return {
         controller: new AppServerRuntimeController(client, this.remoteOptions),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
         modelSettings: response.agent?.model_settings ?? null,
         ...(tools !== undefined ? { tools } : {}),
+        ...(skillSources !== undefined ? { skillSources: [...skillSources] } : {}),
       };
     } catch (error) {
       this.removeExternalToolHandler?.();
@@ -783,11 +783,16 @@ export class AppServerSession extends RemoteClientSessionCore {
     if (this.remoteOptions.local !== true) {
       throw new Error("App-server session requires a url unless local app-server spawning is enabled.");
     }
+    // Session-level env layers over client-level env: each SDK-owned session
+    // spawns its own app-server process, so this is a per-session scope.
+    const sessionEnv = (
+      this.mode.options as { env?: Record<string, string> }
+    ).env;
     this.ownedAppServer = await startLocalAppServer({
       listen: this.remoteOptions.localListen,
       backend: this.remoteOptions.localBackend,
       startupTimeoutMs: this.remoteOptions.localStartupTimeoutMs,
-      env: this.remoteOptions.localEnv,
+      env: { ...this.remoteOptions.localEnv, ...sessionEnv },
     });
     return this.ownedAppServer.url;
   }
@@ -812,6 +817,12 @@ export class AppServerSession extends RemoteClientSessionCore {
     const mode = mapPermissionMode(options.permissionMode);
     if (mode) command.mode = mode;
     if (options.cwd !== undefined) command.cwd = options.cwd;
+    // Keep the distinction between omitted (use harness defaults) and []
+    // (disable bundled/global/agent/project skills). The app-server runtime is
+    // session-scoped, so this must be sent on creation and every resume.
+    if (options.skillSources !== undefined) {
+      command.skill_sources = [...new Set(options.skillSources)];
+    }
     const groups = externalToolGroups(options.tools);
     if (groups) command.external_tools = groups;
 
@@ -820,7 +831,17 @@ export class AppServerSession extends RemoteClientSessionCore {
         body: createAgentBody(this.mode.options, {
           includeSdkOriginTag: this.remoteOptions.includeSdkOriginTag,
         }),
-        pin_global: this.remoteOptions.pinGlobalAgent ?? true,
+        // Hidden (worker-style) agents default to unpinned.
+        pin_global:
+          this.remoteOptions.pinGlobalAgent ??
+          (this.mode.options as CreateAgentOptions).hidden !== true,
+        // Signal memfs-less (worker-style) creation to the harness so it
+        // skips the memfs tag/settings/clone entirely; older harnesses
+        // ignore the field, and the client-side enable_memfs skip still
+        // applies either way.
+        ...((this.mode.options as CreateAgentOptions).memfs === false
+          ? { memfs: false }
+          : {}),
       };
       return command as RuntimeStartCommand;
     }
