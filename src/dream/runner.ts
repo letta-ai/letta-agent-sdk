@@ -20,6 +20,8 @@ export interface RunAgentOptions {
   env?: Record<string, string>;
   /** Restrict Letta Code skills for this runtime. [] disables every source. */
   skillSources?: SkillSource[];
+  /** Abort: closes the session and returns a failed result promptly. */
+  signal?: AbortSignal;
   onProgress?: (line: string) => void;
 }
 
@@ -41,6 +43,18 @@ export async function runAgentToCompletion(
   const started = Date.now();
   const log = options.onProgress ?? (() => {});
 
+  if (options.signal?.aborted) {
+    return {
+      agentId: options.agentId,
+      conversationId: null,
+      success: false,
+      error: "aborted before start",
+      report: "",
+      durationMs: 0,
+      messages: [],
+    };
+  }
+
   const sessionOptions = {
     permissionMode: "unrestricted" as const,
     cwd: options.cwd,
@@ -59,6 +73,14 @@ export async function runAgentToCompletion(
   let error: string | undefined;
   let report = "";
   let lastAssistant = "";
+
+  // Abort mid-turn by closing the session: the stream ends and the normal
+  // failure handling below reports the run as unsuccessful.
+  const onAbort = () => {
+    log(`[${options.label}] aborted; closing session`);
+    session.close();
+  };
+  options.signal?.addEventListener("abort", onAbort, { once: true });
 
   try {
     await session.send(options.userPrompt);
@@ -80,7 +102,12 @@ export async function runAgentToCompletion(
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
   } finally {
+    options.signal?.removeEventListener("abort", onAbort);
     session.close();
+  }
+  if (options.signal?.aborted) {
+    success = false;
+    error = error ?? "aborted";
   }
 
   return {

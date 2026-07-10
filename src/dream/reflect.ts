@@ -66,6 +66,8 @@ export interface RunBatchReflectionsParams {
   concurrency: number;
   /** Additional scope/instructions provided only to reflection agents. */
   reflectionPrompt?: string;
+  /** Abort: stop dispatching new batches and close in-flight sessions. */
+  signal?: AbortSignal;
   log?: (line: string) => void;
 }
 
@@ -142,10 +144,12 @@ async function runOneBatch(
     label,
     env: memoryEnv,
     skillSources: [],
+    ...(params.signal ? { signal: params.signal } : {}),
     onProgress: log,
   });
   for (
     let retry = 0;
+    !params.signal?.aborted &&
     !run.success &&
     run.error !== undefined &&
     TRANSIENT_INIT_ERROR.test(run.error) &&
@@ -162,6 +166,7 @@ async function runOneBatch(
       label,
       env: memoryEnv,
       skillSources: [],
+      ...(params.signal ? { signal: params.signal } : {}),
       onProgress: log,
     });
   }
@@ -178,7 +183,10 @@ async function runOneBatch(
     );
   for (
     let nudge = 0;
-    nudge < 2 && run.success && run.conversationId !== null;
+    nudge < 2 &&
+    !params.signal?.aborted &&
+    run.success &&
+    run.conversationId !== null;
     nudge++
   ) {
     const state = await inspectMemoryTree(outputDir, baseRevision);
@@ -199,6 +207,7 @@ async function runOneBatch(
       resumeConversationId: run.conversationId,
       env: memoryEnv,
       skillSources: [],
+      ...(params.signal ? { signal: params.signal } : {}),
       onProgress: log,
     });
     passes.push({ prompt: continuePrompt, run });
@@ -298,7 +307,7 @@ export async function runBatchReflections(
     // Stagger session startups: a same-instant herd of runtime starts can
     // push the slowest past the protocol request timeout.
     await new Promise((resolve) => setTimeout(resolve, workerIndex * 1500));
-    while (next < params.batches.length) {
+    while (!params.signal?.aborted && next < params.batches.length) {
       const batch = params.batches[next++];
       if (!batch) break;
       results.push(await runOneBatch(params, batch));
