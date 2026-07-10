@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   AGGREGATOR_PERSONA,
+  buildReflectionUserPrompt,
   MEMORY_ROUTING_CONTRACT,
   REFLECTION_SYSTEM_PROMPT,
 } from "../dream/prompts.js";
@@ -28,7 +29,30 @@ describe("dream prompt contracts", () => {
       "Merge skills with the same or substantially similar activation conditions",
     );
     expect(MEMORY_ROUTING_CONTRACT).toContain(
-      "facts and documentation readily discoverable from the relevant repository",
+      "information readily discoverable from the relevant repository",
     );
+    expect(MEMORY_ROUTING_CONTRACT).toContain("explicit user feedback");
+    expect(MEMORY_ROUTING_CONTRACT).toContain("experiential delta");
+    expect(MEMORY_ROUTING_CONTRACT).toContain(
+      "Do not persist file maps, implementation tours, API inventories",
+    );
+  });
+
+  test("reflection prompts name the authoritative memory root", () => {
+    const prompt = buildReflectionUserPrompt({
+      batchIndex: 3,
+      inputDir: "/tmp/dream/batches/3/input",
+      sessionFileNames: ["claude-session.json"],
+      memoryDir: "/tmp/dream/batches/3/output",
+      timeRange: {
+        start: "2026-07-01T00:00:00.000Z",
+        end: "2026-07-02T00:00:00.000Z",
+      },
+    });
+
+    expect(prompt).toContain(
+      "authoritative absolute memory root for this batch is:\n/tmp/dream/batches/3/output",
+    );
+    expect(prompt).toContain("never write to a sibling or parent agent's memory");
   });
 });

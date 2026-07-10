@@ -53,12 +53,13 @@ Understand the current structure before changing it.
 
 Review the transcripts for:
 
-1. mistakes, corrections, failed approaches, and resolved failures;
-2. user preferences and enduring behavioral guidance;
-3. reusable methods, decision rules, and review criteria;
-4. domain-specific knowledge, conventions, schemas, tools, and APIs;
-5. contradictions with existing memory or skills;
-6. reusable scripts, templates, examples, or reference material.
+1. explicit user feedback, corrections, intent, rationale, preferences, and criteria for a good result;
+2. mistakes, failed approaches, and resolved failures that reveal what the agent should do differently;
+3. reusable methods, decision rules, and review criteria learned through the interaction;
+4. contradictions with existing memory or skills;
+5. reusable scripts, templates, examples, or resources that embody the experiential lesson.
+
+Repository exploration is supporting evidence, not the memory product. Do not create skills that mainly document files, symbols, APIs, schemas, or current implementation behavior. The future agent can recover those with repository search. Record only the non-obvious lesson learned from the experience, with minimal code pointers when they are necessary to apply it.
 
 For every candidate, check:
 
@@ -66,6 +67,7 @@ For every candidate, check:
 - **Evidence:** Is it supported by the transcript or existing artifacts rather than speculation?
 - **Novelty:** Is it missing from current memory and skills?
 - **Scope:** Can it be expressed as a coherent unit rather than a transcript summary?
+- **Experiential delta:** What did the interaction teach that repository search alone would not reveal, and what should the agent do differently next time?
 - **Routing:** Apply the routing decision above.
 
 Convert relative dates to absolute dates when a date is genuinely durable. Remove temporary paths, ports, hashes, line numbers, raw logs, secrets, and other instance-specific details unless they are essential to a reusable method.
@@ -84,7 +86,7 @@ If nothing survives these checks, make no changes and skip to the report.
 
 #### Creating or updating skills
 
-Maintain an existing adjacent skill when it already owns the capability; otherwise create, revise, reorganize, or remove skill content as the evidence warrants. Evidence from one session or evidence that is not a complete procedure does not by itself rule out a skill change. Make no skill change when there is no clear activation condition, the content would not improve future task execution, evidence is too weak, or the capability is already covered.
+Maintain an existing adjacent skill when it already owns the capability; otherwise create, revise, reorganize, or remove skill content as the evidence warrants. Evidence from one session or evidence that is not a complete procedure does not by itself rule out a skill change. Make no skill change when there is no clear activation condition, no experiential delta, the content would not improve future judgment or execution, evidence is too weak, or the capability is already covered.
 
 Prefer one cohesive new skill over several narrow fragments. Create multiple skills only when the transcripts contain clearly independent, well-supported capabilities that should activate under different conditions.
 
@@ -142,6 +144,8 @@ skills/<name>/
 Before finishing a skill change, verify:
 - the folder and `name` match;
 - the metadata review above passes;
+- the user-derived feedback, intent, or non-obvious experiential lesson is clear;
+- code/file references are minimal application pointers rather than the substance of the skill;
 - the content is actionable and contains only non-obvious value;
 - referenced files exist;
 - no adjacent skill already owns the capability;
