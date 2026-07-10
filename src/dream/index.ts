@@ -87,6 +87,13 @@ export interface DreamOptions {
   transcripts: readonly NormalizedSession[];
   /** Additional instruction provided to every reflection batch only. */
   reflectionPrompt?: string;
+  /**
+   * Additional instruction provided to the aggregation pass — the stage that
+   * lands the final commit on the memory filesystem. Callers maintaining a
+   * projected doc (e.g. AGENTS.md) must route their maintain-instruction
+   * here as well as to reflectionPrompt.
+   */
+  aggregationPrompt?: string;
   /** Override the harness agents directory (tests). */
   agentsDir?: string;
   /** Per-batch token budget (default 60k, measured on normalized content). */
@@ -278,6 +285,9 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
     reflections: batchResults,
     memfsPolicy: agent.config.memfs.policy,
     personaPreamble: AGGREGATOR_PERSONA,
+    ...(options.aggregationPrompt
+      ? { aggregationPrompt: options.aggregationPrompt }
+      : {}),
     log,
   });
 
