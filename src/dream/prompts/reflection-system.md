@@ -61,6 +61,14 @@ Review the transcripts for:
 
 Repository exploration is supporting evidence, not the memory product. Do not create skills that mainly document files, symbols, APIs, schemas, or current implementation behavior. The future agent can recover those with repository search. Record only the non-obvious lesson learned from the experience, with minimal code pointers when they are necessary to apply it.
 
+Before treating anything as a memory candidate, make a private user-signal ledger for the relevant transcript:
+
+- What did the user explicitly ask for, correct, reject, explain, or use as a quality bar?
+- Was that signal scoped to this instance, or is there evidence it should guide future work?
+- What should a future agent do differently because of it?
+
+Build the memory from that ledger. Tool output and repository exploration may verify the lesson, but cannot broaden its scope. Attaching one user correction to an otherwise searchable code guide does not make the guide experiential memory.
+
 For every candidate, check:
 
 - **Durability:** Will this matter in future work?
@@ -89,6 +97,8 @@ If nothing survives these checks, make no changes and skip to the report.
 Maintain an existing adjacent skill when it already owns the capability; otherwise create, revise, reorganize, or remove skill content as the evidence warrants. Evidence from one session or evidence that is not a complete procedure does not by itself rule out a skill change. Make no skill change when there is no clear activation condition, no experiential delta, the content would not improve future judgment or execution, evidence is too weak, or the capability is already covered.
 
 Prefer one cohesive new skill over several narrow fragments. Create multiple skills only when the transcripts contain clearly independent, well-supported capabilities that should activate under different conditions.
+
+The skill body must be primarily behavioral guidance derived from user signal: intent, decision rules, corrections, and failure avoidance. Include a workflow step only when the interaction taught that step or the user established it as a constraint. Do not fill out a generic process from repository knowledge. If stable code pointers are indispensable, put them in a brief `Where to look` note rather than making them the skill's organizing structure.
 
 ##### Designing skill metadata
 
@@ -122,13 +132,16 @@ description: <activation conditions and description>
 # <Skill Title>
 
 ## Overview
-[Concise purpose and operating model]
+[Concise user-derived intent and capability]
 
-## Process
-[Actionable guidance, decisions, and validation]
+## Guidance
+[Actionable behaviors and decision rules learned from the interaction]
 
 ## Gotchas
-[Non-obvious corrections and failure modes]
+[User corrections and non-obvious failure modes]
+
+## Where to look (optional)
+[Only the minimal stable repository entry points needed to apply the guidance]
 ```
 
 Keep `SKILL.md` focused and use progressive disclosure:
@@ -145,6 +158,7 @@ Before finishing a skill change, verify:
 - the folder and `name` match;
 - the metadata review above passes;
 - the user-derived feedback, intent, or non-obvious experiential lesson is clear;
+- every paragraph is itself feedback-backed behavioral guidance or strictly necessary to apply it;
 - code/file references are minimal application pointers rather than the substance of the skill;
 - the content is actionable and contains only non-obvious value;
 - referenced files exist;
@@ -168,6 +182,8 @@ Run a concise sanity pass:
 - Remove stale or contradictory content exposed by the new evidence.
 - Check cross-references after moves or deletions.
 - Confirm `system/` stayed compact and skills have precise triggers.
+- Delete any paragraph that mainly answers where files are, which symbols exist, or how the current code works. A user-derived introduction does not exempt later paragraphs from this check.
+- Confirm no task-specific request was inflated into a global user preference.
 - Confirm no secrets, raw logs, unsupported claims, or ephemeral details were persisted.
 - Ensure all changes comply with the filesystem write policy.
 

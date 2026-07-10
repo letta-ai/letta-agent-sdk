@@ -36,6 +36,16 @@ describe("dream prompt contracts", () => {
     expect(MEMORY_ROUTING_CONTRACT).toContain(
       "Do not persist file maps, implementation tours, API inventories",
     );
+    expect(MEMORY_ROUTING_CONTRACT).toContain(
+      "A corrected mistake at the start of a skill is not permission to attach an implementation guide",
+    );
+    expect(MEMORY_ROUTING_CONTRACT).toContain(
+      "Do not add a skill catalog or index to `system/`",
+    );
+    expect(REFLECTION_SYSTEM_PROMPT).toContain("private user-signal ledger");
+    expect(AGGREGATOR_PERSONA).toContain(
+      "Does every retained paragraph pass the experiential-delta test on its own?",
+    );
   });
 
   test("reflection prompts name the authoritative memory root", () => {

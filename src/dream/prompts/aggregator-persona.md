@@ -24,7 +24,7 @@ From that file-change map, decide the cohesive structure: the reflection agents 
 
 {{memoryRoutingContract}}
 
-Validate the reflection diffs against this contract before preserving them. A reflection report is not proof that its output deserves memory. Strip code inventories and readily searchable implementation detail; retain the user-derived lesson, intent, correction, or decision criterion that makes the memory valuable. If removing repository facts leaves no experiential delta, drop the proposed memory entirely.
+Validate the reflection diffs against this contract before preserving them. A reflection report is not proof that its output deserves memory. For every added or changed paragraph, distinguish (1) explicit user signal, (2) the future behavior or judgment derived from it, and (3) repository facts. Keep the first two. Delete the third unless a minimal pointer is indispensable to applying the lesson. One corrected mistake does not validate the rest of a codebase guide. If removing repository facts leaves no experiential delta, drop the proposed memory entirely.
 
 #### Step 3: Synthesize the changes (invoke subagents if needed)
 Once you have outlined a cohesive structure, aggregate learnings across reflections through reviewing diffs, raw transcripts, and understanding why the reflection agent extracted the learnings it did.
@@ -34,16 +34,20 @@ If needed, use an available delegation tool to focus on specific aspects of memo
 In aggregating learnings, make sure to prioritize:
   - **Deduplications** — A fact or instruction should live in exactly one place. Do not duplicate context across files. If multiple files need to reference the same context, create `[[path]]` links.
   - **User signal** — Preserve explicit user feedback, intent, corrections, rationale, and quality criteria ahead of implementation detail inferred from the repository.
-  - **Experiential value** — Every retained memory must say what was learned from experience and what the agent should do differently. Do not retain codebase summaries that can be regenerated with search.
+  - **Experiential value** — Every retained paragraph must say what was learned from experience or what the agent should do differently. Do not retain codebase summaries that can be regenerated with search, even when the skill also contains a valid experiential lesson.
+  - **Semantic fidelity** — Preserve the scope and nuance of the evidence. Do not inflate a task-specific instruction into a standing preference or add rationale the user did not provide.
   - **Conflict resolution** — For contradicting information, look at the reflection trajectory and/or raw trajectories to understand *why* the conflicting context arose. Determine how to resolve the conflict based on this, and generally prefer learnings from more recent experience and learnings that have stronger backing from experience.
   - **Cohesive merging** — Take care to merge instructions in `system/` into a single coherent voice, rather than simply concatenating. Ensure merged files in general are cohesive and clear.
   - **Tiering** — Keep `system/` concise, put conditionally useful detail in the relevant skill, and use generic reference memory only when no reliable skill trigger exists. Any nested folders should have a clear hierarchy, with top-level folders grouping together relevant files or subfolders.
   - **Importance** — Prioritize durable patterns. A strong single session can qualify when its evidence generalizes; drop anything ephemeral that slipped through reflection.
   - **One home per topic** — Every topic gets exactly ONE canonical file. Never create parallel locations for the same subject (e.g. both `reference/letta-code/` and `reference/projects/letta-code.md`), and never create index/overview files that restate what per-topic files already say (e.g. a repos overview duplicating the per-project files). Connect related files with `[[path]]` links instead of repeating content.
-  - **Progressive disclosure** — The merged MemFS is navigated by descriptions, not by reading everything: every file's frontmatter `description` must accurately index its contents, and `[[path]]` links should form discovery paths from `system/` into relevant skills or generic reference memory. Ensure that skill descriptions remain imperative and describe the conditions to load the skill.
+  - **Progressive disclosure** — The merged MemFS is navigated by descriptions, not by reading everything: every file's frontmatter `description` must accurately index its contents. Skill descriptions are their activation mechanism. Do not add a skill catalog or index to `system/`; add a `[[path]]` link only where the surrounding content genuinely depends on that specific memory.
 
 #### Step 4: Review your final aggregated MemFS
 - Was any information lost through aggregation? If yes, recover it.
 - Is the MemFS structure cohesive and consistent? If no, restructure it.
 - Is there duplicated or redundant information (across files, or between reference/ and system/)? If yes, eliminate.
 - Does any pair of paths overlap in scope (parallel taxonomies, index files restating per-topic files)? If yes, merge them.
+- Does any skill use a user-derived introduction to justify later implementation-reference sections? If yes, rewrite it around the behavioral lesson and remove those sections.
+- Does every retained paragraph pass the experiential-delta test on its own? If no, delete or compress it to a minimal application pointer.
+- Did you preserve the evidence's actual scope without inventing a broader preference? If no, narrow or drop it.
