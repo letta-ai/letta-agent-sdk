@@ -54,6 +54,8 @@ export async function runDreamAggregation(params: {
    * files (e.g. a projected AGENTS.md) must reach it here.
    */
   instruction?: string;
+  /** Abort: close the aggregator session and stop nudging. */
+  signal?: AbortSignal;
   log?: (line: string) => void;
 }): Promise<DreamAggregationOutcome> {
   const log = params.log ?? (() => {});
@@ -139,6 +141,7 @@ export async function runDreamAggregation(params: {
     cwd: dirname(params.memoryDir),
     label: "aggregate",
     env: memoryEnv,
+    ...(params.signal ? { signal: params.signal } : {}),
     onProgress: log,
   });
   // The model can end its turn narrating its plan instead of executing it.
@@ -150,6 +153,7 @@ export async function runDreamAggregation(params: {
   for (
     let nudge = 0;
     nudge < 2 &&
+    !params.signal?.aborted &&
     run.success &&
     run.conversationId !== null &&
     (await landedCommits()) === 0;
@@ -165,6 +169,7 @@ export async function runDreamAggregation(params: {
       label: "aggregate",
       resumeConversationId: run.conversationId,
       env: memoryEnv,
+      ...(params.signal ? { signal: params.signal } : {}),
       onProgress: log,
     });
     passes.push({ prompt: AGGREGATOR_CONTINUE_PROMPT, run });

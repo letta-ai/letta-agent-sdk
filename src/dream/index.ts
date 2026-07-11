@@ -7,7 +7,7 @@
 // caller supplies immutable transcript snapshots, which makes selection easy
 // to inspect and makes a run reproducible after its source files change.
 
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { LettaAgentClient } from "../client.js";
 import {
@@ -103,6 +103,14 @@ export interface DreamOptions {
   concurrency?: number;
   /** Preview cursor filtering and batch packing without running agents. */
   planOnly?: boolean;
+  /**
+   * Abort the run: in-flight reflector/aggregator sessions are closed, no
+   * new batches start, the run's artifacts (clones, runRoot) are removed,
+   * cursors are NOT advanced, and dream() rejects with the abort reason.
+   * Shutting down a spawned app-server remains the caller's job via
+   * client.close().
+   */
+  signal?: AbortSignal;
   log?: (line: string) => void;
 }
 
@@ -166,6 +174,7 @@ function validateTranscripts(
 
 export async function dream(options: DreamOptions): Promise<DreamResult> {
   const log = options.log ?? (() => {});
+  options.signal?.throwIfAborted();
   validateTranscripts(options.transcripts);
 
   const agent = await loadDreamAgent(options.agentId, {
@@ -242,9 +251,20 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
     };
   }
 
+  options.signal?.throwIfAborted();
   await mkdir(agent.runsDir, { recursive: true });
   const runRoot = join(agent.runsDir, dreamRunId());
   await mkdir(runRoot, { recursive: true });
+
+  // On abort: remove this run's artifacts (batch clones live under runRoot)
+  // and reject. Cursors are never advanced (the success gate below already
+  // requires a non-aborted, fully successful run).
+  const throwIfAbortedWithCleanup = async () => {
+    if (!options.signal?.aborted) return;
+    log("[abort] dream aborted; removing run artifacts");
+    await rm(runRoot, { recursive: true, force: true }).catch(() => {});
+    options.signal.throwIfAborted();
+  };
 
   const workers = await ensureDreamWorkers(options.client, {
     reflectorAgentId: agent.config.reflectorAgentId,
@@ -271,8 +291,10 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
     memfsPolicy: agent.config.memfs.policy,
     concurrency: options.concurrency ?? batches.length,
     ...(options.instruction ? { instruction: options.instruction } : {}),
+    ...(options.signal ? { signal: options.signal } : {}),
     log,
   });
+  await throwIfAbortedWithCleanup();
 
   const aggregation = await runDreamAggregation({
     client: options.client,
@@ -283,8 +305,10 @@ export async function dream(options: DreamOptions): Promise<DreamResult> {
     memfsPolicy: agent.config.memfs.policy,
     personaPreamble: AGGREGATOR_PERSONA,
     ...(options.instruction ? { instruction: options.instruction } : {}),
+    ...(options.signal ? { signal: options.signal } : {}),
     log,
   });
+  await throwIfAbortedWithCleanup();
 
   const everyBatchSucceeded = batchResults.every((batch) => batch.success);
   const success = everyBatchSucceeded && aggregation.success;
