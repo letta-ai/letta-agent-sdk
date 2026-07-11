@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { LettaAgentClient } from "../index.js";
+import {
+  CloudManagedSandboxExpiredError,
+  LettaAgentClient,
+} from "../index.js";
 import { asAdvanced } from "./advanced-session.js";
 
 type Listener = (event: unknown) => void;
@@ -33,10 +36,28 @@ function bodyOf(init?: RequestInit): unknown {
   return JSON.parse(String(init.body));
 }
 
+type CloudFetchMockOptions = {
+  /** Simulate a server without conversation-scoped sandbox support: it
+   * strips the conversationId body key and never echoes it back. */
+  legacySandboxServer?: boolean;
+  /** Override the conversation id echoed by a supporting sandbox server. */
+  sandboxConversationEcho?: string;
+  /** Sandbox ids whose by-id refresh should 404 (TTL reaped). */
+  reapedSandboxes?: Set<string>;
+  /** Override a by-id refresh response for lifecycle race tests. */
+  sandboxRefreshResponse?: (
+    sandboxId: string,
+    attempt: number,
+  ) => Response | Promise<Response> | undefined;
+};
+
 function createCloudFetchMock(
   requests: RecordedRequest[],
   environmentConnections?: Array<Record<string, unknown>>,
+  options: CloudFetchMockOptions = {},
 ): typeof fetch {
+  let sandboxCreates = 0;
+  let sandboxRefreshes = 0;
   return ((input: FetchInput | URL, init?: RequestInit) => {
     const url = urlOf(input);
     const parsed = new URL(url);
@@ -63,11 +84,53 @@ function createCloudFetchMock(
     const agentSandboxMatch = /^\/v1\/agents\/([^/]+)\/sandboxes$/.exec(parsed.pathname);
     if (agentSandboxMatch && method === "POST") {
       const agentId = decodeURIComponent(agentSandboxMatch[1]!);
+      sandboxCreates += 1;
+      const body = bodyOf(init) as { conversationId?: string } | undefined;
+      const sandboxId = sandboxCreates === 1
+        ? `sandbox-${agentId}`
+        : `sandbox-${agentId}-r${sandboxCreates}`;
+      const conversationEcho =
+        body?.conversationId && !options.legacySandboxServer
+          ? {
+              conversationId:
+                options.sandboxConversationEcho ?? body.conversationId,
+              resumed: false,
+            }
+          : {};
       return Promise.resolve(jsonResponse({
-        sandboxId: `sandbox-${agentId}`,
+        sandboxId,
         deviceId: `device-${agentId}`,
         connectionName: `sandbox-${agentId}-session`,
+        ...conversationEcho,
       }));
+    }
+
+    const sandboxRefreshMatch = /^\/v1\/sandboxes\/([^/]+)\/refresh$/.exec(parsed.pathname);
+    if (sandboxRefreshMatch && method === "POST") {
+      const sandboxId = decodeURIComponent(sandboxRefreshMatch[1]!);
+      sandboxRefreshes += 1;
+      const responseOverride = options.sandboxRefreshResponse?.(
+        sandboxId,
+        sandboxRefreshes,
+      );
+      if (responseOverride) return Promise.resolve(responseOverride);
+      if (options.reapedSandboxes?.has(sandboxId)) {
+        return Promise.resolve(jsonResponse(
+          { errorCode: "SANDBOX_NOT_FOUND", message: `Sandbox ${sandboxId} no longer exists` },
+          { status: 404 },
+        ));
+      }
+      const body = bodyOf(init) as { ttlMinutes?: number } | undefined;
+      return Promise.resolve(jsonResponse({
+        success: true,
+        sandboxId,
+        ttlMinutes: body?.ttlMinutes ?? 5,
+      }));
+    }
+
+    const sandboxTerminateMatch = /^\/v1\/sandboxes\/([^/]+)\/terminate$/.exec(parsed.pathname);
+    if (sandboxTerminateMatch && method === "POST") {
+      return Promise.resolve(jsonResponse({ success: true, message: "terminated" }));
     }
 
     const agentSandboxRefreshMatch = /^\/v1\/agents\/([^/]+)\/sandboxes\/refresh$/.exec(parsed.pathname);
@@ -531,7 +594,7 @@ function resetFakeAppServer(): void {
 }
 
 describe("CloudEnvironmentSession", () => {
-  test("creates, refreshes, and cleans up a managed Cloud sandbox when no environment is specified", async () => {
+  test("creates, refreshes, and cleans up a managed Cloud sandbox with terminateOnClose", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
     const client = new LettaAgentClient({
@@ -541,7 +604,7 @@ describe("CloudEnvironmentSession", () => {
       fetch: createCloudFetchMock(requests),
       WebSocket: FakeCloudSocket,
       requestTimeoutMs: 1_000,
-      sandbox: { ttlMinutes: 2 },
+      sandbox: { ttlMinutes: 2, terminateOnClose: true },
     });
 
     const session = client.resumeSession("agent-1");
@@ -593,7 +656,7 @@ describe("CloudEnvironmentSession", () => {
     }));
   });
 
-  test("can leave managed Cloud sandbox cleanup to TTL", async () => {
+  test("leaves managed Cloud sandbox cleanup to TTL by default", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
     const client = new LettaAgentClient({
@@ -603,7 +666,6 @@ describe("CloudEnvironmentSession", () => {
       fetch: createCloudFetchMock(requests),
       WebSocket: FakeCloudSocket,
       requestTimeoutMs: 1_000,
-      sandbox: { terminateOnClose: false },
     });
 
     const session = client.resumeSession("agent-1");
@@ -618,6 +680,238 @@ describe("CloudEnvironmentSession", () => {
       new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes" &&
         request.method === "DELETE"
     )).toBe(false);
+  });
+
+  test("scopes the managed sandbox to the conversation when the server supports it", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+    });
+
+    const session = client.resumeSession("conv-1");
+    try {
+      const init = await asAdvanced(session).initialize();
+      expect(init).toMatchObject({
+        type: "init",
+        agentId: "agent-from-conv",
+        conversationId: "conv-1",
+      });
+
+      expect(requests).toContainEqual(expect.objectContaining({
+        method: "POST",
+        url: "https://api.test/v1/agents/agent-from-conv/sandboxes",
+        body: { conversationId: "conv-1" },
+      }));
+      // Refreshes go by sandbox id — never the agent-scoped "latest active"
+      // route, whose target another conversation's create could displace.
+      expect(requests.some((request) =>
+        new URL(request.url).pathname === "/v1/sandboxes/sandbox-agent-from-conv/refresh"
+      )).toBe(true);
+      expect(requests.some((request) =>
+        new URL(request.url).pathname === "/v1/agents/agent-from-conv/sandboxes/refresh"
+      )).toBe(false);
+    } finally {
+      session.close();
+    }
+  });
+
+  test("falls back to the agent-scoped sandbox lifecycle against legacy servers", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests, undefined, { legacySandboxServer: true }),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+    });
+
+    const session = client.resumeSession("conv-1");
+    try {
+      await asAdvanced(session).initialize();
+
+      // The request still carries conversationId (legacy servers strip
+      // unknown body keys), but without the response echo the SDK must stay
+      // on the agent-scoped lifecycle.
+      expect(requests).toContainEqual(expect.objectContaining({
+        method: "POST",
+        url: "https://api.test/v1/agents/agent-from-conv/sandboxes",
+        body: { conversationId: "conv-1" },
+      }));
+      expect(requests.some((request) =>
+        new URL(request.url).pathname === "/v1/agents/agent-from-conv/sandboxes/refresh"
+      )).toBe(true);
+      expect(requests.some((request) =>
+        new URL(request.url).pathname.startsWith("/v1/sandboxes/")
+      )).toBe(false);
+    } finally {
+      session.close();
+    }
+  });
+
+  test("rejects a mismatched conversation id echoed by the sandbox server", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests, undefined, {
+        sandboxConversationEcho: "conv-other",
+      }),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+    });
+
+    const session = client.resumeSession("conv-1");
+    try {
+      await expect(asAdvanced(session).initialize()).rejects.toThrow(
+        "expected conv-1, got conv-other",
+      );
+    } finally {
+      session.close();
+    }
+  });
+
+  test("surfaces a typed pre-turn error when a conversation sandbox expires", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const reapedSandboxes = new Set<string>();
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests, undefined, { reapedSandboxes }),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+    });
+
+    const session = client.resumeSession("conv-1");
+    try {
+      await asAdvanced(session).initialize();
+      reapedSandboxes.add("sandbox-agent-from-conv");
+
+      // The next turn's refresh happens before its input frame is sent. The
+      // caller can therefore create a new SDK session for this conversation
+      // and retry without duplicating the message.
+      let thrown: unknown;
+      try {
+        await asAdvanced(session).runTurn("hello");
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(CloudManagedSandboxExpiredError);
+      expect(thrown).toMatchObject({
+        code: "managed_sandbox_expired",
+        sandboxId: "sandbox-agent-from-conv",
+        conversationId: "conv-1",
+      });
+      expect(FakeCloudSocket.allSent().some((command) =>
+        command.type === "input"
+      )).toBe(false);
+
+      const creates = requests.filter((request) =>
+        request.method === "POST" &&
+          new URL(request.url).pathname === "/v1/agents/agent-from-conv/sandboxes"
+      );
+      expect(creates).toHaveLength(1);
+    } finally {
+      session.close();
+    }
+  });
+
+  test("terminates a conversation sandbox by id when terminateOnClose is set", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { terminateOnClose: true },
+    });
+
+    const session = client.resumeSession("conv-1");
+    await asAdvanced(session).initialize();
+    session.close();
+
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(requests).toContainEqual(expect.objectContaining({
+      method: "POST",
+      url: "https://api.test/v1/sandboxes/sandbox-agent-from-conv/terminate",
+    }));
+    expect(requests.some((request) =>
+      request.method === "DELETE" &&
+        new URL(request.url).pathname === "/v1/agents/agent-from-conv/sandboxes"
+    )).toBe(false);
+  });
+
+  test("waits for an in-flight refresh before terminating on close", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    let releaseRefresh = () => {};
+    const pendingRefresh = new Promise<Response>((resolve) => {
+      releaseRefresh = () => resolve(jsonResponse({
+        success: true,
+        sandboxId: "sandbox-agent-from-conv",
+        ttlMinutes: 5,
+      }));
+    });
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests, undefined, {
+        sandboxRefreshResponse: (_sandboxId, attempt) =>
+          attempt === 2 ? pendingRefresh : undefined,
+      }),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { refreshIntervalMs: 1, terminateOnClose: true },
+    });
+
+    const session = client.resumeSession("conv-1");
+    try {
+      await asAdvanced(session).initialize();
+      for (let i = 0; i < 20; i += 1) {
+        const refreshes = requests.filter((request) =>
+          new URL(request.url).pathname.endsWith("/refresh")
+        );
+        if (refreshes.length >= 2) break;
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+
+      session.close();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(requests.some((request) =>
+        new URL(request.url).pathname.endsWith("/terminate")
+      )).toBe(false);
+
+      releaseRefresh();
+      for (let i = 0; i < 5; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      expect(requests).toContainEqual(expect.objectContaining({
+        method: "POST",
+        url: "https://api.test/v1/sandboxes/sandbox-agent-from-conv/terminate",
+      }));
+    } finally {
+      releaseRefresh();
+      session.close();
+    }
   });
 
 

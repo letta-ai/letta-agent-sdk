@@ -137,6 +137,7 @@ export type {
 export { Session } from "./session.js";
 export { RepositoriesClient } from "./repositories.js";
 export { LettaAgentClient } from "./client.js";
+export { CloudManagedSandboxExpiredError } from "./cloud-session.js";
 
 export { extractStreamTextDelta } from "./stream-events.js";
 

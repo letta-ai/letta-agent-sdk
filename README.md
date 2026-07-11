@@ -116,9 +116,12 @@ for await (const msg of session.stream()) {
 ### Constellation
 
 Use `backend: "cloud"` to create or resume agents hosted on Constellation. If
-no `environment` is provided, the SDK creates an agent-scoped sandbox, waits for
-it to come online, refreshes it while the session is active, and cleans it up on
-close.
+no `environment` is provided, the SDK creates a managed sandbox, waits for it to
+come online, and refreshes it while the session is active. Non-default
+conversations request a conversation-scoped sandbox from supporting servers;
+the default conversation and legacy servers retain the agent-scoped lifecycle.
+Managed sandboxes are left for TTL cleanup by default so another session for the
+same conversation can reconnect to them.
 
 ```ts
 const client = new LettaAgentClient({
@@ -127,8 +130,8 @@ const client = new LettaAgentClient({
   sandbox: {
     // Optional: defaults to a 5-minute refresh TTL.
     ttlMinutes: 5,
-    // Optional: defaults true. Set false for concurrent same-agent sessions.
-    terminateOnClose: true,
+    // Optional: defaults false. Set true only with exclusive ownership.
+    terminateOnClose: false,
   },
 });
 
@@ -180,10 +183,52 @@ await using session = client.resumeSession(agentId, {
 `environment` also accepts `{ id: "env-..." }` for an environment record or
 `{ deviceId: "device-..." }` for a stable device selector.
 
-`environment` and `sandbox` are mutually exclusive. Managed sandbox refresh and
-termination operate on the latest active sandbox for an agent; set
-`sandbox.terminateOnClose: false` when multiple SDK sessions may run
-concurrently against the same agent and rely on TTL cleanup instead.
+`environment` and `sandbox` are mutually exclusive. Conversation-scoped
+sandboxes refresh and terminate by sandbox ID. Legacy agent-scoped sandboxes
+retain the latest-active ownership check. Pass `sandbox.terminateOnClose: true`
+to request best-effort eager cleanup, but only when no other session or
+reconnecting client needs the sandbox.
+
+If Cloud reaps a conversation-scoped sandbox before the next refresh,
+`send()` throws `CloudManagedSandboxExpiredError` before transmitting the turn.
+Close the old SDK session and resume the same conversation to create a fresh
+connection, then retry safely:
+
+```ts
+import {
+  CloudManagedSandboxExpiredError,
+  LettaAgentClient,
+} from "@letta-ai/letta-agent-sdk";
+
+const client = new LettaAgentClient({
+  backend: "cloud",
+  apiKey: process.env.LETTA_API_KEY,
+});
+const conversationId = "conv-123";
+let session = client.resumeSession(conversationId);
+
+async function sendWithSandboxRecovery(message: string): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await session.send(message);
+      for await (const event of session.stream()) {
+        if (event.type === "assistant") console.log(event.content);
+      }
+      return;
+    } catch (error) {
+      if (!(error instanceof CloudManagedSandboxExpiredError) || attempt > 0) {
+        throw error;
+      }
+      session.close();
+      session = client.resumeSession(conversationId);
+    }
+  }
+}
+```
+
+Only retry automatically for this pre-send expiration error. If a connection
+fails after `send()` succeeds, inspect conversation history before retrying
+because the original message may already have reached the runtime.
 
 By default, websocket authentication uses `Authorization` headers. Set
 `webSocketAuth: "query"` for browser-style websocket clients that cannot send

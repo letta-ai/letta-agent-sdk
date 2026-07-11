@@ -92,6 +92,8 @@ type CloudAgentSandbox = Record<string, unknown> & {
   sandboxId?: string;
   deviceId?: string;
   connectionName?: string;
+  conversationId?: string;
+  resumed?: boolean;
 };
 
 type CloudAgentSandboxRefresh = Record<string, unknown> & {
@@ -102,6 +104,10 @@ type CloudAgentSandboxRefresh = Record<string, unknown> & {
 
 type ManagedCloudSandbox = {
   agentId: string;
+  /** Non-null when the server confirmed conversation scoping by echoing the
+   * conversationId (legacy servers strip unknown body keys and answer
+   * without it, so the sandbox falls back to the agent-scoped lifecycle). */
+  conversationId: string | null;
   sandboxId: string;
   deviceId: string;
   connectionName: string;
@@ -117,6 +123,26 @@ type ResolvedCloudConnection = {
 };
 
 class CloudManagedSandboxOwnershipError extends Error {}
+
+/**
+ * The Cloud API reaped a conversation-scoped managed sandbox before the SDK
+ * could refresh it. The failed refresh happens before the next turn is sent,
+ * so callers can safely create a new SDK session for {@link conversationId}
+ * and retry that turn.
+ */
+export class CloudManagedSandboxExpiredError extends Error {
+  readonly code = "managed_sandbox_expired" as const;
+
+  constructor(
+    readonly sandboxId: string,
+    readonly conversationId: string,
+  ) {
+    super(
+      `Cloud managed sandbox ${sandboxId} expired. Resume conversation ${conversationId} with a new SDK session and retry the turn.`,
+    );
+    this.name = "CloudManagedSandboxExpiredError";
+  }
+}
 
 type CloudSessionMode = Extract<RuntimeSessionMode, { kind: "session" }>;
 
@@ -679,6 +705,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   private managedSandbox: ManagedCloudSandbox | null = null;
   private sandboxRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private sandboxRefreshInFlight: Promise<void> | null = null;
+  private sandboxLifecycleClosing = false;
   private attachedRepositoryIds = new Set<string>();
   private readonly cloudMode: CloudSessionMode;
 
@@ -1019,8 +1046,24 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   private async createManagedSandboxConnection(
     runtime: RuntimeScope,
   ): Promise<ResolvedCloudConnection> {
-    const sandbox = await this.createManagedSandbox(runtime.agent_id);
+    // Scope the managed sandbox to the conversation when one exists: the
+    // server treats create-with-conversationId as create-or-resume, so
+    // sessions of the same conversation share one sandbox and sessions of
+    // different conversations stop contending for a single per-agent one.
+    const conversationId =
+      runtime.conversation_id && runtime.conversation_id !== "default"
+        ? runtime.conversation_id
+        : undefined;
+    const sandbox = await this.createManagedSandbox(
+      runtime.agent_id,
+      conversationId,
+    );
     this.managedSandbox = sandbox;
+
+    if (this.sandboxLifecycleClosing) {
+      await this.cleanupManagedSandbox();
+      throw new Error("Cloud managed sandbox session closed during initialization.");
+    }
 
     try {
       await this.refreshManagedSandbox(sandbox);
@@ -1033,7 +1076,10 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     }
   }
 
-  private async createManagedSandbox(agentId: string): Promise<ManagedCloudSandbox> {
+  private async createManagedSandbox(
+    agentId: string,
+    conversationId?: string,
+  ): Promise<ManagedCloudSandbox> {
     const fetchImpl = getFetch(this.cloudOptions.fetch);
     const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
     const response = await fetchImpl(
@@ -1041,13 +1087,24 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       {
         method: "POST",
         headers: cloudHeaders(this.cloudOptions),
-        body: JSON.stringify({}),
+        body: JSON.stringify(conversationId ? { conversationId } : {}),
       },
     );
     const body = await parseJsonResponse(response);
     assertOkResponse(response, body, "Cloud create managed sandbox");
     if (!isCloudAgentSandbox(body)) {
       throw new Error("Cloud create managed sandbox response did not include sandbox connection details.");
+    }
+
+    const responseConversationId =
+      typeof body.conversationId === "string" ? body.conversationId : null;
+    if (
+      responseConversationId !== null &&
+      responseConversationId !== conversationId
+    ) {
+      throw new Error(
+        `Cloud managed sandbox response conversation mismatch: expected ${conversationId ?? "none"}, got ${responseConversationId}.`,
+      );
     }
 
     const sandboxOptions = this.resolvedSandboxOptions();
@@ -1063,6 +1120,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
 
     return {
       agentId,
+      conversationId: responseConversationId,
       sandboxId: body.sandboxId,
       deviceId: body.deviceId,
       connectionName: body.connectionName,
@@ -1070,7 +1128,10 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       readyTimeoutMs,
       readyPollIntervalMs,
       refreshIntervalMs: sandboxOptions.refreshIntervalMs ?? defaultRefreshIntervalMs,
-      terminateOnClose: sandboxOptions.terminateOnClose ?? true,
+      // Default to TTL cleanup: terminating on close kills a sandbox that
+      // other sessions of the same conversation (or a reconnecting client)
+      // may still be using; the server-side TTL bounds leaked sandboxes.
+      terminateOnClose: sandboxOptions.terminateOnClose ?? false,
     };
   }
 
@@ -1091,6 +1152,38 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   private async refreshManagedSandboxOnce(sandbox: ManagedCloudSandbox): Promise<void> {
     const fetchImpl = getFetch(this.cloudOptions.fetch);
     const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
+
+    if (sandbox.conversationId) {
+      // Conversation-scoped sandboxes refresh by id — no "latest active"
+      // indirection, so ownership changes are structurally impossible.
+      const response = await fetchImpl(
+        `${baseUrl}/v1/sandboxes/${encodeURIComponent(sandbox.sandboxId)}/refresh`,
+        {
+          method: "POST",
+          headers: cloudHeaders(this.cloudOptions),
+          body: JSON.stringify({ ttlMinutes: sandbox.ttlMinutes }),
+        },
+      );
+      if (response.status === 404) {
+        await parseJsonResponse(response);
+        // The current control and stream WebSockets are bound to this
+        // sandbox's ephemeral connection id. Recreating only the sandbox would
+        // leave both sockets targeting the dead connection, so surface a
+        // pre-turn error and let the caller resume the same conversation with
+        // a new SDK session.
+        throw new CloudManagedSandboxExpiredError(
+          sandbox.sandboxId,
+          sandbox.conversationId,
+        );
+      }
+      const body = await parseJsonResponse(response);
+      assertOkResponse(response, body, "Cloud refresh managed sandbox");
+      if (!isCloudAgentSandboxRefresh(body) || !body.success) {
+        throw new Error("Cloud refresh managed sandbox response did not confirm refresh.");
+      }
+      return;
+    }
+
     const response = await fetchImpl(
       `${baseUrl}/v1/agents/${encodeURIComponent(sandbox.agentId)}/sandboxes/refresh`,
       {
@@ -1112,10 +1205,30 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   private async terminateManagedSandbox(sandbox: ManagedCloudSandbox): Promise<void> {
-    await this.refreshManagedSandbox(sandbox);
-
     const fetchImpl = getFetch(this.cloudOptions.fetch);
     const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
+
+    if (sandbox.conversationId) {
+      // Terminate exactly this sandbox — the agent-scoped DELETE targets the
+      // agent's "latest active" sandbox, which may not be ours.
+      const response = await fetchImpl(
+        `${baseUrl}/v1/sandboxes/${encodeURIComponent(sandbox.sandboxId)}/terminate`,
+        {
+          method: "POST",
+          headers: cloudHeaders(this.cloudOptions),
+          body: JSON.stringify({}),
+        },
+      );
+      const body = await parseJsonResponse(response);
+      if (response.status === 404) return;
+      assertOkResponse(response, body, "Cloud terminate managed sandbox");
+      return;
+    }
+
+    // Agent-scoped: refresh first so the ownership check confirms the
+    // "latest active" sandbox the DELETE will target is still ours.
+    await this.refreshManagedSandbox(sandbox);
+
     const response = await fetchImpl(
       `${baseUrl}/v1/agents/${encodeURIComponent(sandbox.agentId)}/sandboxes`,
       {
@@ -1160,7 +1273,10 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     this.stopManagedSandboxRefresh();
     this.sandboxRefreshTimer = setInterval(() => {
       void this.refreshManagedSandbox(sandbox).catch((error) => {
-        if (error instanceof CloudManagedSandboxOwnershipError) {
+        if (
+          error instanceof CloudManagedSandboxOwnershipError ||
+          error instanceof CloudManagedSandboxExpiredError
+        ) {
           this.stopManagedSandboxRefresh();
         }
       });
@@ -1175,9 +1291,20 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   private async cleanupManagedSandbox(): Promise<void> {
+    this.sandboxLifecycleClosing = true;
     this.stopManagedSandboxRefresh();
     const sandbox = this.managedSandbox;
     this.managedSandbox = null;
+
+    // Do not race termination against a refresh already in flight. In
+    // particular, this ensures cleanup observes the final refresh outcome
+    // before issuing the by-id terminate request.
+    try {
+      await this.sandboxRefreshInFlight;
+    } catch {
+      // Expiration/refresh failures do not prevent best-effort cleanup.
+    }
+
     if (!sandbox || !sandbox.terminateOnClose) return;
     try {
       await this.terminateManagedSandbox(sandbox);

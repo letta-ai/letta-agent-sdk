@@ -340,7 +340,9 @@ export interface LettaCodeCloudSandboxOptions {
   refreshIntervalMs?: number;
   /**
    * Best-effort terminate the SDK-managed sandbox on session close. Defaults to
-   * true. Set false when multiple SDK sessions may race on the same agent.
+   * false so other sessions for the same conversation and reconnecting clients
+   * can continue using it. Set true to restore eager cleanup when this session
+   * exclusively owns the sandbox.
    */
   terminateOnClose?: boolean;
 }
