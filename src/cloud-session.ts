@@ -124,6 +124,26 @@ type ResolvedCloudConnection = {
 
 class CloudManagedSandboxOwnershipError extends Error {}
 
+/**
+ * The Cloud API reaped a conversation-scoped managed sandbox before the SDK
+ * could refresh it. The failed refresh happens before the next turn is sent,
+ * so callers can safely create a new SDK session for {@link conversationId}
+ * and retry that turn.
+ */
+export class CloudManagedSandboxExpiredError extends Error {
+  readonly code = "managed_sandbox_expired" as const;
+
+  constructor(
+    readonly sandboxId: string,
+    readonly conversationId: string,
+  ) {
+    super(
+      `Cloud managed sandbox ${sandboxId} expired. Resume conversation ${conversationId} with a new SDK session and retry the turn.`,
+    );
+    this.name = "CloudManagedSandboxExpiredError";
+  }
+}
+
 type CloudSessionMode = Extract<RuntimeSessionMode, { kind: "session" }>;
 
 type CloudAgentRepository = {
@@ -685,6 +705,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   private managedSandbox: ManagedCloudSandbox | null = null;
   private sandboxRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private sandboxRefreshInFlight: Promise<void> | null = null;
+  private sandboxLifecycleClosing = false;
   private attachedRepositoryIds = new Set<string>();
   private readonly cloudMode: CloudSessionMode;
 
@@ -1039,6 +1060,11 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     );
     this.managedSandbox = sandbox;
 
+    if (this.sandboxLifecycleClosing) {
+      await this.cleanupManagedSandbox();
+      throw new Error("Cloud managed sandbox session closed during initialization.");
+    }
+
     try {
       await this.refreshManagedSandbox(sandbox);
       const connection = await this.waitForManagedSandboxConnection(sandbox);
@@ -1070,6 +1096,17 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       throw new Error("Cloud create managed sandbox response did not include sandbox connection details.");
     }
 
+    const responseConversationId =
+      typeof body.conversationId === "string" ? body.conversationId : null;
+    if (
+      responseConversationId !== null &&
+      responseConversationId !== conversationId
+    ) {
+      throw new Error(
+        `Cloud managed sandbox response conversation mismatch: expected ${conversationId ?? "none"}, got ${responseConversationId}.`,
+      );
+    }
+
     const sandboxOptions = this.resolvedSandboxOptions();
     const ttlMinutes = sandboxOptions.ttlMinutes ?? DEFAULT_SANDBOX_TTL_MINUTES;
     const readyTimeoutMs = sandboxOptions.readyTimeoutMs
@@ -1083,8 +1120,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
 
     return {
       agentId,
-      conversationId:
-        typeof body.conversationId === "string" ? body.conversationId : null,
+      conversationId: responseConversationId,
       sandboxId: body.sandboxId,
       deviceId: body.deviceId,
       connectionName: body.connectionName,
@@ -1129,19 +1165,16 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
         },
       );
       if (response.status === 404) {
-        // The TTL reaped the sandbox mid-session. Create-or-resume brings up
-        // a replacement with the same deterministic deviceId, so environment
-        // resolution (and reconnects) keep working; adopt its identity and
-        // keep refreshing.
         await parseJsonResponse(response);
-        const replacement = await this.createManagedSandbox(
-          sandbox.agentId,
+        // The current control and stream WebSockets are bound to this
+        // sandbox's ephemeral connection id. Recreating only the sandbox would
+        // leave both sockets targeting the dead connection, so surface a
+        // pre-turn error and let the caller resume the same conversation with
+        // a new SDK session.
+        throw new CloudManagedSandboxExpiredError(
+          sandbox.sandboxId,
           sandbox.conversationId,
         );
-        sandbox.sandboxId = replacement.sandboxId;
-        sandbox.deviceId = replacement.deviceId;
-        sandbox.connectionName = replacement.connectionName;
-        return;
       }
       const body = await parseJsonResponse(response);
       assertOkResponse(response, body, "Cloud refresh managed sandbox");
@@ -1240,7 +1273,10 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     this.stopManagedSandboxRefresh();
     this.sandboxRefreshTimer = setInterval(() => {
       void this.refreshManagedSandbox(sandbox).catch((error) => {
-        if (error instanceof CloudManagedSandboxOwnershipError) {
+        if (
+          error instanceof CloudManagedSandboxOwnershipError ||
+          error instanceof CloudManagedSandboxExpiredError
+        ) {
           this.stopManagedSandboxRefresh();
         }
       });
@@ -1255,9 +1291,20 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   private async cleanupManagedSandbox(): Promise<void> {
+    this.sandboxLifecycleClosing = true;
     this.stopManagedSandboxRefresh();
     const sandbox = this.managedSandbox;
     this.managedSandbox = null;
+
+    // Do not race termination against a refresh already in flight. In
+    // particular, this ensures cleanup observes the final refresh outcome
+    // before issuing the by-id terminate request.
+    try {
+      await this.sandboxRefreshInFlight;
+    } catch {
+      // Expiration/refresh failures do not prevent best-effort cleanup.
+    }
+
     if (!sandbox || !sandbox.terminateOnClose) return;
     try {
       await this.terminateManagedSandbox(sandbox);
