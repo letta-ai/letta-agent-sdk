@@ -37,11 +37,6 @@ function bodyOf(init?: RequestInit): unknown {
 }
 
 type CloudFetchMockOptions = {
-  /** Simulate a server without conversation-scoped sandbox support: it
-   * strips the conversationId body key and never echoes it back. */
-  legacySandboxServer?: boolean;
-  /** Override the conversation id echoed by a supporting sandbox server. */
-  sandboxConversationEcho?: string;
   /** Sandbox ids whose by-id refresh should 404 (TTL reaped). */
   reapedSandboxes?: Set<string>;
   /** Override a by-id refresh response for lifecycle race tests. */
@@ -85,23 +80,13 @@ function createCloudFetchMock(
     if (agentSandboxMatch && method === "POST") {
       const agentId = decodeURIComponent(agentSandboxMatch[1]!);
       sandboxCreates += 1;
-      const body = bodyOf(init) as { conversationId?: string } | undefined;
       const sandboxId = sandboxCreates === 1
         ? `sandbox-${agentId}`
         : `sandbox-${agentId}-r${sandboxCreates}`;
-      const conversationEcho =
-        body?.conversationId && !options.legacySandboxServer
-          ? {
-              conversationId:
-                options.sandboxConversationEcho ?? body.conversationId,
-              resumed: false,
-            }
-          : {};
       return Promise.resolve(jsonResponse({
         sandboxId,
         deviceId: `device-${agentId}`,
         connectionName: `sandbox-${agentId}-session`,
-        ...conversationEcho,
       }));
     }
 
@@ -682,7 +667,7 @@ describe("CloudEnvironmentSession", () => {
     )).toBe(false);
   });
 
-  test("scopes the managed sandbox to the conversation when the server supports it", async () => {
+  test("uses the conversation-scoped sandbox lifecycle without response feature detection", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
     const client = new LettaAgentClient({
@@ -716,65 +701,6 @@ describe("CloudEnvironmentSession", () => {
       expect(requests.some((request) =>
         new URL(request.url).pathname === "/v1/agents/agent-from-conv/sandboxes/refresh"
       )).toBe(false);
-    } finally {
-      session.close();
-    }
-  });
-
-  test("falls back to the agent-scoped sandbox lifecycle against legacy servers", async () => {
-    resetFakeCloud();
-    const requests: RecordedRequest[] = [];
-    const client = new LettaAgentClient({
-      backend: "cloud",
-      apiBaseUrl: "https://api.test",
-      apiKey: "sk-test",
-      fetch: createCloudFetchMock(requests, undefined, { legacySandboxServer: true }),
-      WebSocket: FakeCloudSocket,
-      requestTimeoutMs: 1_000,
-    });
-
-    const session = client.resumeSession("conv-1");
-    try {
-      await asAdvanced(session).initialize();
-
-      // The request still carries conversationId (legacy servers strip
-      // unknown body keys), but without the response echo the SDK must stay
-      // on the agent-scoped lifecycle.
-      expect(requests).toContainEqual(expect.objectContaining({
-        method: "POST",
-        url: "https://api.test/v1/agents/agent-from-conv/sandboxes",
-        body: { conversationId: "conv-1" },
-      }));
-      expect(requests.some((request) =>
-        new URL(request.url).pathname === "/v1/agents/agent-from-conv/sandboxes/refresh"
-      )).toBe(true);
-      expect(requests.some((request) =>
-        new URL(request.url).pathname.startsWith("/v1/sandboxes/")
-      )).toBe(false);
-    } finally {
-      session.close();
-    }
-  });
-
-  test("rejects a mismatched conversation id echoed by the sandbox server", async () => {
-    resetFakeCloud();
-    const requests: RecordedRequest[] = [];
-    const client = new LettaAgentClient({
-      backend: "cloud",
-      apiBaseUrl: "https://api.test",
-      apiKey: "sk-test",
-      fetch: createCloudFetchMock(requests, undefined, {
-        sandboxConversationEcho: "conv-other",
-      }),
-      WebSocket: FakeCloudSocket,
-      requestTimeoutMs: 1_000,
-    });
-
-    const session = client.resumeSession("conv-1");
-    try {
-      await expect(asAdvanced(session).initialize()).rejects.toThrow(
-        "expected conv-1, got conv-other",
-      );
     } finally {
       session.close();
     }

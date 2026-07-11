@@ -118,8 +118,8 @@ for await (const msg of session.stream()) {
 Use `backend: "cloud"` to create or resume agents hosted on Constellation. If
 no `environment` is provided, the SDK creates a managed sandbox, waits for it to
 come online, and refreshes it while the session is active. Non-default
-conversations request a conversation-scoped sandbox from supporting servers;
-the default conversation and legacy servers retain the agent-scoped lifecycle.
+conversations use the conversation-scoped sandbox API; the special default
+conversation retains the agent-scoped lifecycle.
 Managed sandboxes are left for TTL cleanup by default so another session for the
 same conversation can reconnect to them.
 
@@ -184,10 +184,10 @@ await using session = client.resumeSession(agentId, {
 `{ deviceId: "device-..." }` for a stable device selector.
 
 `environment` and `sandbox` are mutually exclusive. Conversation-scoped
-sandboxes refresh and terminate by sandbox ID. Legacy agent-scoped sandboxes
-retain the latest-active ownership check. Pass `sandbox.terminateOnClose: true`
-to request best-effort eager cleanup, but only when no other session or
-reconnecting client needs the sandbox.
+sandboxes refresh and terminate by sandbox ID. Default-conversation
+agent-scoped sandboxes retain the latest-active ownership check. Pass
+`sandbox.terminateOnClose: true` to request best-effort eager cleanup, but only
+when no other session or reconnecting client needs the sandbox.
 
 If Cloud reaps a conversation-scoped sandbox before the next refresh,
 `send()` throws `CloudManagedSandboxExpiredError` before transmitting the turn.
