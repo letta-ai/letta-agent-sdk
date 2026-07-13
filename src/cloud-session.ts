@@ -92,8 +92,6 @@ type CloudAgentSandbox = Record<string, unknown> & {
   sandboxId?: string;
   deviceId?: string;
   connectionName?: string;
-  conversationId?: string;
-  resumed?: boolean;
 };
 
 type CloudAgentSandboxRefresh = Record<string, unknown> & {
@@ -104,9 +102,8 @@ type CloudAgentSandboxRefresh = Record<string, unknown> & {
 
 type ManagedCloudSandbox = {
   agentId: string;
-  /** Non-null when the server confirmed conversation scoping by echoing the
-   * conversationId (legacy servers strip unknown body keys and answer
-   * without it, so the sandbox falls back to the agent-scoped lifecycle). */
+  /** Non-null for a real conversation-scoped sandbox; null only for the
+   * special default conversation, which retains the agent-scoped lifecycle. */
   conversationId: string | null;
   sandboxId: string;
   deviceId: string;
@@ -1096,17 +1093,6 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       throw new Error("Cloud create managed sandbox response did not include sandbox connection details.");
     }
 
-    const responseConversationId =
-      typeof body.conversationId === "string" ? body.conversationId : null;
-    if (
-      responseConversationId !== null &&
-      responseConversationId !== conversationId
-    ) {
-      throw new Error(
-        `Cloud managed sandbox response conversation mismatch: expected ${conversationId ?? "none"}, got ${responseConversationId}.`,
-      );
-    }
-
     const sandboxOptions = this.resolvedSandboxOptions();
     const ttlMinutes = sandboxOptions.ttlMinutes ?? DEFAULT_SANDBOX_TTL_MINUTES;
     const readyTimeoutMs = sandboxOptions.readyTimeoutMs
@@ -1120,7 +1106,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
 
     return {
       agentId,
-      conversationId: responseConversationId,
+      conversationId: conversationId ?? null,
       sandboxId: body.sandboxId,
       deviceId: body.deviceId,
       connectionName: body.connectionName,
