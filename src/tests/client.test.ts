@@ -979,6 +979,31 @@ describe("LettaAgentClient", () => {
     });
   });
 
+  test("baseTools overrides App Server agent defaults", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    await client.createAgent({
+      model: "anthropic/claude-sonnet-4",
+      baseTools: [],
+    });
+
+    expect(fakeControlSocket().sent[0]).toMatchObject({
+      type: "runtime_start",
+      create_agent: {
+        body: {
+          tools: [],
+          include_base_tools: false,
+          include_base_tool_rules: false,
+        },
+      },
+    });
+  });
+
   test("forwards an empty skillSources override when creating app-server agents", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({
