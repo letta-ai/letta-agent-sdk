@@ -61,6 +61,10 @@ export {
   loadDreamAgent,
 } from "./agent.js";
 export {
+  createMemfsWritePolicy,
+  installMemfsGuard,
+  recreateMemfsDirectories,
+  type MemfsGuardInstallation,
   type MemfsOperation,
   type MemfsOperationRule,
   type MemfsStructure,
