@@ -641,7 +641,10 @@ describe("LettaAgentClient", () => {
       WebSocket: FakeAppServerSocket,
     });
 
-    const session = client.createSession("agent-123", { cwd: "/tmp/project" });
+    const session = client.createSession("agent-123", {
+      cwd: "/tmp/project",
+      allowedTools: ["Bash", "Read", "Write", "Edit", "Read"],
+    });
     try {
       const init = await asAdvanced(session).initialize();
       expect(init.agentId).toBe("agent-123");
@@ -665,7 +668,10 @@ describe("LettaAgentClient", () => {
       expect(inputCommand).toMatchObject({
         type: "input",
         runtime: { agent_id: "agent-123", conversation_id: "conv-created" },
-        payload: { kind: "create_message" },
+        payload: {
+          kind: "create_message",
+          client_tool_allowlist: ["Bash", "Read", "Write", "Edit"],
+        },
       });
       const payload = inputCommand?.payload as Record<string, unknown> | undefined;
       expect(payload).not.toHaveProperty("supports_control_response");
