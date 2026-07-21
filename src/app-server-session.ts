@@ -229,7 +229,9 @@ export function createAgentBody(
   if (options.hidden !== undefined) body.hidden = options.hidden;
   if (options.baseTools !== undefined) body.tools = options.baseTools;
 
-  if (options.systemPrompt !== undefined) {
+  if (options.systemPrompt === undefined) {
+    body.system = "";
+  } else {
     if (typeof options.systemPrompt === "string") {
       if (isPresetSystemPrompt(options.systemPrompt)) {
         throw new Error("createAgent() does not yet support system prompt presets for this backend.");
