@@ -4,7 +4,6 @@ import {
   type AppServerExternalToolCallHandler,
   type AppServerSocketConstructor,
 } from "@letta-ai/letta-code/app-server-client";
-import { buildSystemPrompt } from "@letta-ai/letta-code/agent-presets";
 import {
   isHeadlessAutoAllowTool,
   requiresRuntimeUserInput,
@@ -145,10 +144,6 @@ function isPresetSystemPrompt(value: string): boolean {
   ].includes(value);
 }
 
-function buildDefaultSystemPrompt(options: CreateAgentOptions): string {
-  return buildSystemPrompt("default", options.memfs === false ? "standard" : "memfs");
-}
-
 function includeSdkAgentOriginTag(tags: string[] | undefined): string[] {
   const normalizedTags: string[] = [];
   let hasOriginTag = false;
@@ -235,7 +230,7 @@ export function createAgentBody(
   if (options.baseTools !== undefined) body.tools = options.baseTools;
 
   if (options.systemPrompt === undefined) {
-    body.system = buildDefaultSystemPrompt(options);
+    body.system = "";
   } else {
     if (typeof options.systemPrompt === "string") {
       if (isPresetSystemPrompt(options.systemPrompt)) {

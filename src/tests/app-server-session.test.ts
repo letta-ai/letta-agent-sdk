@@ -1,21 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { buildSystemPrompt } from "@letta-ai/letta-code/agent-presets";
 import { createAgentBody } from "../app-server-session.js";
 
 describe("createAgentBody", () => {
-  test("uses the Letta Code MemFS prompt when systemPrompt is omitted", () => {
+  test("uses an empty prompt when systemPrompt is omitted", () => {
     const body = createAgentBody({ model: "openai/gpt-5.2" });
 
-    expect(body.system).toBe(buildSystemPrompt("default", "memfs"));
-  });
-
-  test("uses the Letta Code non-MemFS prompt for worker agents", () => {
-    const body = createAgentBody({
-      model: "openai/gpt-5.2",
-      memfs: false,
-    });
-
-    expect(body.system).toBe(buildSystemPrompt("default", "standard"));
+    expect(body.system).toBe("");
   });
 
   test("preserves custom prompts", () => {
