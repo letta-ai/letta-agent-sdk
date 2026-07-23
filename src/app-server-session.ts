@@ -185,8 +185,8 @@ export function assertRemoteSessionOptionsSupported(
   if (options.systemPrompt !== undefined) {
     throw new Error(`App-server ${action}() does not yet support systemPrompt overrides for existing agents.`);
   }
-  if (options.allowedTools !== undefined || options.disallowedTools !== undefined) {
-    throw new Error(`App-server ${action}() does not yet support allowedTools/disallowedTools.`);
+  if (options.disallowedTools !== undefined) {
+    throw new Error(`App-server ${action}() does not yet support disallowedTools.`);
   }
   if (options.systemInfoReminder !== undefined) {
     throw new Error(`App-server ${action}() does not yet support systemInfoReminder overrides.`);
@@ -227,7 +227,14 @@ export function createAgentBody(
   if (options.name !== undefined) body.name = options.name;
   if (options.description !== undefined) body.description = options.description;
   if (options.hidden !== undefined) body.hidden = options.hidden;
-  if (options.baseTools !== undefined) body.tools = options.baseTools;
+  if (options.baseTools !== undefined) {
+    body.tools = options.baseTools;
+    // `tools: []` alone does not suppress the Letta agent type's defaults.
+    // Keep the SDK's documented `baseTools: []` contract by disabling both
+    // default tool attachment and its corresponding default tool rules.
+    body.include_base_tools = false;
+    body.include_base_tool_rules = false;
+  }
 
   if (options.systemPrompt === undefined) {
     body.system = "";
@@ -541,6 +548,7 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
   constructor(
     private readonly client: AppServerClient,
     private readonly options: AppServerSessionOptions,
+    private readonly clientToolAllowlist?: readonly string[],
   ) {}
 
   onMessage(handler: (message: ProtocolMessage, channel?: string) => void): () => void {
@@ -568,6 +576,9 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
         },
       ],
     };
+    if (this.clientToolAllowlist !== undefined) {
+      payload.client_tool_allowlist = [...new Set(this.clientToolAllowlist)];
+    }
     this.client.input({
       runtime,
       payload,
@@ -752,7 +763,11 @@ export class AppServerSession extends RemoteClientSessionCore {
       const tools = agentToolNames(response.agent);
       const skillSources = this.currentOptions().skillSources;
       return {
-        controller: new AppServerRuntimeController(client, this.remoteOptions),
+        controller: new AppServerRuntimeController(
+          client,
+          this.remoteOptions,
+          this.currentOptions().allowedTools,
+        ),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
         modelSettings: response.agent?.model_settings ?? null,
