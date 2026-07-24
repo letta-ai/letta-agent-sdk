@@ -74,7 +74,8 @@ describe("transport args", () => {
     expect(args).toContain("--allowedTools");
     expect(args).toContain("Read,Bash");
     expect(args).toContain("--disallowedTools");
-    expect(args).toContain("EnterPlanMode,ExitPlanMode");
+    // User denials come first, then the SDK's default interactive-tool denials.
+    expect(args).toContain("EnterPlanMode,ExitPlanMode,AskUserQuestion,request_user_input");
   });
 
   test("non-create sessions do not forward memfs flags", () => {

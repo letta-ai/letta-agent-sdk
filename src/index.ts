@@ -150,6 +150,14 @@ export {
   readStringArrayParam,
 } from "./tool-helpers.js";
 
+// Default toolsets
+export {
+  DEFAULT_BASE_TOOLS,
+  DEFAULT_CLIENT_TOOLS,
+  EXCLUDED_INTERACTIVE_CLIENT_TOOLS,
+  resolveClientToolAllowlist,
+} from "./default-toolset.js";
+
 /**
  * Create a new agent with a default conversation.
  * Returns the agentId which can be used with resumeSession or createSession.

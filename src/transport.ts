@@ -6,6 +6,10 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
+import {
+  DEFAULT_BASE_TOOLS,
+  EXCLUDED_INTERACTIVE_CLIENT_TOOLS,
+} from "./default-toolset.js";
 import { normalizePermissionMode } from "./remote-client-session-core.js";
 import type { InternalSessionOptions, WireMessage } from "./types.js";
 
@@ -164,8 +168,16 @@ export function buildCliArgs(options: InternalSessionOptions): string[] {
   if (options.allowedTools) {
     args.push("--allowedTools", options.allowedTools.join(","));
   }
-  if (options.disallowedTools) {
-    args.push("--disallowedTools", options.disallowedTools.join(","));
+  // Interactive user-input tools are denied by default for SDK sessions;
+  // listing one in allowedTools opts back in.
+  const disallowed = [...(options.disallowedTools ?? [])];
+  for (const tool of EXCLUDED_INTERACTIVE_CLIENT_TOOLS) {
+    if (!options.allowedTools?.includes(tool) && !disallowed.includes(tool)) {
+      disallowed.push(tool);
+    }
+  }
+  if (disallowed.length > 0) {
+    args.push("--disallowedTools", disallowed.join(","));
   }
 
   // Tags
@@ -179,6 +191,13 @@ export function buildCliArgs(options: InternalSessionOptions): string[] {
   // SDK-created agents always use the git-backed memory filesystem.
   if (applyNewAgentDefaults) {
     args.push("--memfs");
+    // Pin server-side tools explicitly: the SDK default set when baseTools is
+    // omitted, none for `baseTools: []` ("none" is the CLI's empty sentinel).
+    const baseTools = options.baseTools ?? [...DEFAULT_BASE_TOOLS];
+    args.push(
+      "--base-tools",
+      baseTools.length > 0 ? baseTools.join(",") : "none",
+    );
   }
 
   // Skills sources

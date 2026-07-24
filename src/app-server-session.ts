@@ -4,6 +4,7 @@ import {
   type AppServerExternalToolCallHandler,
   type AppServerSocketConstructor,
 } from "@letta-ai/letta-code/app-server-client";
+import { DEFAULT_BASE_TOOLS, resolveClientToolAllowlist } from "./default-toolset.js";
 import {
   isHeadlessAutoAllowTool,
   requiresRuntimeUserInput,
@@ -227,14 +228,13 @@ export function createAgentBody(
   if (options.name !== undefined) body.name = options.name;
   if (options.description !== undefined) body.description = options.description;
   if (options.hidden !== undefined) body.hidden = options.hidden;
-  if (options.baseTools !== undefined) {
-    body.tools = options.baseTools;
-    // `tools: []` alone does not suppress the Letta agent type's defaults.
-    // Keep the SDK's documented `baseTools: []` contract by disabling both
-    // default tool attachment and its corresponding default tool rules.
-    body.include_base_tools = false;
-    body.include_base_tool_rules = false;
-  }
+  // SDK agents get exactly the requested server-side tools: the SDK default
+  // set when baseTools is omitted, none for `baseTools: []`. `tools` alone
+  // does not suppress the Letta agent type's defaults, so default tool
+  // attachment and its corresponding default tool rules are always disabled.
+  body.tools = options.baseTools ?? [...DEFAULT_BASE_TOOLS];
+  body.include_base_tools = false;
+  body.include_base_tool_rules = false;
 
   if (options.systemPrompt === undefined) {
     body.system = "";
@@ -766,7 +766,10 @@ export class AppServerSession extends RemoteClientSessionCore {
         controller: new AppServerRuntimeController(
           client,
           this.remoteOptions,
-          this.currentOptions().allowedTools,
+          resolveClientToolAllowlist(
+            this.currentOptions().allowedTools,
+            [...this.externalTools.keys()],
+          ),
         ),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",

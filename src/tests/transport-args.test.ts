@@ -31,6 +31,8 @@ describe("buildCliArgs — baseline args", () => {
       "--output-format", "stream-json",
       "--input-format", "stream-json",
       "--permission-mode", "standard",
+      // Interactive user-input tools are denied by default for SDK sessions.
+      "--disallowedTools", "AskUserQuestion,request_user_input",
     ]);
   });
 });
@@ -237,10 +239,45 @@ describe("buildCliArgs — tools and tags", () => {
     expect(args[idx + 1]).toBe("Read,Write,Bash");
   });
 
-  test("disallowedTools → --disallowedTools joined with comma", () => {
+  test("disallowedTools → --disallowedTools merged with default interactive denials", () => {
     const args = buildCliArgs({ disallowedTools: ["EnterPlanMode"] });
     const idx = args.indexOf("--disallowedTools");
-    expect(args[idx + 1]).toBe("EnterPlanMode");
+    expect(args[idx + 1]).toBe("EnterPlanMode,AskUserQuestion,request_user_input");
+  });
+
+  test("interactive input tools are denied by default", () => {
+    const args = buildCliArgs({});
+    const idx = args.indexOf("--disallowedTools");
+    expect(args[idx + 1]).toBe("AskUserQuestion,request_user_input");
+  });
+
+  test("allowedTools opts interactive input tools back in", () => {
+    const args = buildCliArgs({ allowedTools: ["AskUserQuestion"] });
+    const idx = args.indexOf("--disallowedTools");
+    expect(args[idx + 1]).toBe("request_user_input");
+  });
+
+  test("createOnly passes the default base tools when baseTools is omitted", () => {
+    const args = buildCliArgs({ createOnly: true });
+    const idx = args.indexOf("--base-tools");
+    expect(args[idx + 1]).toBe("web_search,fetch_webpage");
+  });
+
+  test("createOnly passes --base-tools none for baseTools: []", () => {
+    const args = buildCliArgs({ createOnly: true, baseTools: [] });
+    const idx = args.indexOf("--base-tools");
+    expect(args[idx + 1]).toBe("none");
+  });
+
+  test("createOnly passes explicit baseTools through", () => {
+    const args = buildCliArgs({ createOnly: true, baseTools: ["web_search"] });
+    const idx = args.indexOf("--base-tools");
+    expect(args[idx + 1]).toBe("web_search");
+  });
+
+  test("existing-agent sessions never pass --base-tools", () => {
+    const args = buildCliArgs({ agentId: "agent-1", baseTools: ["web_search"] });
+    expect(args).not.toContain("--base-tools");
   });
 
   test("tags → --tags joined with comma", () => {

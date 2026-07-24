@@ -531,6 +531,9 @@ export interface InternalSessionOptions {
   permissionMode?: PermissionMode;
   canUseTool?: CanUseToolCallback;
 
+  // Server-side tools (only for new agents); defaults to DEFAULT_BASE_TOOLS.
+  baseTools?: string[];
+
   // Custom tools
   tools?: AnyAgentTool[];
 
@@ -633,7 +636,11 @@ export interface CreateSessionOptions {
   /** System prompt preset (only presets, no custom strings or append) - updates the agent */
   systemPrompt?: SystemPromptPreset;
 
-  /** List of allowed tool names */
+  /**
+   * Client-side tool allowlist. Defaults to DEFAULT_CLIENT_TOOLS, which
+   * excludes interactive user-input tools (AskUserQuestion and variants);
+   * pass an explicit list to opt back in.
+   */
   allowedTools?: string[];
 
   /** List of disallowed tool names */
@@ -781,13 +788,18 @@ export interface CreateAgentOptions {
   hidden?: boolean;
 
   /**
-   * Server-side tools to attach at creation (e.g. web_search). Pass [] for
-   * none — client-side tools (Bash, Edit, …) are provided by the harness at
-   * runtime and are unaffected.
+   * Server-side tools to attach at creation. Defaults to DEFAULT_BASE_TOOLS
+   * (web_search, fetch_webpage); pass [] for none or an explicit list to
+   * override. Client-side tools (Bash, Edit, …) are provided by the harness
+   * at runtime and are unaffected.
    */
   baseTools?: string[];
 
-  /** List of allowed tool names */
+  /**
+   * Client-side tool allowlist. Defaults to DEFAULT_CLIENT_TOOLS, which
+   * excludes interactive user-input tools (AskUserQuestion and variants);
+   * pass an explicit list to opt back in.
+   */
   allowedTools?: string[];
 
   /** List of disallowed tool names */
