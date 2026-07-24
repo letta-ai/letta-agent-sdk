@@ -29,6 +29,9 @@ export function createLocalAppServerSession(
     ...(appServer.requestTimeoutMs !== undefined
       ? { requestTimeoutMs: appServer.requestTimeoutMs }
       : {}),
+    ...(appServer.pinGlobalAgent !== undefined
+      ? { pinGlobalAgent: appServer.pinGlobalAgent }
+      : {}),
   };
   return new AppServerSession(sessionOptions, mode);
 }
