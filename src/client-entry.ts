@@ -1,0 +1,30 @@
+import { LettaAgentClientBase } from "./client-base.js";
+import type {
+  LettaCodeCloudClientOptions,
+  LettaCodeRemoteClientOptions,
+} from "./types.js";
+
+export type PortableLettaAgentClientOptions =
+  | LettaCodeRemoteClientOptions
+  | LettaCodeCloudClientOptions;
+
+/**
+ * Portable Letta Agent SDK client for browsers and React Native.
+ *
+ * This entry point intentionally excludes local process execution. Use the
+ * package root from Node.js when `backend: "local"` is required.
+ */
+export class LettaAgentClient extends LettaAgentClientBase {
+  constructor(options: PortableLettaAgentClientOptions) {
+    super(options);
+    if (this.backend === "local") {
+      throw this.localBackendUnavailableError();
+    }
+  }
+}
+
+export { CloudManagedSandboxExpiredError } from "./cloud-session.js";
+export { RepositoriesClient } from "./repositories.js";
+export { extractStreamTextDelta } from "./stream-events.js";
+export { createReactNativeWebSocketConstructor } from "./websocket.js";
+export type * from "./types.js";

@@ -59,6 +59,7 @@ export type {
   LettaCodeSession,
   LettaCodeSocketLike,
   LettaCodeSocketConstructor,
+  LettaCodeReactNativeSocketConstructor,
   SDKMessage,
   SDKInitMessage,
   SDKAssistantMessage,
@@ -138,6 +139,7 @@ export { Session } from "./session.js";
 export { RepositoriesClient } from "./repositories.js";
 export { LettaAgentClient } from "./client.js";
 export { CloudManagedSandboxExpiredError } from "./cloud-session.js";
+export { createReactNativeWebSocketConstructor } from "./websocket.js";
 
 export { extractStreamTextDelta } from "./stream-events.js";
 

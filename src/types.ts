@@ -47,6 +47,16 @@ export type LettaCodeSocketConstructor = new (
   options?: LettaCodeSocketOptions,
 ) => LettaCodeSocketLike;
 
+/**
+ * React Native's WebSocket constructor accepts request headers as its third
+ * argument, unlike the Node-style constructor used by the SDK protocol layer.
+ */
+export type LettaCodeReactNativeSocketConstructor = new (
+  url: string,
+  protocols?: string | string[] | null,
+  options?: LettaCodeSocketOptions,
+) => LettaCodeSocketLike;
+
 // ═══════════════════════════════════════════════════════════════
 // MESSAGE CONTENT TYPES (for multimodal support)
 // ═══════════════════════════════════════════════════════════════
@@ -368,11 +378,6 @@ export interface LettaCodeCloudClientOptions {
   webSocketAuth?: "header" | "query";
   /** Heartbeat interval for the Cloud status websocket. Defaults to 30s. */
   pingIntervalMs?: number;
-  /**
-   * Advanced local app-server overrides used by cloud createAgent().
-   * Omit to let the SDK spawn a bundled local app-server authenticated to Cloud.
-   */
-  appServer?: LettaCodeLocalAppServerOptions;
   /**
    * Execution target for Constellation sessions. If omitted, the SDK creates
    * and owns a sandbox for the session.

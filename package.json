@@ -10,6 +10,13 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client-entry.d.ts",
+      "react-native": "./dist/client-entry.js",
+      "browser": "./dist/client-entry.js",
+      "import": "./dist/client-entry.js",
+      "default": "./dist/client-entry.js"
     }
   },
   "files": [

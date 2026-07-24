@@ -8,7 +8,6 @@ import {
   isHeadlessAutoAllowTool,
   requiresRuntimeUserInput,
 } from "./interactiveToolPolicy.js";
-import { startLocalAppServer, type LocalAppServerHandle } from "./local-app-server.js";
 import {
   RemoteClientSessionCore,
   ensureSuccess,
@@ -109,19 +108,15 @@ export function agentToolNames(
 }
 
 export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
-  /** Base websocket URL. Remote sessions require this; local sessions may omit
-   * it to spawn an SDK-owned app-server lazily at initialize(). */
+  /** Base websocket URL. */
   url?: string;
-  /** Spawn a local app-server when url is omitted. */
-  local?: boolean;
-  /** Optional backend for SDK-owned local app-server processes. */
-  localBackend?: string;
-  /** Optional local app-server listen URL. Defaults to ws://127.0.0.1:0. */
-  localListen?: string;
-  /** Timeout for local app-server startup. */
-  localStartupTimeoutMs?: number;
-  /** Extra environment variables for SDK-owned local app-server processes. */
-  localEnv?: Record<string, string | undefined>;
+  /**
+   * Internal lazy connection hook. The Node entry point uses this to start a
+   * local app-server without pulling process-management code into `/client`.
+   */
+  connect?: (
+    sessionEnv?: Record<string, string>,
+  ) => Promise<{ url: string; close(): void }>;
   /** Whether create-agent runtime_start should pin the created agent globally. */
   pinGlobalAgent?: boolean;
   /** Whether SDK create-agent payloads should add the origin tag automatically. */
@@ -702,7 +697,7 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
 }
 
 export class AppServerSession extends RemoteClientSessionCore {
-  private ownedAppServer: LocalAppServerHandle | null = null;
+  private ownedConnection: { close(): void } | null = null;
   private externalTools = new Map<string, AnyAgentTool>();
   private removeExternalToolHandler: (() => void) | null = null;
   private removeControlRequestHandler: (() => void) | null = null;
@@ -789,29 +784,23 @@ export class AppServerSession extends RemoteClientSessionCore {
     this.removeExternalToolHandler = null;
     this.removeControlRequestHandler?.();
     this.removeControlRequestHandler = null;
-    this.ownedAppServer?.close();
-    this.ownedAppServer = null;
+    this.ownedConnection?.close();
+    this.ownedConnection = null;
   }
 
   private async resolveAppServerUrl(): Promise<string> {
     if (this.remoteOptions.url) {
       return this.remoteOptions.url;
     }
-    if (this.remoteOptions.local !== true) {
-      throw new Error("App-server session requires a url unless local app-server spawning is enabled.");
+    if (!this.remoteOptions.connect) {
+      throw new Error("App-server session requires a url.");
     }
-    // Session-level env layers over client-level env: each SDK-owned session
-    // spawns its own app-server process, so this is a per-session scope.
     const sessionEnv = (
       this.mode.options as { env?: Record<string, string> }
     ).env;
-    this.ownedAppServer = await startLocalAppServer({
-      listen: this.remoteOptions.localListen,
-      backend: this.remoteOptions.localBackend,
-      startupTimeoutMs: this.remoteOptions.localStartupTimeoutMs,
-      env: { ...this.remoteOptions.localEnv, ...sessionEnv },
-    });
-    return this.ownedAppServer.url;
+    const connection = await this.remoteOptions.connect(sessionEnv);
+    this.ownedConnection = connection;
+    return connection.url;
   }
 
   private async startRuntime(client: AppServerClient): Promise<RuntimeStartResponse> {
