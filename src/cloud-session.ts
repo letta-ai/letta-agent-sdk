@@ -12,12 +12,9 @@ import {
   createExternalToolCallHandler,
   externalToolGroups,
   registerAppServerControlRequestHandler,
+  resolveClientToolAllowlist,
   type AppServerSessionOptions,
 } from "./app-server-session.js";
-import {
-  resolveClientToolAllowlist,
-  shouldExcludeInteractiveTools,
-} from "./default-toolset.js";
 import {
   RemoteEnvironmentClient,
   type RemoteEnvironmentTarget,
@@ -774,15 +771,10 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
           {
             requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
           },
-          {
-            clientToolAllowlist: resolveClientToolAllowlist(
-              this.currentOptions().allowedTools,
-              [...this.externalTools.keys()],
-            ),
-            excludeInteractiveTools: shouldExcludeInteractiveTools(
-              this.currentOptions().allowedTools,
-            ),
-          },
+          resolveClientToolAllowlist(
+            this.currentOptions().allowedTools,
+            [...this.externalTools.keys()],
+          ),
         ),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",

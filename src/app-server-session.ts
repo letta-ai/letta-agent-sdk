@@ -5,11 +5,6 @@ import {
   type AppServerSocketConstructor,
 } from "@letta-ai/letta-code/app-server-client";
 import {
-  DEFAULT_BASE_TOOLS,
-  resolveClientToolAllowlist,
-  shouldExcludeInteractiveTools,
-} from "./default-toolset.js";
-import {
   isHeadlessAutoAllowTool,
   requiresRuntimeUserInput,
 } from "./interactiveToolPolicy.js";
@@ -232,13 +227,15 @@ export function createAgentBody(
   if (options.name !== undefined) body.name = options.name;
   if (options.description !== undefined) body.description = options.description;
   if (options.hidden !== undefined) body.hidden = options.hidden;
-  // SDK agents get exactly the requested server-side tools: the SDK default
-  // set when baseTools is omitted, none for `baseTools: []`. `tools` alone
-  // does not suppress the Letta agent type's defaults, so default tool
-  // attachment and its corresponding default tool rules are always disabled.
-  body.tools = options.baseTools ?? [...DEFAULT_BASE_TOOLS];
-  body.include_base_tools = false;
-  body.include_base_tool_rules = false;
+  // When baseTools is omitted, the harness applies its created-agent
+  // defaults (web_search, fetch_webpage). An explicit list is pinned exactly:
+  // `tools` alone does not suppress the Letta agent type's defaults, so both
+  // default tool attachment and its default tool rules are disabled here.
+  if (options.baseTools !== undefined) {
+    body.tools = options.baseTools;
+    body.include_base_tools = false;
+    body.include_base_tool_rules = false;
+  }
 
   if (options.systemPrompt === undefined) {
     body.system = "";
@@ -548,18 +545,31 @@ async function respondToAppServerControlRequest(
   } as Parameters<AppServerClient["input"]>[0]);
 }
 
-export interface AppServerTurnToolConfig {
-  /** Explicit client toolset allowlist; undefined sends none. */
-  clientToolAllowlist?: readonly string[];
-  /** Ask the harness to exclude interactive user-input tools (headless default). */
-  excludeInteractiveTools?: boolean;
+/**
+ * Merge custom SDK tool names into an explicit allowlist — the harness
+ * filters registered external tools by the allowlist too, and registering a
+ * custom tool is already an explicit opt-in. Undefined stays undefined (no
+ * allowlist sent; the harness default toolset applies).
+ */
+export function resolveClientToolAllowlist(
+  allowedTools: readonly string[] | undefined,
+  customToolNames: readonly string[] = [],
+): string[] | undefined {
+  if (allowedTools === undefined) return undefined;
+  const resolved = [...allowedTools];
+  for (const name of customToolNames) {
+    if (!resolved.includes(name)) {
+      resolved.push(name);
+    }
+  }
+  return resolved;
 }
 
 export class AppServerRuntimeController implements RemoteClientRuntimeController {
   constructor(
     private readonly client: AppServerClient,
     private readonly options: AppServerSessionOptions,
-    private readonly toolConfig: AppServerTurnToolConfig = {},
+    private readonly clientToolAllowlist?: readonly string[],
   ) {}
 
   onMessage(handler: (message: ProtocolMessage, channel?: string) => void): () => void {
@@ -587,12 +597,13 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
         },
       ],
     };
-    if (this.toolConfig.clientToolAllowlist !== undefined) {
-      payload.client_tool_allowlist = [...new Set(this.toolConfig.clientToolAllowlist)];
+    if (this.clientToolAllowlist !== undefined) {
+      payload.client_tool_allowlist = [...new Set(this.clientToolAllowlist)];
     }
-    if (this.toolConfig.excludeInteractiveTools) {
-      payload.exclude_interactive_tools = true;
-    }
+    // SDK sessions are headless: interactive user-input tools are always
+    // excluded from the toolset (harnesses without support ignore the flag
+    // and the SDK's runtime denial still applies).
+    payload.exclude_interactive_tools = true;
     this.client.input({
       runtime,
       payload,
@@ -777,15 +788,14 @@ export class AppServerSession extends RemoteClientSessionCore {
       const tools = agentToolNames(response.agent);
       const skillSources = this.currentOptions().skillSources;
       return {
-        controller: new AppServerRuntimeController(client, this.remoteOptions, {
-          clientToolAllowlist: resolveClientToolAllowlist(
+        controller: new AppServerRuntimeController(
+          client,
+          this.remoteOptions,
+          resolveClientToolAllowlist(
             this.currentOptions().allowedTools,
             [...this.externalTools.keys()],
           ),
-          excludeInteractiveTools: shouldExcludeInteractiveTools(
-            this.currentOptions().allowedTools,
-          ),
-        }),
+        ),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
         modelSettings: response.agent?.model_settings ?? null,

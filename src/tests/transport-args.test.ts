@@ -243,10 +243,9 @@ describe("buildCliArgs — tools and tags", () => {
     expect(args[idx + 1]).toBe("EnterPlanMode");
   });
 
-  test("createOnly passes the default base tools when baseTools is omitted", () => {
+  test("createOnly leaves base tools to the CLI defaults when baseTools is omitted", () => {
     const args = buildCliArgs({ createOnly: true });
-    const idx = args.indexOf("--base-tools");
-    expect(args[idx + 1]).toBe("web_search,fetch_webpage");
+    expect(args).not.toContain("--base-tools");
   });
 
   test("createOnly passes --base-tools none for baseTools: []", () => {

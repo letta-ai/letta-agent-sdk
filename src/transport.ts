@@ -6,7 +6,6 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
-import { DEFAULT_BASE_TOOLS } from "./default-toolset.js";
 import { normalizePermissionMode } from "./remote-client-session-core.js";
 import type { InternalSessionOptions, WireMessage } from "./types.js";
 
@@ -181,13 +180,14 @@ export function buildCliArgs(options: InternalSessionOptions): string[] {
   // SDK-created agents always use the git-backed memory filesystem.
   if (applyNewAgentDefaults) {
     args.push("--memfs");
-    // Pin server-side tools explicitly: the SDK default set when baseTools is
-    // omitted, none for `baseTools: []` ("none" is the CLI's empty sentinel).
-    const baseTools = options.baseTools ?? [...DEFAULT_BASE_TOOLS];
-    args.push(
-      "--base-tools",
-      baseTools.length > 0 ? baseTools.join(",") : "none",
-    );
+    // When omitted, the CLI applies its created-agent defaults. An explicit
+    // list is forwarded; "none" is the CLI's sentinel for an empty list.
+    if (options.baseTools !== undefined) {
+      args.push(
+        "--base-tools",
+        options.baseTools.length > 0 ? options.baseTools.join(",") : "none",
+      );
+    }
   }
 
   // Skills sources

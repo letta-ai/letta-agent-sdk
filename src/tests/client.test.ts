@@ -708,7 +708,7 @@ describe("LettaAgentClient", () => {
     }
   });
 
-  test("allowedTools with AskUserQuestion opts back into interactive tools", async () => {
+  test("interactive tools stay excluded even with an explicit allowlist", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({
       backend: "remote",
@@ -717,7 +717,7 @@ describe("LettaAgentClient", () => {
     });
 
     const session = client.createSession("agent-123", {
-      allowedTools: ["Bash", "Read", "AskUserQuestion"],
+      allowedTools: ["Bash", "Read"],
     });
     try {
       await asAdvanced(session).initialize();
@@ -728,8 +728,8 @@ describe("LettaAgentClient", () => {
           typeof command === "object" && command !== null && "type" in command && command.type === "input",
       );
       const payload = inputCommand?.payload as Record<string, unknown> | undefined;
-      expect(payload?.client_tool_allowlist).toEqual(["Bash", "Read", "AskUserQuestion"]);
-      expect(payload).not.toHaveProperty("exclude_interactive_tools");
+      expect(payload?.client_tool_allowlist).toEqual(["Bash", "Read"]);
+      expect(payload?.exclude_interactive_tools).toBe(true);
     } finally {
       session.close();
     }
@@ -1033,7 +1033,7 @@ describe("LettaAgentClient", () => {
     });
   });
 
-  test("createAgent attaches the default server-side tools when baseTools is omitted", async () => {
+  test("createAgent leaves server-side tools to the harness defaults when baseTools is omitted", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({
       backend: "remote",
@@ -1045,16 +1045,13 @@ describe("LettaAgentClient", () => {
       model: "anthropic/claude-sonnet-4",
     });
 
-    expect(fakeControlSocket().sent[0]).toMatchObject({
-      type: "runtime_start",
-      create_agent: {
-        body: {
-          tools: ["web_search", "fetch_webpage"],
-          include_base_tools: false,
-          include_base_tool_rules: false,
-        },
-      },
-    });
+    const command = fakeControlSocket().sent[0] as {
+      create_agent?: { body?: Record<string, unknown> };
+    };
+    // The harness applies its created-agent defaults (web_search,
+    // fetch_webpage); the SDK does not pin them client-side.
+    expect(command.create_agent?.body).not.toHaveProperty("tools");
+    expect(command.create_agent?.body).not.toHaveProperty("include_base_tools");
   });
 
   test("baseTools: [] attaches no server-side tools", async () => {
@@ -1107,7 +1104,7 @@ describe("LettaAgentClient", () => {
     });
   });
 
-  test("default toolset contract: created agents get web_search/fetch_webpage server-side and DEFAULT_CLIENT_TOOLS client-side", async () => {
+  test("default toolset contract: harness owns both defaults; SDK only excludes interactive tools", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({
       backend: "remote",
@@ -1115,19 +1112,16 @@ describe("LettaAgentClient", () => {
       WebSocket: FakeAppServerSocket,
     });
 
-    // 1. Creation pins the server-side toolset to exactly the SDK default.
+    // 1. Creation sends no tool fields — the harness applies its
+    //    created-agent defaults (web_search, fetch_webpage).
     const agentId = await client.createAgent({
       model: "anthropic/claude-sonnet-4",
     });
     const createCommand = fakeControlSocket().sent[0] as {
       create_agent?: { body?: Record<string, unknown> };
     };
-    expect(createCommand.create_agent?.body?.tools).toEqual([
-      "web_search",
-      "fetch_webpage",
-    ]);
-    expect(createCommand.create_agent?.body?.include_base_tools).toBe(false);
-    expect(createCommand.create_agent?.body?.include_base_tool_rules).toBe(false);
+    expect(createCommand.create_agent?.body).not.toHaveProperty("tools");
+    expect(createCommand.create_agent?.body).not.toHaveProperty("include_base_tools");
 
     // 2. Every turn keeps the harness default toolset (no pinned allowlist)
     //    and excludes interactive user-input tools via the protocol flag.

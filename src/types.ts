@@ -531,7 +531,7 @@ export interface InternalSessionOptions {
   permissionMode?: PermissionMode;
   canUseTool?: CanUseToolCallback;
 
-  // Server-side tools (only for new agents); defaults to DEFAULT_BASE_TOOLS.
+  // Server-side tools (only for new agents); omitted -> harness defaults.
   baseTools?: string[];
 
   // Custom tools
@@ -638,9 +638,9 @@ export interface CreateSessionOptions {
 
   /**
    * Client-side tool allowlist for the session. When omitted, the harness
-   * default toolset applies with interactive user-input tools
-   * (AskUserQuestion and variants) excluded; list one explicitly to opt back
-   * in. Custom SDK tools are always merged into an explicit allowlist.
+   * default toolset applies. Interactive user-input tools (AskUserQuestion)
+   * are always excluded for SDK sessions. Custom SDK tools are merged into
+   * an explicit allowlist automatically.
    */
   allowedTools?: string[];
 
@@ -789,18 +789,18 @@ export interface CreateAgentOptions {
   hidden?: boolean;
 
   /**
-   * Server-side tools to attach at creation. Defaults to DEFAULT_BASE_TOOLS
-   * (web_search, fetch_webpage); pass [] for none or an explicit list to
-   * override. Client-side tools (Bash, Edit, …) are provided by the harness
-   * at runtime and are unaffected.
+   * Server-side tools to attach at creation. When omitted, the harness
+   * applies its created-agent defaults (web_search, fetch_webpage). Pass []
+   * for none or an explicit list to override. Client-side tools (Bash,
+   * Edit, …) are provided by the harness at runtime and are unaffected.
    */
   baseTools?: string[];
 
   /**
    * Client-side tool allowlist for the session. When omitted, the harness
-   * default toolset applies with interactive user-input tools
-   * (AskUserQuestion and variants) excluded; list one explicitly to opt back
-   * in. Custom SDK tools are always merged into an explicit allowlist.
+   * default toolset applies. Interactive user-input tools (AskUserQuestion)
+   * are always excluded for SDK sessions. Custom SDK tools are merged into
+   * an explicit allowlist automatically.
    */
   allowedTools?: string[];
 
