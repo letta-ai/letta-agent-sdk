@@ -1324,13 +1324,15 @@ describe("CloudEnvironmentSession", () => {
       body: {
         model: "anthropic/claude-sonnet-4",
         system: "You are a repo assistant.",
-        memory_blocks: [{ label: "project", value: "Use Bun." }],
+        memory_blocks: expect.arrayContaining([
+          expect.objectContaining({ label: "project", value: "Use Bun." }),
+        ]),
       },
     });
     expect((requests[0]!.body as { tags: string[] }).tags).toEqual([
-      "team:sdk",
       "origin:letta-code",
       "git-memory-enabled",
+      "team:sdk",
     ]);
 
     await expect(client.createAgent({
@@ -1341,7 +1343,7 @@ describe("CloudEnvironmentSession", () => {
     );
   });
 
-  test("rejects Cloud createAgent without an explicit model", async () => {
+  test("uses the Letta Code default model for Cloud createAgent", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
     const client = new LettaAgentClient({
@@ -1352,14 +1354,14 @@ describe("CloudEnvironmentSession", () => {
       WebSocket: FakeCloudSocket,
     });
 
-    await expect(client.createAgent({
-      systemPrompt: "You are a repo assistant.",
-    })).rejects.toThrow("Constellation createAgent() requires an explicit model");
+    await expect(client.createAgent()).resolves.toBe("agent-created");
+    expect(requests[0]?.body).toMatchObject({ model: "letta/auto" });
+
     await expect(client.createAgent({
       model: "   ",
-    })).rejects.toThrow("Constellation createAgent() requires an explicit model");
+    })).rejects.toThrow('Unknown model:');
 
-    expect(requests).toHaveLength(0);
+    expect(requests).toHaveLength(1);
   });
 
   test("responds to Remote Client approval requests through canUseTool", async () => {

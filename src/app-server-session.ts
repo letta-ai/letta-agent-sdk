@@ -5,6 +5,12 @@ import {
   type AppServerSocketConstructor,
 } from "@letta-ai/letta-code/app-server-client";
 import {
+  buildCreateAgentRequestForPersonality,
+  buildSystemPrompt,
+  GIT_MEMORY_ENABLED_TAG,
+  LETTA_CODE_ORIGIN_TAG,
+} from "@letta-ai/letta-code/agent-presets";
+import {
   isHeadlessAutoAllowTool,
   requiresRuntimeUserInput,
 } from "./interactiveToolPolicy.js";
@@ -125,8 +131,6 @@ export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
 
 export type AppServerSessionMode = RuntimeSessionMode;
 
-const SDK_AGENT_ORIGIN_TAG = "origin:letta-code";
-
 function isPresetSystemPrompt(value: string): boolean {
   return [
     "default",
@@ -137,25 +141,6 @@ function isPresetSystemPrompt(value: string): boolean {
     "codex",
     "gemini",
   ].includes(value);
-}
-
-function includeSdkAgentOriginTag(tags: string[] | undefined): string[] {
-  const normalizedTags: string[] = [];
-  let hasOriginTag = false;
-
-  for (const tag of tags ?? []) {
-    if (tag === SDK_AGENT_ORIGIN_TAG) {
-      if (hasOriginTag) continue;
-      hasOriginTag = true;
-    }
-    normalizedTags.push(tag);
-  }
-
-  if (!hasOriginTag) {
-    normalizedTags.push(SDK_AGENT_ORIGIN_TAG);
-  }
-
-  return normalizedTags;
 }
 
 function assertRemoteCreateAgentOptionsSupported(options: CreateAgentOptions): void {
@@ -205,22 +190,49 @@ function normalizeMemoryBlock(block: Record<string, unknown>): Record<string, un
   return normalized;
 }
 
-export function createAgentBody(
+function upsertMemoryBlock(
+  blocks: Array<Record<string, unknown>>,
+  block: Record<string, unknown>,
+): void {
+  const label = block.label;
+  if (typeof label === "string") {
+    const existingIndex = blocks.findIndex((candidate) => candidate.label === label);
+    if (existingIndex >= 0) {
+      blocks[existingIndex] = block;
+      return;
+    }
+  }
+  blocks.push(block);
+}
+
+export async function createAgentBody(
   options: CreateAgentOptions,
   settings: { includeSdkOriginTag?: boolean } = {},
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   assertRemoteCreateAgentOptionsSupported(options);
 
   const includeOriginTag = settings.includeSdkOriginTag ?? true;
-  const body: Record<string, unknown> = {};
-  if (includeOriginTag || options.tags !== undefined) {
-    body.tags = includeOriginTag ? includeSdkAgentOriginTag(options.tags) : options.tags;
+  const body: Record<string, unknown> = {
+    ...(await buildCreateAgentRequestForPersonality({
+      personalityId: options.personality ?? "memo",
+      ...(options.name !== undefined ? { name: options.name } : {}),
+      ...(options.description !== undefined
+        ? { description: options.description }
+        : {}),
+      ...(options.model !== undefined ? { model: options.model } : {}),
+      ...(options.tags !== undefined ? { extraTags: options.tags } : {}),
+    })),
+  };
+
+  if (Array.isArray(body.tags)) {
+    body.tags = body.tags.filter(
+      (tag) =>
+        (includeOriginTag || tag !== LETTA_CODE_ORIGIN_TAG) &&
+        (options.memfs !== false || tag !== GIT_MEMORY_ENABLED_TAG),
+    );
   }
 
-  if (options.model !== undefined) body.model = options.model;
   if (options.embedding !== undefined) body.embedding = options.embedding;
-  if (options.name !== undefined) body.name = options.name;
-  if (options.description !== undefined) body.description = options.description;
   if (options.hidden !== undefined) body.hidden = options.hidden;
   if (options.baseTools !== undefined) {
     body.tools = options.baseTools;
@@ -232,7 +244,9 @@ export function createAgentBody(
   }
 
   if (options.systemPrompt === undefined) {
-    body.system = "";
+    if (options.memfs === false) {
+      body.system = buildSystemPrompt("default", "standard");
+    }
   } else {
     if (typeof options.systemPrompt === "string") {
       if (isPresetSystemPrompt(options.systemPrompt)) {
@@ -244,7 +258,14 @@ export function createAgentBody(
     }
   }
 
-  const memoryBlocks: Array<Record<string, unknown>> = [];
+  const memoryBlocks = Array.isArray(body.memory_blocks)
+    ? body.memory_blocks
+        .filter(
+          (block): block is Record<string, unknown> =>
+            block !== null && typeof block === "object",
+        )
+        .map((block) => ({ ...block }))
+    : [];
   const blockIds: string[] = [];
   for (const item of options.memory ?? []) {
     if (typeof item === "string") {
@@ -253,16 +274,22 @@ export function createAgentBody(
     if ("blockId" in item) {
       blockIds.push(item.blockId);
     } else {
-      memoryBlocks.push(normalizeMemoryBlock(item as unknown as Record<string, unknown>));
+      upsertMemoryBlock(
+        memoryBlocks,
+        normalizeMemoryBlock(item as unknown as Record<string, unknown>),
+      );
     }
   }
   if (options.persona !== undefined) {
-    memoryBlocks.push({ label: "persona", value: options.persona });
+    upsertMemoryBlock(memoryBlocks, {
+      label: "persona",
+      value: options.persona,
+    });
   }
   if (options.human !== undefined) {
-    memoryBlocks.push({ label: "human", value: options.human });
+    upsertMemoryBlock(memoryBlocks, { label: "human", value: options.human });
   }
-  if (memoryBlocks.length > 0) body.memory_blocks = memoryBlocks;
+  body.memory_blocks = memoryBlocks;
   if (blockIds.length > 0) body.block_ids = blockIds;
 
   return body;
@@ -834,7 +861,7 @@ export class AppServerSession extends RemoteClientSessionCore {
 
     if (this.mode.kind === "create-agent") {
       command.create_agent = {
-        body: createAgentBody(this.mode.options, {
+        body: await createAgentBody(this.mode.options, {
           includeSdkOriginTag: this.remoteOptions.includeSdkOriginTag,
         }),
         // Hidden (worker-style) agents default to unpinned.

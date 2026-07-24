@@ -26,6 +26,10 @@ export type {
 
 // Import types for use in this file
 import type { CreateBlock, CanUseToolResponse } from "./protocol.js";
+import type { PersonalityId } from "@letta-ai/letta-code/agent-presets";
+
+/** Letta Code personality preset used to seed a new agent. */
+export type LettaCodePersonalityId = PersonalityId;
 
 export interface LettaCodeSocketLike {
   readyState: number;
@@ -740,6 +744,12 @@ export interface LettaCodeSession extends AsyncDisposable {
  * Options for createAgent() - full control over agent creation.
  */
 export interface CreateAgentOptions {
+  /**
+   * Letta Code personality preset. Defaults to "memo". The creation payload
+   * is built by `@letta-ai/letta-code/agent-presets`, matching Chat/Desktop.
+   */
+  personality?: LettaCodePersonalityId;
+
   /** Model to use (e.g., "claude-sonnet-4-20250514") */
   model?: string;
 

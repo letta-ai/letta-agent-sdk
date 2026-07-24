@@ -55,6 +55,7 @@ const client = new LettaAgentClient({
 });
 
 const agentId = await client.createAgent({
+  personality: "memo",
   model: "anthropic/claude-sonnet-4",
 });
 const session = client.resumeSession(agentId);

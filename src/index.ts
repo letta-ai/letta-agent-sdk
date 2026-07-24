@@ -48,6 +48,7 @@ import { validateCreateSessionOptions, validateCreateAgentOptions } from "./vali
 export type {
   CreateSessionOptions,
   CreateAgentOptions,
+  LettaCodePersonalityId,
   LettaCodeBackend,
   LettaCodeEnvironment,
   LettaCodeLocalClientOptions,

@@ -48,7 +48,6 @@ const DEFAULT_SANDBOX_READY_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_REPOSITORY_ATTACH_TIMEOUT_MS = 10_000;
 const DEFAULT_REPOSITORY_ATTACH_POLL_INTERVAL_MS = 250;
 const SDK_AGENT_ORIGIN = "@letta-ai/letta-agent-sdk";
-const GIT_MEMORY_ENABLED_TAG = "git-memory-enabled";
 
 type FetchLike = typeof fetch;
 
@@ -631,16 +630,7 @@ export async function createCloudAgent(
   clientOptions: LettaCodeCloudClientOptions,
   agentOptions: CreateAgentOptions,
 ): Promise<string> {
-  const body = createAgentBody(agentOptions);
-  if (agentOptions.memfs !== false) {
-    const tags = Array.isArray(body.tags)
-      ? body.tags.filter((tag): tag is string => typeof tag === "string")
-      : [];
-    if (!tags.includes(GIT_MEMORY_ENABLED_TAG)) {
-      tags.push(GIT_MEMORY_ENABLED_TAG);
-    }
-    body.tags = tags;
-  }
+  const body = await createAgentBody(agentOptions);
 
   const response = await getFetch(clientOptions.fetch)(
     `${normalizeCloudApiBaseUrl(clientOptions.apiBaseUrl)}/v1/agents/`,
