@@ -5,10 +5,15 @@ import {
   type AppServerSocketConstructor,
 } from "@letta-ai/letta-code/app-server-client";
 import {
+  buildCreateAgentRequestForPersonality,
+  buildSystemPrompt,
+  GIT_MEMORY_ENABLED_TAG,
+  LETTA_CODE_ORIGIN_TAG,
+} from "@letta-ai/letta-code/agent-presets";
+import {
   isHeadlessAutoAllowTool,
   requiresRuntimeUserInput,
 } from "./interactiveToolPolicy.js";
-import { startLocalAppServer, type LocalAppServerHandle } from "./local-app-server.js";
 import {
   RemoteClientSessionCore,
   ensureSuccess,
@@ -109,19 +114,15 @@ export function agentToolNames(
 }
 
 export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
-  /** Base websocket URL. Remote sessions require this; local sessions may omit
-   * it to spawn an SDK-owned app-server lazily at initialize(). */
+  /** Base websocket URL. */
   url?: string;
-  /** Spawn a local app-server when url is omitted. */
-  local?: boolean;
-  /** Optional backend for SDK-owned local app-server processes. */
-  localBackend?: string;
-  /** Optional local app-server listen URL. Defaults to ws://127.0.0.1:0. */
-  localListen?: string;
-  /** Timeout for local app-server startup. */
-  localStartupTimeoutMs?: number;
-  /** Extra environment variables for SDK-owned local app-server processes. */
-  localEnv?: Record<string, string | undefined>;
+  /**
+   * Internal lazy connection hook. The Node entry point uses this to start a
+   * local app-server without pulling process-management code into `/client`.
+   */
+  connect?: (
+    sessionEnv?: Record<string, string>,
+  ) => Promise<{ url: string; close(): void }>;
   /** Whether create-agent runtime_start should pin the created agent globally. */
   pinGlobalAgent?: boolean;
   /** Whether SDK create-agent payloads should add the origin tag automatically. */
@@ -129,8 +130,6 @@ export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
 };
 
 export type AppServerSessionMode = RuntimeSessionMode;
-
-const SDK_AGENT_ORIGIN_TAG = "origin:letta-code";
 
 function isPresetSystemPrompt(value: string): boolean {
   return [
@@ -142,25 +141,6 @@ function isPresetSystemPrompt(value: string): boolean {
     "codex",
     "gemini",
   ].includes(value);
-}
-
-function includeSdkAgentOriginTag(tags: string[] | undefined): string[] {
-  const normalizedTags: string[] = [];
-  let hasOriginTag = false;
-
-  for (const tag of tags ?? []) {
-    if (tag === SDK_AGENT_ORIGIN_TAG) {
-      if (hasOriginTag) continue;
-      hasOriginTag = true;
-    }
-    normalizedTags.push(tag);
-  }
-
-  if (!hasOriginTag) {
-    normalizedTags.push(SDK_AGENT_ORIGIN_TAG);
-  }
-
-  return normalizedTags;
 }
 
 function assertRemoteCreateAgentOptionsSupported(options: CreateAgentOptions): void {
@@ -210,22 +190,49 @@ function normalizeMemoryBlock(block: Record<string, unknown>): Record<string, un
   return normalized;
 }
 
-export function createAgentBody(
+function upsertMemoryBlock(
+  blocks: Array<Record<string, unknown>>,
+  block: Record<string, unknown>,
+): void {
+  const label = block.label;
+  if (typeof label === "string") {
+    const existingIndex = blocks.findIndex((candidate) => candidate.label === label);
+    if (existingIndex >= 0) {
+      blocks[existingIndex] = block;
+      return;
+    }
+  }
+  blocks.push(block);
+}
+
+export async function createAgentBody(
   options: CreateAgentOptions,
   settings: { includeSdkOriginTag?: boolean } = {},
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   assertRemoteCreateAgentOptionsSupported(options);
 
   const includeOriginTag = settings.includeSdkOriginTag ?? true;
-  const body: Record<string, unknown> = {};
-  if (includeOriginTag || options.tags !== undefined) {
-    body.tags = includeOriginTag ? includeSdkAgentOriginTag(options.tags) : options.tags;
+  const body: Record<string, unknown> = {
+    ...(await buildCreateAgentRequestForPersonality({
+      personalityId: options.personality ?? "memo",
+      ...(options.name !== undefined ? { name: options.name } : {}),
+      ...(options.description !== undefined
+        ? { description: options.description }
+        : {}),
+      ...(options.model !== undefined ? { model: options.model } : {}),
+      ...(options.tags !== undefined ? { extraTags: options.tags } : {}),
+    })),
+  };
+
+  if (Array.isArray(body.tags)) {
+    body.tags = body.tags.filter(
+      (tag) =>
+        (includeOriginTag || tag !== LETTA_CODE_ORIGIN_TAG) &&
+        (options.memfs !== false || tag !== GIT_MEMORY_ENABLED_TAG),
+    );
   }
 
-  if (options.model !== undefined) body.model = options.model;
   if (options.embedding !== undefined) body.embedding = options.embedding;
-  if (options.name !== undefined) body.name = options.name;
-  if (options.description !== undefined) body.description = options.description;
   if (options.hidden !== undefined) body.hidden = options.hidden;
   if (options.baseTools !== undefined) {
     body.tools = options.baseTools;
@@ -237,7 +244,9 @@ export function createAgentBody(
   }
 
   if (options.systemPrompt === undefined) {
-    body.system = "";
+    if (options.memfs === false) {
+      body.system = buildSystemPrompt("default", "standard");
+    }
   } else {
     if (typeof options.systemPrompt === "string") {
       if (isPresetSystemPrompt(options.systemPrompt)) {
@@ -249,7 +258,14 @@ export function createAgentBody(
     }
   }
 
-  const memoryBlocks: Array<Record<string, unknown>> = [];
+  const memoryBlocks = Array.isArray(body.memory_blocks)
+    ? body.memory_blocks
+        .filter(
+          (block): block is Record<string, unknown> =>
+            block !== null && typeof block === "object",
+        )
+        .map((block) => ({ ...block }))
+    : [];
   const blockIds: string[] = [];
   for (const item of options.memory ?? []) {
     if (typeof item === "string") {
@@ -258,16 +274,22 @@ export function createAgentBody(
     if ("blockId" in item) {
       blockIds.push(item.blockId);
     } else {
-      memoryBlocks.push(normalizeMemoryBlock(item as unknown as Record<string, unknown>));
+      upsertMemoryBlock(
+        memoryBlocks,
+        normalizeMemoryBlock(item as unknown as Record<string, unknown>),
+      );
     }
   }
   if (options.persona !== undefined) {
-    memoryBlocks.push({ label: "persona", value: options.persona });
+    upsertMemoryBlock(memoryBlocks, {
+      label: "persona",
+      value: options.persona,
+    });
   }
   if (options.human !== undefined) {
-    memoryBlocks.push({ label: "human", value: options.human });
+    upsertMemoryBlock(memoryBlocks, { label: "human", value: options.human });
   }
-  if (memoryBlocks.length > 0) body.memory_blocks = memoryBlocks;
+  body.memory_blocks = memoryBlocks;
   if (blockIds.length > 0) body.block_ids = blockIds;
 
   return body;
@@ -702,7 +724,7 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
 }
 
 export class AppServerSession extends RemoteClientSessionCore {
-  private ownedAppServer: LocalAppServerHandle | null = null;
+  private ownedConnection: { close(): void } | null = null;
   private externalTools = new Map<string, AnyAgentTool>();
   private removeExternalToolHandler: (() => void) | null = null;
   private removeControlRequestHandler: (() => void) | null = null;
@@ -789,29 +811,23 @@ export class AppServerSession extends RemoteClientSessionCore {
     this.removeExternalToolHandler = null;
     this.removeControlRequestHandler?.();
     this.removeControlRequestHandler = null;
-    this.ownedAppServer?.close();
-    this.ownedAppServer = null;
+    this.ownedConnection?.close();
+    this.ownedConnection = null;
   }
 
   private async resolveAppServerUrl(): Promise<string> {
     if (this.remoteOptions.url) {
       return this.remoteOptions.url;
     }
-    if (this.remoteOptions.local !== true) {
-      throw new Error("App-server session requires a url unless local app-server spawning is enabled.");
+    if (!this.remoteOptions.connect) {
+      throw new Error("App-server session requires a url.");
     }
-    // Session-level env layers over client-level env: each SDK-owned session
-    // spawns its own app-server process, so this is a per-session scope.
     const sessionEnv = (
       this.mode.options as { env?: Record<string, string> }
     ).env;
-    this.ownedAppServer = await startLocalAppServer({
-      listen: this.remoteOptions.localListen,
-      backend: this.remoteOptions.localBackend,
-      startupTimeoutMs: this.remoteOptions.localStartupTimeoutMs,
-      env: { ...this.remoteOptions.localEnv, ...sessionEnv },
-    });
-    return this.ownedAppServer.url;
+    const connection = await this.remoteOptions.connect(sessionEnv);
+    this.ownedConnection = connection;
+    return connection.url;
   }
 
   private async startRuntime(client: AppServerClient): Promise<RuntimeStartResponse> {
@@ -845,7 +861,7 @@ export class AppServerSession extends RemoteClientSessionCore {
 
     if (this.mode.kind === "create-agent") {
       command.create_agent = {
-        body: createAgentBody(this.mode.options, {
+        body: await createAgentBody(this.mode.options, {
           includeSdkOriginTag: this.remoteOptions.includeSdkOriginTag,
         }),
         // Hidden (worker-style) agents default to unpinned.

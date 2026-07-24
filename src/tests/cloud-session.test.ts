@@ -522,77 +522,6 @@ function resetFakeCloud(): void {
   FakeCloudSocket.syncSucceeds = true;
 }
 
-class FakeAppServerSocket {
-  static instances: FakeAppServerSocket[] = [];
-  readyState = 0;
-  sent: Array<Record<string, unknown>> = [];
-  private listeners = new Map<string, Set<Listener>>();
-
-  constructor(readonly url: string) {
-    FakeAppServerSocket.instances.push(this);
-    queueMicrotask(() => {
-      this.readyState = 1;
-      this.emit("open", {});
-    });
-  }
-
-  send(data: string): void {
-    const command = JSON.parse(data) as Record<string, unknown>;
-    this.sent.push(command);
-
-    if (command.type === "runtime_start") {
-      this.serverMessage({
-        type: "runtime_start_response",
-        request_id: command.request_id,
-        success: true,
-        runtime: { agent_id: "agent-created", conversation_id: "conv-created" },
-        agent: { id: "agent-created", model: "anthropic/claude-sonnet-4" },
-        conversation: { id: "conv-created", agent_id: "agent-created" },
-      });
-    }
-
-    if (command.type === "enable_memfs") {
-      this.serverMessage({
-        type: "enable_memfs_response",
-        request_id: command.request_id,
-        success: true,
-      });
-    }
-  }
-
-  close(): void {
-    this.readyState = 3;
-    this.emit("close", {});
-  }
-
-  addEventListener(type: string, listener: Listener): void {
-    let listeners = this.listeners.get(type);
-    if (!listeners) {
-      listeners = new Set();
-      this.listeners.set(type, listeners);
-    }
-    listeners.add(listener);
-  }
-
-  removeEventListener(type: string, listener: Listener): void {
-    this.listeners.get(type)?.delete(listener);
-  }
-
-  private serverMessage(message: unknown): void {
-    this.emit("message", { data: JSON.stringify(message) });
-  }
-
-  private emit(type: string, event: unknown): void {
-    for (const listener of this.listeners.get(type) ?? []) {
-      listener(event);
-    }
-  }
-}
-
-function resetFakeAppServer(): void {
-  FakeAppServerSocket.instances = [];
-}
-
 describe("CloudEnvironmentSession", () => {
   test("creates, refreshes, and cleans up a managed Cloud sandbox with terminateOnClose", async () => {
     resetFakeCloud();
@@ -1366,9 +1295,8 @@ describe("CloudEnvironmentSession", () => {
     session.close();
   });
 
-  test("creates Cloud agents through the local app-server harness", async () => {
+  test("creates Cloud agents directly through the REST API", async () => {
     resetFakeCloud();
-    resetFakeAppServer();
     const requests: RecordedRequest[] = [];
     const client = new LettaAgentClient({
       backend: "cloud",
@@ -1376,11 +1304,6 @@ describe("CloudEnvironmentSession", () => {
       apiKey: "sk-test",
       fetch: createCloudFetchMock(requests),
       WebSocket: FakeCloudSocket,
-      appServer: {
-        url: "ws://app-server.test/ws",
-        WebSocket: FakeAppServerSocket,
-        requestTimeoutMs: 1_000,
-      },
     });
 
     await expect(client.createAgent({
@@ -1390,24 +1313,27 @@ describe("CloudEnvironmentSession", () => {
       tags: ["team:sdk"],
     })).resolves.toBe("agent-created");
 
-    expect(requests).toHaveLength(0);
-    const controlSocket = FakeAppServerSocket.instances.find((socket) => new URL(socket.url).searchParams.get("channel") === "control")!;
-    const runtimeStart = controlSocket.sent.find((command) => command.type === "runtime_start")!;
-    expect(runtimeStart).toMatchObject({
-      create_agent: {
-        pin_global: true,
-        body: {
-          model: "anthropic/claude-sonnet-4",
-          system: "You are a repo assistant.",
-          memory_blocks: [{ label: "project", value: "Use Bun." }],
-        },
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      url: "https://api.test/v1/agents/",
+      method: "POST",
+      headers: {
+        authorization: "Bearer sk-test",
+        "content-type": "application/json",
+      },
+      body: {
+        model: "anthropic/claude-sonnet-4",
+        system: "You are a repo assistant.",
+        memory_blocks: expect.arrayContaining([
+          expect.objectContaining({ label: "project", value: "Use Bun." }),
+        ]),
       },
     });
-    expect((runtimeStart.create_agent as { body: Record<string, unknown> }).body.tags).toEqual([
-      "team:sdk",
+    expect((requests[0]!.body as { tags: string[] }).tags).toEqual([
       "origin:letta-code",
+      "git-memory-enabled",
+      "team:sdk",
     ]);
-    expect(controlSocket.sent).toContainEqual(expect.objectContaining({ type: "enable_memfs" }));
 
     await expect(client.createAgent({
       model: "anthropic/claude-sonnet-4",
@@ -1417,9 +1343,8 @@ describe("CloudEnvironmentSession", () => {
     );
   });
 
-  test("rejects Cloud createAgent without an explicit model", async () => {
+  test("uses the Letta Code default model for Cloud createAgent", async () => {
     resetFakeCloud();
-    resetFakeAppServer();
     const requests: RecordedRequest[] = [];
     const client = new LettaAgentClient({
       backend: "cloud",
@@ -1427,21 +1352,16 @@ describe("CloudEnvironmentSession", () => {
       apiKey: "sk-test",
       fetch: createCloudFetchMock(requests),
       WebSocket: FakeCloudSocket,
-      appServer: {
-        url: "ws://app-server.test/ws",
-        WebSocket: FakeAppServerSocket,
-      },
     });
 
-    await expect(client.createAgent({
-      systemPrompt: "You are a repo assistant.",
-    })).rejects.toThrow("Constellation createAgent() requires an explicit model");
+    await expect(client.createAgent()).resolves.toBe("agent-created");
+    expect(requests[0]?.body).toMatchObject({ model: "letta/auto" });
+
     await expect(client.createAgent({
       model: "   ",
-    })).rejects.toThrow("Constellation createAgent() requires an explicit model");
+    })).rejects.toThrow('Unknown model:');
 
-    expect(requests).toHaveLength(0);
-    expect(FakeAppServerSocket.instances).toHaveLength(0);
+    expect(requests).toHaveLength(1);
   });
 
   test("responds to Remote Client approval requests through canUseTool", async () => {

@@ -7,12 +7,11 @@ import {
 } from "@letta-ai/letta-code/app-server-client";
 import {
   AppServerRuntimeController,
-  AppServerSession,
   agentToolNames,
+  createAgentBody,
   createExternalToolCallHandler,
   externalToolGroups,
   registerAppServerControlRequestHandler,
-  type AppServerSessionOptions,
 } from "./app-server-session.js";
 import {
   RemoteEnvironmentClient,
@@ -293,8 +292,6 @@ function validateCloudSandboxOptions(
 
 export function validateCloudClientOptions(options: LettaCodeCloudClientOptions): void {
   validatePositiveInteger(options.requestTimeoutMs, "requestTimeoutMs");
-  validatePositiveInteger(options.appServer?.requestTimeoutMs, "appServer.requestTimeoutMs");
-  validatePositiveInteger(options.appServer?.startupTimeoutMs, "appServer.startupTimeoutMs");
   validateCloudSandboxOptions(options.sandbox, "sandbox");
   if (options.environment !== undefined && options.sandbox !== undefined) {
     throw new Error("Constellation sessions cannot specify both environment and sandbox options.");
@@ -629,44 +626,30 @@ function externalToolsByName(tools: AnyAgentTool[] | undefined): Map<string, Any
   return result;
 }
 
-function cloudHarnessAppServerOptions(
-  clientOptions: LettaCodeCloudClientOptions,
-): AppServerSessionOptions {
-  const appServer = clientOptions.appServer;
-  const apiKey = getCloudApiKey(clientOptions);
-  const localEnv: Record<string, string | undefined> = {
-    ...(apiKey ? { LETTA_API_KEY: apiKey } : {}),
-    ...(clientOptions.apiBaseUrl
-      ? { LETTA_BASE_URL: normalizeCloudApiBaseUrl(clientOptions.apiBaseUrl) }
-      : {}),
-  };
-  return {
-    local: appServer?.url === undefined,
-    localBackend: "api",
-    ...(appServer?.url !== undefined ? { url: appServer.url } : {}),
-    ...(appServer?.WebSocket !== undefined ? { WebSocket: appServer.WebSocket } : {}),
-    ...(clientOptions.requestTimeoutMs !== undefined || appServer?.requestTimeoutMs !== undefined
-      ? { requestTimeoutMs: appServer?.requestTimeoutMs ?? clientOptions.requestTimeoutMs }
-      : {}),
-    ...(appServer?.listen !== undefined ? { localListen: appServer.listen } : {}),
-    ...(appServer?.startupTimeoutMs !== undefined
-      ? { localStartupTimeoutMs: appServer.startupTimeoutMs }
-      : {}),
-    ...(Object.keys(localEnv).length > 0 ? { localEnv } : {}),
-  };
-}
-
 export async function createCloudAgent(
   clientOptions: LettaCodeCloudClientOptions,
   agentOptions: CreateAgentOptions,
 ): Promise<string> {
-  const session = new AppServerSession(cloudHarnessAppServerOptions(clientOptions), {
-    kind: "create-agent",
-    options: agentOptions,
-  });
-  const initMsg = await session.initialize();
-  session.close();
-  return initMsg.agentId;
+  const body = await createAgentBody(agentOptions);
+
+  const response = await getFetch(clientOptions.fetch)(
+    `${normalizeCloudApiBaseUrl(clientOptions.apiBaseUrl)}/v1/agents/`,
+    {
+      method: "POST",
+      headers: cloudHeaders(clientOptions),
+      body: JSON.stringify(body),
+    },
+  );
+  const responseBody = await parseJsonResponse(response);
+  assertOkResponse(response, responseBody, "Cloud create agent");
+  const agentId =
+    responseBody && typeof responseBody === "object"
+      ? (responseBody as { id?: unknown }).id
+      : undefined;
+  if (typeof agentId !== "string" || agentId.length === 0) {
+    throw new Error("Cloud create agent response did not include an agent id.");
+  }
+  return agentId;
 }
 
 export function assertCloudSessionOptionsSupported(
