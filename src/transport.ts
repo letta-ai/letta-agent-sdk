@@ -6,10 +6,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
-import {
-  DEFAULT_BASE_TOOLS,
-  EXCLUDED_INTERACTIVE_CLIENT_TOOLS,
-} from "./default-toolset.js";
+import { DEFAULT_BASE_TOOLS } from "./default-toolset.js";
 import { normalizePermissionMode } from "./remote-client-session-core.js";
 import type { InternalSessionOptions, WireMessage } from "./types.js";
 
@@ -164,20 +161,13 @@ export function buildCliArgs(options: InternalSessionOptions): string[] {
     args.push("--permission-mode", mode);
   }
 
-  // Allowed / disallowed tools
+  // Allowed / disallowed tools. Interactive user-input tools need no handling
+  // here: the CLI's headless path already excludes them from the toolset.
   if (options.allowedTools) {
     args.push("--allowedTools", options.allowedTools.join(","));
   }
-  // Interactive user-input tools are denied by default for SDK sessions;
-  // listing one in allowedTools opts back in.
-  const disallowed = [...(options.disallowedTools ?? [])];
-  for (const tool of EXCLUDED_INTERACTIVE_CLIENT_TOOLS) {
-    if (!options.allowedTools?.includes(tool) && !disallowed.includes(tool)) {
-      disallowed.push(tool);
-    }
-  }
-  if (disallowed.length > 0) {
-    args.push("--disallowedTools", disallowed.join(","));
+  if (options.disallowedTools) {
+    args.push("--disallowedTools", options.disallowedTools.join(","));
   }
 
   // Tags

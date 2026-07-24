@@ -637,9 +637,10 @@ export interface CreateSessionOptions {
   systemPrompt?: SystemPromptPreset;
 
   /**
-   * Client-side tool allowlist. Defaults to DEFAULT_CLIENT_TOOLS, which
-   * excludes interactive user-input tools (AskUserQuestion and variants);
-   * pass an explicit list to opt back in.
+   * Client-side tool allowlist for the session. When omitted, the harness
+   * default toolset applies with interactive user-input tools
+   * (AskUserQuestion and variants) excluded; list one explicitly to opt back
+   * in. Custom SDK tools are always merged into an explicit allowlist.
    */
   allowedTools?: string[];
 
@@ -796,9 +797,10 @@ export interface CreateAgentOptions {
   baseTools?: string[];
 
   /**
-   * Client-side tool allowlist. Defaults to DEFAULT_CLIENT_TOOLS, which
-   * excludes interactive user-input tools (AskUserQuestion and variants);
-   * pass an explicit list to opt back in.
+   * Client-side tool allowlist for the session. When omitted, the harness
+   * default toolset applies with interactive user-input tools
+   * (AskUserQuestion and variants) excluded; list one explicitly to opt back
+   * in. Custom SDK tools are always merged into an explicit allowlist.
    */
   allowedTools?: string[];
 

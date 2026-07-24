@@ -4,7 +4,11 @@ import {
   type AppServerExternalToolCallHandler,
   type AppServerSocketConstructor,
 } from "@letta-ai/letta-code/app-server-client";
-import { DEFAULT_BASE_TOOLS, resolveClientToolAllowlist } from "./default-toolset.js";
+import {
+  DEFAULT_BASE_TOOLS,
+  resolveClientToolAllowlist,
+  shouldExcludeInteractiveTools,
+} from "./default-toolset.js";
 import {
   isHeadlessAutoAllowTool,
   requiresRuntimeUserInput,
@@ -544,11 +548,18 @@ async function respondToAppServerControlRequest(
   } as Parameters<AppServerClient["input"]>[0]);
 }
 
+export interface AppServerTurnToolConfig {
+  /** Explicit client toolset allowlist; undefined sends none. */
+  clientToolAllowlist?: readonly string[];
+  /** Ask the harness to exclude interactive user-input tools (headless default). */
+  excludeInteractiveTools?: boolean;
+}
+
 export class AppServerRuntimeController implements RemoteClientRuntimeController {
   constructor(
     private readonly client: AppServerClient,
     private readonly options: AppServerSessionOptions,
-    private readonly clientToolAllowlist?: readonly string[],
+    private readonly toolConfig: AppServerTurnToolConfig = {},
   ) {}
 
   onMessage(handler: (message: ProtocolMessage, channel?: string) => void): () => void {
@@ -576,8 +587,11 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
         },
       ],
     };
-    if (this.clientToolAllowlist !== undefined) {
-      payload.client_tool_allowlist = [...new Set(this.clientToolAllowlist)];
+    if (this.toolConfig.clientToolAllowlist !== undefined) {
+      payload.client_tool_allowlist = [...new Set(this.toolConfig.clientToolAllowlist)];
+    }
+    if (this.toolConfig.excludeInteractiveTools) {
+      payload.exclude_interactive_tools = true;
     }
     this.client.input({
       runtime,
@@ -763,14 +777,15 @@ export class AppServerSession extends RemoteClientSessionCore {
       const tools = agentToolNames(response.agent);
       const skillSources = this.currentOptions().skillSources;
       return {
-        controller: new AppServerRuntimeController(
-          client,
-          this.remoteOptions,
-          resolveClientToolAllowlist(
+        controller: new AppServerRuntimeController(client, this.remoteOptions, {
+          clientToolAllowlist: resolveClientToolAllowlist(
             this.currentOptions().allowedTools,
             [...this.externalTools.keys()],
           ),
-        ),
+          excludeInteractiveTools: shouldExcludeInteractiveTools(
+            this.currentOptions().allowedTools,
+          ),
+        }),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
         modelSettings: response.agent?.model_settings ?? null,

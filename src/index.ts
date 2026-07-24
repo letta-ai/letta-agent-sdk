@@ -153,9 +153,9 @@ export {
 // Default toolsets
 export {
   DEFAULT_BASE_TOOLS,
-  DEFAULT_CLIENT_TOOLS,
   EXCLUDED_INTERACTIVE_CLIENT_TOOLS,
   resolveClientToolAllowlist,
+  shouldExcludeInteractiveTools,
 } from "./default-toolset.js";
 
 /**

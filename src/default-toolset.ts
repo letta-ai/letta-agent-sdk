@@ -1,9 +1,11 @@
 /**
- * SDK default client-side toolset.
+ * SDK default toolsets.
  *
- * SDK sessions are typically headless, so interactive user-input tools are
- * excluded from the default toolset. Callers opt back in by passing
- * `allowedTools` explicitly (e.g. `allowedTools: [...DEFAULT_CLIENT_TOOLS, "AskUserQuestion"]`).
+ * SDK sessions are headless, so interactive user-input tools are excluded
+ * from the toolset by default via the harness's `exclude_interactive_tools`
+ * protocol flag — the harness owns the interactive set, so the SDK does not
+ * pin toolset names. Callers opt back in by listing an interactive tool in
+ * `allowedTools`.
  */
 
 /**
@@ -18,7 +20,9 @@ export const DEFAULT_BASE_TOOLS: readonly string[] = [
 
 /**
  * Interactive user-input tools (and their per-toolset variants) excluded from
- * the SDK default toolset.
+ * SDK sessions by default. The authoritative set lives in the harness
+ * (interactive-policy); this list exists so the SDK can detect an explicit
+ * opt-in via `allowedTools`.
  */
 export const EXCLUDED_INTERACTIVE_CLIENT_TOOLS: readonly string[] = [
   "AskUserQuestion",
@@ -26,76 +30,32 @@ export const EXCLUDED_INTERACTIVE_CLIENT_TOOLS: readonly string[] = [
 ];
 
 /**
- * Default client-side tool allowlist for SDK sessions.
- *
- * This is the union of the harness (letta-code) toolsets minus interactive
- * user-input tools. It is applied as an intersection filter: the harness still
- * picks the toolset for the session's model, and this list only removes the
- * interactive tools from whichever toolset is active. Tools the harness does
- * not include for the model are unaffected by their presence here.
+ * Whether a session should ask the harness to exclude interactive
+ * user-input tools. Listing one in `allowedTools` is the explicit opt-in.
  */
-export const DEFAULT_CLIENT_TOOLS: readonly string[] = [
-  // default (Anthropic-style) toolset
-  "Bash",
-  "Edit",
-  "EnterWorktree",
-  "memory",
-  "Read",
-  "Skill",
-  "Task",
-  "TaskCreate",
-  "TaskGet",
-  "TaskList",
-  "TaskOutput",
-  "TaskStop",
-  "TaskUpdate",
-  "Write",
-  // codex toolsets
-  "exec_command",
-  "write_stdin",
-  "ApplyPatch",
-  "apply_patch",
-  "UpdatePlan",
-  "update_plan",
-  "ViewImage",
-  "view_image",
-  "memory_apply_patch",
-  // gemini toolsets
-  "RunShellCommand",
-  "run_shell_command",
-  "ReadFileGemini",
-  "read_file_gemini",
-  "ListDirectory",
-  "list_directory",
-  "GlobGemini",
-  "glob_gemini",
-  "SearchFileContent",
-  "search_file_content",
-  "Replace",
-  "replace",
-  "WriteFileGemini",
-  "write_file_gemini",
-  "WriteTodos",
-  "write_todos",
-  "ReadManyFiles",
-  "read_many_files",
-];
+export function shouldExcludeInteractiveTools(
+  allowedTools: readonly string[] | undefined,
+): boolean {
+  return !allowedTools?.some((name) =>
+    EXCLUDED_INTERACTIVE_CLIENT_TOOLS.includes(name),
+  );
+}
 
 /**
  * Resolve the client tool allowlist for a session.
  *
- * An explicit `allowedTools` wins over the SDK default toolset (including
- * re-adding interactive tools). Custom SDK tool names are always merged in:
- * the harness filters external tools by this allowlist too, and registering
- * a custom tool is already an explicit opt-in.
+ * Undefined `allowedTools` sends no allowlist — the harness default toolset
+ * applies (minus interactive tools, excluded separately). When an explicit
+ * allowlist is given, custom SDK tool names are merged in: the harness
+ * filters external tools by the allowlist too, and registering a custom tool
+ * is already an explicit opt-in.
  */
 export function resolveClientToolAllowlist(
   allowedTools: readonly string[] | undefined,
   customToolNames: readonly string[] = [],
-): string[] {
-  const resolved = [
-    ...(allowedTools !== undefined ? allowedTools : DEFAULT_CLIENT_TOOLS),
-  ];
+): string[] | undefined {
+  if (allowedTools === undefined) return undefined;
+  const resolved = [...allowedTools];
   for (const name of customToolNames) {
     if (!resolved.includes(name)) {
       resolved.push(name);

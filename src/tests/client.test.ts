@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_CLIENT_TOOLS, LettaAgentClient, Session } from "../index.js";
+import { LettaAgentClient, Session } from "../index.js";
 import { asAdvanced } from "./advanced-session.js";
 
 type Listener = (event: unknown) => void;
@@ -681,7 +681,7 @@ describe("LettaAgentClient", () => {
     }
   });
 
-  test("sends the SDK default client tool allowlist when allowedTools is omitted", async () => {
+  test("excludes interactive tools by default without pinning an allowlist", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({
       backend: "remote",
@@ -699,10 +699,37 @@ describe("LettaAgentClient", () => {
           typeof command === "object" && command !== null && "type" in command && command.type === "input",
       );
       const payload = inputCommand?.payload as Record<string, unknown> | undefined;
-      const allowlist = payload?.client_tool_allowlist as string[];
-      expect(allowlist).toEqual([...DEFAULT_CLIENT_TOOLS]);
-      expect(allowlist).not.toContain("AskUserQuestion");
-      expect(allowlist).not.toContain("request_user_input");
+      // No allowlist by default — the harness default toolset applies…
+      expect(payload).not.toHaveProperty("client_tool_allowlist");
+      // …with interactive user-input tools excluded via the protocol flag.
+      expect(payload?.exclude_interactive_tools).toBe(true);
+    } finally {
+      session.close();
+    }
+  });
+
+  test("allowedTools with AskUserQuestion opts back into interactive tools", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123", {
+      allowedTools: ["Bash", "Read", "AskUserQuestion"],
+    });
+    try {
+      await asAdvanced(session).initialize();
+      await asAdvanced(session).runTurn("hello");
+
+      const inputCommand = fakeControlSocket().sent.find(
+        (command): command is Record<string, unknown> =>
+          typeof command === "object" && command !== null && "type" in command && command.type === "input",
+      );
+      const payload = inputCommand?.payload as Record<string, unknown> | undefined;
+      expect(payload?.client_tool_allowlist).toEqual(["Bash", "Read", "AskUserQuestion"]);
+      expect(payload).not.toHaveProperty("exclude_interactive_tools");
     } finally {
       session.close();
     }
@@ -1102,8 +1129,8 @@ describe("LettaAgentClient", () => {
     expect(createCommand.create_agent?.body?.include_base_tools).toBe(false);
     expect(createCommand.create_agent?.body?.include_base_tool_rules).toBe(false);
 
-    // 2. Every turn pins the client-side toolset to the SDK default allowlist,
-    //    which excludes interactive user-input tools.
+    // 2. Every turn keeps the harness default toolset (no pinned allowlist)
+    //    and excludes interactive user-input tools via the protocol flag.
     FakeAppServerSocket.instances = [];
     const session = client.createSession(agentId);
     try {
@@ -1115,15 +1142,8 @@ describe("LettaAgentClient", () => {
           typeof command === "object" && command !== null && "type" in command && command.type === "input",
       );
       const payload = inputCommand?.payload as Record<string, unknown> | undefined;
-      const allowlist = payload?.client_tool_allowlist as string[];
-      expect(allowlist).toEqual([...DEFAULT_CLIENT_TOOLS]);
-      // The Anthropic-style core toolset is present…
-      for (const tool of ["Bash", "Edit", "Read", "Write", "memory", "Skill", "Task"]) {
-        expect(allowlist).toContain(tool);
-      }
-      // …and interactive user-input tools are not.
-      expect(allowlist).not.toContain("AskUserQuestion");
-      expect(allowlist).not.toContain("request_user_input");
+      expect(payload).not.toHaveProperty("client_tool_allowlist");
+      expect(payload?.exclude_interactive_tools).toBe(true);
     } finally {
       session.close();
     }
@@ -1355,17 +1375,16 @@ describe("LettaAgentClient", () => {
         ],
       });
 
-      // The default client tool allowlist must include the custom tool —
-      // the harness filters external tools by this allowlist too.
+      // No default allowlist is sent, so the custom tool is never filtered
+      // by the harness; interactive tools are excluded via the flag instead.
       await asAdvanced(session).runTurn("hello");
       const inputCommand = fakeControlSocket().sent.find(
         (command): command is Record<string, unknown> =>
           typeof command === "object" && command !== null && "type" in command && command.type === "input",
       );
-      const allowlist = (inputCommand?.payload as Record<string, unknown>)
-        ?.client_tool_allowlist as string[];
-      expect(allowlist).toContain("get_weather");
-      expect(allowlist).toEqual([...DEFAULT_CLIENT_TOOLS, "get_weather"]);
+      const payload = inputCommand?.payload as Record<string, unknown> | undefined;
+      expect(payload).not.toHaveProperty("client_tool_allowlist");
+      expect(payload?.exclude_interactive_tools).toBe(true);
 
       // Harness asks the SDK to execute the tool; it runs client-side and
       // the result is sent back over the wire.
