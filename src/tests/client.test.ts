@@ -1408,6 +1408,57 @@ describe("LettaAgentClient", () => {
     }
   });
 
+  test("explicit allowedTools remains authoritative over registered custom tools", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("agent-123", {
+      allowedTools: ["Read"],
+      tools: [
+        {
+          name: "get_weather",
+          label: "Get weather",
+          description: "Get the weather for a city",
+          parameters: {
+            type: "object",
+            properties: { city: { type: "string" } },
+            required: ["city"],
+          },
+          execute: async () => ({
+            content: [{ type: "text", text: "sunny" }],
+          }),
+        },
+      ],
+    });
+
+    try {
+      await asAdvanced(session).initialize();
+      expect(fakeControlSocket().sent[0]).toMatchObject({
+        type: "runtime_start",
+        external_tools: [
+          {
+            tools: [{ name: "get_weather" }],
+          },
+        ],
+      });
+
+      await asAdvanced(session).runTurn("hello");
+      const inputCommand = fakeControlSocket().sent.find(
+        (command): command is Record<string, unknown> =>
+          typeof command === "object" && command !== null && "type" in command && command.type === "input",
+      );
+      const payload = inputCommand?.payload as Record<string, unknown> | undefined;
+      expect(payload?.client_tool_allowlist).toEqual(["Read"]);
+      expect(payload?.exclude_interactive_tools).toBe(true);
+    } finally {
+      session.close();
+    }
+  });
+
   test("websocket protocol sessions apply model dreaming and list messages", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({

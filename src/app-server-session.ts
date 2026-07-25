@@ -545,26 +545,6 @@ async function respondToAppServerControlRequest(
   } as Parameters<AppServerClient["input"]>[0]);
 }
 
-/**
- * Merge custom SDK tool names into an explicit allowlist — the harness
- * filters registered external tools by the allowlist too, and registering a
- * custom tool is already an explicit opt-in. Undefined stays undefined (no
- * allowlist sent; the harness default toolset applies).
- */
-export function resolveClientToolAllowlist(
-  allowedTools: readonly string[] | undefined,
-  customToolNames: readonly string[] = [],
-): string[] | undefined {
-  if (allowedTools === undefined) return undefined;
-  const resolved = [...allowedTools];
-  for (const name of customToolNames) {
-    if (!resolved.includes(name)) {
-      resolved.push(name);
-    }
-  }
-  return resolved;
-}
-
 export class AppServerRuntimeController implements RemoteClientRuntimeController {
   constructor(
     private readonly client: AppServerClient,
@@ -791,10 +771,7 @@ export class AppServerSession extends RemoteClientSessionCore {
         controller: new AppServerRuntimeController(
           client,
           this.remoteOptions,
-          resolveClientToolAllowlist(
-            this.currentOptions().allowedTools,
-            [...this.externalTools.keys()],
-          ),
+          this.currentOptions().allowedTools,
         ),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
