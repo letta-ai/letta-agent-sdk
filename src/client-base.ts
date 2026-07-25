@@ -90,7 +90,7 @@ type TurnSession = LettaCodeSession & {
  * `local` spawns an SDK-owned Letta Code app-server and speaks the websocket
  * protocol by default, with an explicit stdio fallback for legacy flows.
  * `remote` connects to a user-managed Letta Code app-server websocket endpoint.
- * `cloud` uses agents hosted on Constellation, with an explicit remote
+ * `cloud` uses agents hosted on Letta Cloud, with an explicit remote
  * environment or SDK-managed sandbox.
  */
 export class LettaAgentClientBase {
@@ -243,7 +243,7 @@ export class LettaAgentClientBase {
     if (this.backend === "cloud") {
       if (!agentId) {
         throw new Error(
-          "Constellation createSession() requires an agent id. Call createAgent() first or pass an agent id.",
+          "Letta Cloud createSession() requires an agent id. Call createAgent() first or pass an agent id.",
         );
       }
       return new CloudEnvironmentSession(this.cloudOptions(), {
@@ -260,7 +260,7 @@ export class LettaAgentClientBase {
    * Resume an existing agent default conversation or a specific conversation.
    *
    * `options.environment` overrides the client's default execution target for
-   * Constellation sessions. Remote app-server URLs already select the runtime.
+   * Letta Cloud sessions. Remote app-server URLs already select the runtime.
    */
   resumeSession(
     id: string,
@@ -361,10 +361,10 @@ export class LettaAgentClientBase {
     if (this.backend === "cloud") {
       const cloudOptions = this.cloudOptions();
       if (cloudOptions.environment !== undefined && options.sandbox !== undefined) {
-        throw new Error(`Constellation ${action}() cannot specify sandbox options when the client has a default environment.`);
+        throw new Error(`Letta Cloud ${action}() cannot specify sandbox options when the client has a default environment.`);
       }
       if (cloudOptions.sandbox !== undefined && options.environment !== undefined) {
-        throw new Error(`Constellation ${action}() cannot specify an environment when the client has default sandbox options.`);
+        throw new Error(`Letta Cloud ${action}() cannot specify an environment when the client has default sandbox options.`);
       }
       assertCloudSessionOptionsSupported(action, options);
       return;
@@ -441,7 +441,7 @@ export class LettaAgentClientBase {
 
   private cloudOptions(): LettaCodeCloudClientOptions {
     if (this.backend !== "cloud") {
-      throw new Error('Constellation options requested for non-"cloud" backend.');
+      throw new Error('Letta Cloud options requested for non-"cloud" backend.');
     }
     return this.options as LettaCodeCloudClientOptions;
   }

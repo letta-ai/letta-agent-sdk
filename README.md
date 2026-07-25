@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/@letta-ai/letta-agent-sdk.svg?style=flat-square)](https://www.npmjs.com/package/@letta-ai/letta-agent-sdk) [![Discord](https://img.shields.io/badge/discord-join-blue?style=flat-square&logo=discord)](https://discord.gg/letta)
 
-The SDK interface to [**Letta Code**](https://github.com/letta-ai/letta-code). Build agents with persistent memory that learn over time. 
+Build applications with stateful agents powered by the [Letta agent harness](https://www.letta.com/agent). The Agent SDK provides one TypeScript interface for managed, local, and self-hosted deployments.
 
 ## Installation
 
@@ -10,388 +10,115 @@ The SDK interface to [**Letta Code**](https://github.com/letta-ai/letta-code). B
 npm install @letta-ai/letta-agent-sdk
 ```
 
-## Quick start
+Local execution requires Node.js 22.19 or newer.
 
-### Client creation
+## Quick start
 
 ```ts
 import { LettaAgentClient } from "@letta-ai/letta-agent-sdk";
 
-// Local: SDK-owned Letta Code app-server over loopback websockets. The SDK
-// spawns/manages the app-server process for you.
-const localClient = new LettaAgentClient({ backend: "local" });
-
-// Remote: connect to a user-managed Letta Code app-server over websockets.
-const remoteClient = new LettaAgentClient({
-  backend: "remote",
-  url: "http://127.0.0.1:4500",
-  // Required when the app-server is bound to a non-loopback interface with
-  // --ws-auth capability-token.
-  authToken: process.env.LETTA_APP_SERVER_TOKEN,
-});
-
-// Constellation: create or resume agents whose state lives in Letta's
-// agent cloud, with an SDK-managed sandbox by default.
 const client = new LettaAgentClient({
   backend: "cloud",
   apiKey: process.env.LETTA_API_KEY,
 });
+
+const agentId = await client.createAgent({
+  model: "anthropic/claude-opus-4-8",
+  persona: "You are a proactive research assistant.",
+  human: "The user prefers concise summaries with sources and next steps.",
+});
+
+await using session = client.createSession(agentId);
+
+await session.send("Research the latest project changes and prepare a brief.");
+for await (const message of session.stream()) {
+  if (message.type === "assistant") {
+    console.log(message.content);
+  }
+}
 ```
 
-### Browser and React Native client
+An agent is the persistent entity with memory. A conversation is a thread on that agent. A session is the active connection used to send messages, stream events, execute tools, and handle approvals.
 
-Use the portable `/client` entry point in Expo, React Native, and browser
-applications. It contains the remote and Cloud transports without importing
-Node process-management modules:
+- `createSession(agentId)` starts a new conversation.
+- `resumeSession(conversationId)` resumes a saved conversation.
+- `resumeSession(agentId)` resumes the agent's default conversation.
+- `prompt(message, agentId)` runs a one-shot prompt in a new conversation.
+
+## Deployment options
+
+| Backend | Agent state | Tool execution |
+| --- | --- | --- |
+| `cloud` | Letta Cloud | Managed cloud sandbox or a selected computer |
+| `local` | Current computer | Current computer through an SDK-managed App Server |
+| `remote` | Configured by the App Server | A user-managed App Server computer |
+
+### Local
+
+```ts
+const client = new LettaAgentClient({ backend: "local" });
+
+await using session = client.createSession(agentId, {
+  cwd: process.cwd(),
+});
+```
+
+### Remote App Server
+
+```ts
+const client = new LettaAgentClient({
+  backend: "remote",
+  url: "http://127.0.0.1:4500",
+  authToken: process.env.LETTA_APP_SERVER_TOKEN,
+});
+```
+
+See the [deployment guide](https://docs.letta.com/letta-agent-sdk/deployment) for managed sandboxes, remote computers, App Server setup, and authentication.
+
+## Browser and React Native
+
+Use the portable `/client` entry point in browser, Expo, and React Native applications. It supports the `cloud` and `remote` backends without importing Node process-management modules.
 
 ```ts
 import { LettaAgentClient } from "@letta-ai/letta-agent-sdk/client";
 
 const client = new LettaAgentClient({
   backend: "cloud",
-  apiKey: "your-user-provided-api-key",
-  // Browser and React Native WebSockets cannot set upgrade headers.
+  apiKey: userProvidedApiKey,
   webSocketAuth: "query",
 });
-
-const agentId = await client.createAgent({
-  personality: "memo",
-  model: "anthropic/claude-sonnet-4",
-});
-const session = client.resumeSession(agentId);
 ```
 
-The `/client` entry requires `backend: "remote"` or `backend: "cloud"`.
-Local execution remains available from the package root because it launches
-and manages a Letta Code process. For authenticated remote app-servers in React
-Native, pass the platform WebSocket through
-`createReactNativeWebSocketConstructor()` so capability-token headers use React
-Native's third constructor argument. Cloud clients should prefer query
-authentication as shown above.
+For authenticated Remote App Servers in React Native, pass the platform WebSocket through `createReactNativeWebSocketConstructor()` so capability-token headers use React Native's third constructor argument.
 
-### Agent and conversation management
+## Management APIs
 
-The same management API works with Cloud REST and the Letta Code app-server
-protocol, including from the portable `/client` entry:
+The client exposes agent, conversation, and Cloud repository management alongside active sessions:
 
 ```ts
-const agents = await client.agents.list({
-  query: "support",
-  tags: ["mobile"],
-});
-const agent = await client.agents.retrieve(agents[0].id);
-await client.agents.update(agent.id, { name: "Mobile support" });
-
+const agents = await client.agents.list({ tags: ["support"] });
 const conversations = await client.conversations.list({
-  agentId: agent.id,
+  agentId: agents[0].id,
   orderBy: "lastMessageAt",
   order: "desc",
 });
-const conversation = await client.conversations.create({
-  agentId: agent.id,
-  summary: "New mobile thread",
-});
-await client.conversations.update(conversation.id, {
-  summary: "Onboarding question",
-});
-const history = await client.conversations.listMessages(conversation.id, {
-  limit: 50,
-  order: "desc",
+
+const repository = await client.repositories.create({ name: "inputs" });
+await client.repositories.files.create(repository.id, {
+  path: "brief.md",
+  content: "# Project brief\n",
 });
 ```
 
-Agent creation intentionally remains the high-level
-`client.createAgent(options)` method. It uses Letta Code's centralized
-personality, memory-filesystem, origin-tag, and preset logic on every backend.
-For an active session, `session.listMessages()` remains the convenient
-conversation-scoped form of `client.conversations.listMessages()`.
+`client.repositories` is available on the `cloud` backend. See [Cloud repositories](https://docs.letta.com/letta-agent-sdk/repositories) for file operations, version history, and session resources.
 
-### Persistent agent with multi-turn conversations
+## Documentation
 
-```ts
-import { LettaAgentClient } from "@letta-ai/letta-agent-sdk";
-
-const client = new LettaAgentClient({ backend: "local" });
-
-const agentId = await client.createAgent({
-  persona: "You are a helpful coding assistant for TypeScript projects.",
-});
-
-await using session = client.resumeSession(agentId);
-
-await session.send("Find and fix the bug in auth.ts");
-for await (const msg of session.stream()) {
-  if (msg.type === "assistant") console.log(msg.content);
-}
-
-await session.send("Add a unit test for the fix");
-for await (const msg of session.stream()) {
-  if (msg.type === "assistant") console.log(msg.content);
-}
-```
-
-Cloud, remote, and local agent sessions can accept another `send()` while a
-turn is streaming. The SDK sends the same `input` frame used by Letta Desktop
-and the listener owns queueing; `stream()` may surface `queue_update` events
-before the current turn's `result`.
-
-By default, `resumeSession(agentId)` continues the agent’s default conversation.
-Use `createSession(agentId)` when you want to start a fresh thread.
-
-For Constellation agents, omitting `environment` lets the SDK create and manage
-a sandbox for the session. `environment` is still session-scoped and can
-override the client default when you want to use a specific remote runtime:
-
-```ts
-await using session = client.resumeSession(agentId, {
-  environment: { name: "LettaDevelopers" },
-});
-```
-
-The top-level helpers (`createAgent`, `createSession`, `resumeSession`, and
-`prompt`) remain available. Local helper calls use Letta Code's default agent
-selection when you do not pass an agent ID.
-
-### User-managed app-server backend
-
-Use `backend: "remote"` when you already have a Letta Code app-server running.
-The app-server URL selects the execution environment; the SDK uses the same
-Letta Code websocket protocol for `runtime_start`, `input`, streaming deltas,
-and SDK-defined external tools.
-
-```ts
-const client = new LettaAgentClient({
-  backend: "remote",
-  url: "http://127.0.0.1:4500",
-  authToken: process.env.LETTA_APP_SERVER_TOKEN,
-  requestTimeoutMs: 120_000,
-});
-
-const agentId = await client.createAgent({
-  model: "anthropic/claude-sonnet-4",
-  persona: "You are a helpful coding assistant.",
-});
-
-await using session = client.createSession(agentId);
-
-await session.send("Summarize this repository.");
-for await (const msg of session.stream()) {
-  if (msg.type === "assistant") console.log(msg.content);
-}
-```
-
-
-### Constellation
-
-Use `backend: "cloud"` to create or resume agents hosted on Constellation. If
-no `environment` is provided, the SDK creates a managed sandbox, waits for it to
-come online, and refreshes it while the session is active. Non-default
-conversations request a conversation-scoped sandbox from supporting servers;
-the default conversation and legacy servers retain the agent-scoped lifecycle.
-Managed sandboxes are left for TTL cleanup by default so another session for the
-same conversation can reconnect to them.
-
-```ts
-const client = new LettaAgentClient({
-  backend: "cloud",
-  apiKey: process.env.LETTA_API_KEY,
-  sandbox: {
-    // Optional: defaults to a 5-minute refresh TTL.
-    ttlMinutes: 5,
-    // Optional: defaults false. Set true only with exclusive ownership.
-    terminateOnClose: false,
-  },
-});
-
-const agentId = await client.createAgent({
-  model: "anthropic/claude-sonnet-4",
-  persona: "You are a helpful coding assistant.",
-});
-
-await using session = client.resumeSession(agentId, {
-  permissionMode: "unrestricted",
-});
-
-await session.send("Summarize this repository.");
-for await (const msg of session.stream()) {
-  if (msg.type === "assistant") console.log(msg.content);
-}
-```
-
-If you pass `cwd` for a Constellation session, use a path that exists inside the
-selected remote environment or managed sandbox. Local paths such as
-`process.cwd()` are not mapped into managed sandboxes automatically.
-
-You can still set a default `environment` on the client or override it per
-session to use an existing remote runtime instead of an SDK-managed sandbox. Use
-the environment name from `letta remote --env-name <name>`:
-
-```ts
-const client = new LettaAgentClient({
-  backend: "cloud",
-  apiKey: process.env.LETTA_API_KEY,
-  environment: { name: "devbox" },
-});
-
-await using session = client.resumeSession(agentId, {
-  environment: { name: "devbox" },
-});
-```
-
-For advanced cases where you want to target a specific remote connection, pass
-its `connectionId` instead. Connection IDs are assigned when the remote listener
-registers and may change after reconnects:
-
-```ts
-await using session = client.resumeSession(agentId, {
-  environment: { connectionId: "conn-123" },
-});
-```
-
-`environment` also accepts `{ id: "env-..." }` for an environment record or
-`{ deviceId: "device-..." }` for a stable device selector.
-
-`environment` and `sandbox` are mutually exclusive. Conversation-scoped
-sandboxes refresh and terminate by sandbox ID. Legacy agent-scoped sandboxes
-retain the latest-active ownership check. Pass `sandbox.terminateOnClose: true`
-to request best-effort eager cleanup, but only when no other session or
-reconnecting client needs the sandbox.
-
-If Cloud reaps a conversation-scoped sandbox before the next refresh,
-`send()` throws `CloudManagedSandboxExpiredError` before transmitting the turn.
-Close the old SDK session and resume the same conversation to create a fresh
-connection, then retry safely:
-
-```ts
-import {
-  CloudManagedSandboxExpiredError,
-  LettaAgentClient,
-} from "@letta-ai/letta-agent-sdk";
-
-const client = new LettaAgentClient({
-  backend: "cloud",
-  apiKey: process.env.LETTA_API_KEY,
-});
-const conversationId = "conv-123";
-let session = client.resumeSession(conversationId);
-
-async function sendWithSandboxRecovery(message: string): Promise<void> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      await session.send(message);
-      for await (const event of session.stream()) {
-        if (event.type === "assistant") console.log(event.content);
-      }
-      return;
-    } catch (error) {
-      if (!(error instanceof CloudManagedSandboxExpiredError) || attempt > 0) {
-        throw error;
-      }
-      session.close();
-      session = client.resumeSession(conversationId);
-    }
-  }
-}
-```
-
-Only retry automatically for this pre-send expiration error. If a connection
-fails after `send()` succeeds, inspect conversation history before retrying
-because the original message may already have reached the runtime.
-
-By default, websocket authentication uses `Authorization` headers. Set
-`webSocketAuth: "query"` for browser-style websocket clients that cannot send
-custom upgrade headers.
-
-## Cloud repositories
-
-Cloud clients can create hosted repositories, manage text files inside them,
-and attach repositories to a session as resources. Repository resources are
-attached before the session starts and detached when the SDK session closes.
-
-```ts
-const client = new LettaAgentClient({
-  backend: "cloud",
-  apiKey: process.env.LETTA_API_KEY,
-});
-
-const repo = await client.repositories.create({ name: "inputs" });
-
-await client.repositories.files.create(repo.id, {
-  path: "data.csv",
-  content: csvContent,
-});
-
-await using session = client.createSession(agentId, {
-  resources: [
-    { type: "repository", repositoryId: repo.id },
-  ],
-});
-
-await session.send("Analyze the files in the attached repository.");
-```
-
-Repository file helpers are available under `client.repositories.files`, and
-version history helpers are available under `client.repositories.versions`.
-
-## Session configuration
-
-Session options let you set runtime defaults before a session starts, including
-`model`, `reasoningEffort`, `cwd`, `permissionMode`, and dreaming triggers. For
-remote and Constellation sessions, `cwd` must be a path inside the selected
-runtime environment.
-
-```ts
-import { LettaAgentClient } from "@letta-ai/letta-agent-sdk";
-
-const client = new LettaAgentClient({ backend: "local" });
-
-const session = client.resumeSession("agent-123", {
-  model: "anthropic/claude-sonnet-4",
-  reasoningEffort: "high",
-  // For local sessions this may be a local path; for remote/Constellation
-  // sessions, use a path inside the selected runtime environment.
-  cwd: "/workspace/project",
-  permissionMode: "unrestricted",
-  dreaming: {
-    trigger: "step-count", // off | step-count | compaction-event
-    stepCount: 8,
-  },
-});
-```
-
-You can also inspect and change models after startup:
-
-```ts
-const catalog = await session.listModels();
-await session.updateModel({ model: "sonnet", reasoningEffort: "medium" });
-```
-
-Call `await session.abort()` to interrupt the current turn without closing the
-session.
-
-For advanced protocol access, use `sendCommand()` with raw Letta Code websocket
-protocol commands:
-
-```ts
-await session.sendCommand({
-  type: "change_device_state",
-  runtime: { agent_id: session.agentId!, conversation_id: session.conversationId! },
-  payload: { cwd: "/workspace/project" },
-});
-
-const sync = await session.sendCommand(
-  {
-    type: "sync",
-    runtime: { agent_id: session.agentId!, conversation_id: session.conversationId! },
-  },
-  { responseType: "sync_response" },
-);
-```
-
-## Links
-
-- Docs: https://docs.letta.com/letta-agent-sdk
-- Examples: [`./examples`](./examples)
+- [Overview](https://docs.letta.com/letta-agent-sdk/overview)
+- [Quickstart](https://docs.letta.com/letta-agent-sdk/quickstart)
+- [Deployment](https://docs.letta.com/letta-agent-sdk/deployment)
+- [SDK reference](https://docs.letta.com/letta-agent-sdk/reference)
+- [Examples](./examples)
 
 ---
 
