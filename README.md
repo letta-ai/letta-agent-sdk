@@ -38,6 +38,37 @@ const client = new LettaAgentClient({
 });
 ```
 
+### Browser and React Native client
+
+Use the portable `/client` entry point in Expo, React Native, and browser
+applications. It contains the remote and Cloud transports without importing
+Node process-management modules:
+
+```ts
+import { LettaAgentClient } from "@letta-ai/letta-agent-sdk/client";
+
+const client = new LettaAgentClient({
+  backend: "cloud",
+  apiKey: "your-user-provided-api-key",
+  // Browser and React Native WebSockets cannot set upgrade headers.
+  webSocketAuth: "query",
+});
+
+const agentId = await client.createAgent({
+  personality: "memo",
+  model: "anthropic/claude-sonnet-4",
+});
+const session = client.resumeSession(agentId);
+```
+
+The `/client` entry requires `backend: "remote"` or `backend: "cloud"`.
+Local execution remains available from the package root because it launches
+and manages a Letta Code process. For authenticated remote app-servers in React
+Native, pass the platform WebSocket through
+`createReactNativeWebSocketConstructor()` so capability-token headers use React
+Native's third constructor argument. Cloud clients should prefer query
+authentication as shown above.
+
 ### Persistent agent with multi-turn conversations
 
 ```ts

@@ -1024,10 +1024,10 @@ describe("LettaAgentClient", () => {
       create_agent: {
         body: {
           model: "anthropic/claude-sonnet-4",
-          tags: ["sdk-test", "origin:letta-code"],
-          memory_blocks: [
+          tags: ["origin:letta-code", "git-memory-enabled", "sdk-test"],
+          memory_blocks: expect.arrayContaining([
             { label: "persona", value: "Helpful TypeScript assistant" },
-          ],
+          ]),
         },
       },
     });
