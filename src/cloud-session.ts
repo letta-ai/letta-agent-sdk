@@ -305,7 +305,7 @@ export function validateCloudClientOptions(options: LettaCodeCloudClientOptions)
   validatePositiveInteger(options.requestTimeoutMs, "requestTimeoutMs");
   validateCloudSandboxOptions(options.sandbox, "sandbox");
   if (options.environment !== undefined && options.sandbox !== undefined) {
-    throw new Error("Constellation sessions cannot specify both environment and sandbox options.");
+    throw new Error("Letta Cloud sessions cannot specify both environment and sandbox options.");
   }
   if (
     options.webSocketAuth !== undefined &&
@@ -669,25 +669,25 @@ export function assertCloudSessionOptionsSupported(
 ): void {
   validateCloudSandboxOptions(options.sandbox, "sandbox");
   if (options.environment !== undefined && options.sandbox !== undefined) {
-    throw new Error(`Constellation ${action}() cannot specify both environment and sandbox options.`);
+    throw new Error(`Letta Cloud ${action}() cannot specify both environment and sandbox options.`);
   }
   if (options.systemPrompt !== undefined) {
-    throw new Error(`Constellation ${action}() cannot rewrite an existing agent's systemPrompt from the SDK adapter yet.`);
+    throw new Error(`Letta Cloud ${action}() cannot rewrite an existing agent's systemPrompt from the SDK adapter yet.`);
   }
   if (options.disallowedTools !== undefined) {
-    throw new Error(`Constellation ${action}() has not wired disallowedTools to the remote device protocol yet.`);
+    throw new Error(`Letta Cloud ${action}() has not wired disallowedTools to the remote device protocol yet.`);
   }
   if (options.systemInfoReminder !== undefined) {
-    throw new Error(`Constellation ${action}() has not wired systemInfoReminder to the remote device protocol yet.`);
+    throw new Error(`Letta Cloud ${action}() has not wired systemInfoReminder to the remote device protocol yet.`);
   }
   if (options.dreaming?.behavior !== undefined) {
-    throw new Error(`Constellation ${action}() does not yet support dreaming.behavior overrides.`);
+    throw new Error(`Letta Cloud ${action}() does not yet support dreaming.behavior overrides.`);
   }
   if ((options as { memfsStartup?: unknown }).memfsStartup !== undefined) {
-    throw new Error(`Constellation ${action}() does not support memfsStartup.`);
+    throw new Error(`Letta Cloud ${action}() does not support memfsStartup.`);
   }
   if (options.includePartialMessages !== undefined) {
-    throw new Error(`Constellation ${action}() streams Remote Client deltas directly; includePartialMessages is not a separate toggle.`);
+    throw new Error(`Letta Cloud ${action}() streams Remote Client deltas directly; includePartialMessages is not a separate toggle.`);
   }
 }
 
@@ -853,7 +853,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
 
     if (!agentId) {
       throw new Error(
-        "Constellation createSession()/resumeSession() requires an agent id or conversation id.",
+        "Letta Cloud createSession()/resumeSession() requires an agent id or conversation id.",
       );
     }
 
@@ -868,7 +868,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
 
     if (!conversationId) {
       throw new Error(
-        "Constellation createSession()/resumeSession() requires an agent id or conversation id.",
+        "Letta Cloud createSession()/resumeSession() requires an agent id or conversation id.",
       );
     }
 
@@ -1026,7 +1026,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     const sandboxOptions = this.effectiveSandboxOptions();
     if (environment !== undefined) {
       if (sandboxOptions !== undefined) {
-        throw new Error("Constellation sessions cannot specify both environment and sandbox options.");
+        throw new Error("Letta Cloud sessions cannot specify both environment and sandbox options.");
       }
       return this.resolveExplicitConnection(environment);
     }

@@ -277,7 +277,7 @@ export type AnyAgentTool = AgentTool<any, unknown>;
  *
  * - local: spawn/manage a local Letta Code app-server over loopback websockets.
  * - remote: connect to a user-managed app-server over websockets.
- * - cloud: use agents hosted on Constellation, with an explicit remote
+ * - cloud: use agents hosted on Letta Cloud, with an explicit remote
  *   environment or SDK-managed sandbox.
  */
 export type LettaCodeBackend = "local" | "remote" | "cloud";
@@ -383,7 +383,7 @@ export interface LettaCodeCloudClientOptions {
   /** Heartbeat interval for the Cloud status websocket. Defaults to 30s. */
   pingIntervalMs?: number;
   /**
-   * Execution target for Constellation sessions. If omitted, the SDK creates
+   * Execution target for Letta Cloud sessions. If omitted, the SDK creates
    * and owns a sandbox for the session.
    */
   environment?: LettaCodeEnvironment;
