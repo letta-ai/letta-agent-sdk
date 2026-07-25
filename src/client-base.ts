@@ -1,14 +1,25 @@
 import { RepositoriesClient } from "./repositories.js";
+import { AppServerManagementTransport } from "./app-server-management.js";
 import {
   AppServerSession,
   assertRemoteSessionOptionsSupported,
 } from "./app-server-session.js";
+import { CloudManagementTransport } from "./cloud-management.js";
 import {
   CloudEnvironmentSession,
   assertCloudSessionOptionsSupported,
   createCloudAgent,
   validateCloudClientOptions,
 } from "./cloud-session.js";
+import {
+  createAgentsClient,
+  createConversationsClient,
+  type ManagementTransport,
+} from "./management.js";
+import type {
+  AgentsClient,
+  ConversationsClient,
+} from "./management-types.js";
 import type {
   CreateAgentOptions,
   CreateSessionOptions,
@@ -85,8 +96,11 @@ type TurnSession = LettaCodeSession & {
 export class LettaAgentClientBase {
   readonly backend: LettaCodeBackend;
   readonly environment: LettaCodeEnvironment | undefined;
+  readonly agents: AgentsClient;
+  readonly conversations: ConversationsClient;
   protected readonly options: LettaCodeClientOptions;
   private repositoriesClient: RepositoriesClient | null = null;
+  private managementTransport: ManagementTransport | null = null;
 
   constructor(options: LettaCodeClientOptions = {}) {
     const backend = options.backend ?? "local";
@@ -99,6 +113,10 @@ export class LettaAgentClientBase {
     this.backend = backend;
     this.environment = getOptionsEnvironment(options);
     this.options = options;
+    this.agents = createAgentsClient(() => this.getManagementTransport());
+    this.conversations = createConversationsClient(
+      () => this.getManagementTransport(),
+    );
 
     if (this.backend === "local" && this.environment !== undefined) {
       throw new Error(
@@ -386,6 +404,10 @@ export class LettaAgentClientBase {
     );
   }
 
+  protected createLocalManagementTransport(): ManagementTransport {
+    throw this.localBackendUnavailableError();
+  }
+
   private remoteOptions(): LettaCodeRemoteClientOptions {
     if (this.backend !== "remote") {
       throw new Error("Remote options requested for non-remote backend.");
@@ -399,6 +421,22 @@ export class LettaAgentClientBase {
     }
     this.repositoriesClient ??= new RepositoriesClient(this.cloudOptions());
     return this.repositoriesClient;
+  }
+
+  private getManagementTransport(): ManagementTransport {
+    if (this.managementTransport) return this.managementTransport;
+    if (this.backend === "remote") {
+      this.managementTransport = new AppServerManagementTransport(
+        this.remoteOptions(),
+      );
+    } else if (this.backend === "cloud") {
+      this.managementTransport = new CloudManagementTransport(
+        this.cloudOptions(),
+      );
+    } else {
+      this.managementTransport = this.createLocalManagementTransport();
+    }
+    return this.managementTransport;
   }
 
   private cloudOptions(): LettaCodeCloudClientOptions {
