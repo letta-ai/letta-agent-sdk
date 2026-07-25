@@ -1,1 +1,0 @@
-{"kind":"ObservationEvent","id":"evt-3","timestamp":"2026-07-01T12:00:06","tool_call_id":"oh-call-1","action_id":"evt-2","observation":{"content":[{"type":"text","text":"src/api.ts:40: fetch(url)"}],"is_error":false}}

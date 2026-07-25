@@ -1,3 +1,0 @@
-[loader]
-# Prompt text lives in .md files (src/dream/prompts/); import as strings.
-".md" = "text"

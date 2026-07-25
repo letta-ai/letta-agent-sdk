@@ -30,8 +30,6 @@ const nodeBuild = await Bun.build({
   ...sharedBuildOptions,
   entrypoints: ["./src/index.ts"],
   target: "node",
-  // Prompt text lives in .md files (src/dream/prompts/); inline as strings.
-  loader: { ".md": "text" },
 });
 if (!nodeBuild.success) {
   throw new AggregateError(nodeBuild.logs, "Node entry build failed");
