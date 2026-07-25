@@ -666,7 +666,7 @@ describeLive("live integration: letta-agent-sdk", () => {
         log(`Session initialized for stuck agent, conversationId: ${init.conversationId}`);
 
         // Attempt recovery - the agent has a pending approval from a Bash tool call
-        const recovery = await asAdvanced(session).recoverPendingApprovals({ timeoutMs: 30000 });
+        const recovery = await session.recoverPendingApprovals({ timeoutMs: 30000 });
         log("Recovery result:", recovery);
 
         // The recovery should either succeed (recovered=true) or report that
@@ -695,7 +695,7 @@ describeLive("live integration: letta-agent-sdk", () => {
               stopReason: result.stopReason,
               errorCode: result.errorCode,
             });
-            const followupRecovery = await asAdvanced(session).recoverPendingApprovals({ timeoutMs: 30000 });
+            const followupRecovery = await session.recoverPendingApprovals({ timeoutMs: 30000 });
             log("Post-recovery approval cleanup result", followupRecovery);
           } else if (result.success) {
             log("Post-recovery turn succeeded");

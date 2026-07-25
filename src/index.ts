@@ -85,6 +85,8 @@ export type {
   RunTurnOptions,
   RecoverPendingApprovalsOptions,
   RecoverPendingApprovalsResult,
+  ChangeDeviceStateOptions,
+  RemoveQueuedMessageResult,
   SkillSource,
   DreamingOptions,
   DreamingTrigger,

@@ -27,10 +27,12 @@ import type {
   ListModelsResult,
   BootstrapStateOptions,
   BootstrapStateResult,
+  ChangeDeviceStateOptions,
   SDKStreamEventPayload,
   RunTurnOptions,
   RecoverPendingApprovalsOptions,
   RecoverPendingApprovalsResult,
+  RemoveQueuedMessageResult,
   SDKProtocolCommand,
   SDKProtocolMessage,
   SendCommandOptions,
@@ -1178,6 +1180,18 @@ export class Session implements AsyncDisposable {
   async updateModel(_update: string | UpdateModelOptions): Promise<UpdateModelResult> {
     throw new Error(
       "updateModel() is not supported by this session. Use a Cloud, Remote, or local agent session.",
+    );
+  }
+
+  async changeDeviceState(_updates: ChangeDeviceStateOptions): Promise<void> {
+    throw new Error(
+      "changeDeviceState() is not supported by the legacy stdio transport. Use a Cloud, Remote, or local app-server session.",
+    );
+  }
+
+  async removeQueuedMessage(_itemId: string): Promise<RemoveQueuedMessageResult> {
+    throw new Error(
+      "removeQueuedMessage() is not supported by the legacy stdio transport. Use a Cloud, Remote, or local app-server session.",
     );
   }
 

@@ -45,6 +45,28 @@ An agent is the persistent entity with memory. A conversation is a thread on tha
 - `resumeSession(agentId)` resumes the agent's default conversation.
 - `prompt(message, agentId)` runs a one-shot prompt in a new conversation.
 
+Portable sessions also expose the stateful controls needed by interactive
+clients:
+
+```ts
+const state = await session.bootstrapState();
+await session.changeDeviceState({
+  cwd: "/workspace/project",
+  permissionMode: "acceptEdits",
+});
+
+const removed = await session.removeQueuedMessage(queueItemId);
+if (!removed.removed) {
+  // Reconcile the authoritative queue before offering the action again.
+}
+
+await session.recoverPendingApprovals();
+```
+
+`removeQueuedMessage()` waits for an app-server acknowledgement.
+`changeDeviceState()` currently confirms command transport only because the
+underlying protocol does not acknowledge that mutation.
+
 ## Deployment options
 
 | Backend | Agent state | Tool execution |

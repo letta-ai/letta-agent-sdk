@@ -1,6 +1,7 @@
 import type {
   BootstrapStateOptions,
   BootstrapStateResult,
+  ChangeDeviceStateOptions,
   CreateAgentOptions,
   LettaCodeClientSessionOptions,
   LettaCodeSession,
@@ -11,6 +12,7 @@ import type {
   MessageContentItem,
   RecoverPendingApprovalsOptions,
   RecoverPendingApprovalsResult,
+  RemoveQueuedMessageResult,
   ReasoningEffort,
   RunTurnOptions,
   SDKErrorCode,
@@ -736,6 +738,40 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     return this.controller.recoverPendingApprovals(this.runtime, options);
   }
 
+  async removeQueuedMessage(itemId: string): Promise<RemoveQueuedMessageResult> {
+    if (typeof itemId !== "string" || itemId.trim().length === 0) {
+      throw new Error("Invalid queue item id. Expected a non-empty string.");
+    }
+    if (!this.initialized) {
+      await this.initialize();
+    }
+    if (!this.controller || !this.runtime) {
+      throw new Error("Session is not initialized");
+    }
+
+    const response = await this.controller.request(
+      "remove_queue_item",
+      {
+        runtime: this.runtime,
+        item_id: itemId,
+      },
+      {
+        predicate: (message) =>
+          message.type === "remove_queue_item_response" &&
+          message.item_id === itemId,
+      },
+    );
+    if (typeof response.success !== "boolean") {
+      throw new Error("Invalid remove_queue_item_response from runtime");
+    }
+
+    return {
+      itemId:
+        typeof response.item_id === "string" ? response.item_id : itemId,
+      removed: response.success,
+    };
+  }
+
   async listMessages(options: ListMessagesOptions = {}): Promise<ListMessagesResult> {
     if (!this.initialized) {
       await this.initialize();
@@ -813,12 +849,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   }
 
   async changeDeviceState(
-    updates: {
-      cwd?: string;
-      permissionMode?: LettaCodeClientSessionOptions["permissionMode"];
-      agentId?: string;
-      conversationId?: string;
-    },
+    updates: ChangeDeviceStateOptions,
   ): Promise<void> {
     if (!this.initialized) {
       await this.initialize();
@@ -832,8 +863,11 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       const mode = mapPermissionMode(updates.permissionMode);
       if (mode !== undefined) payload.mode = mode;
     }
-    if (updates.agentId !== undefined) payload.agent_id = updates.agentId;
-    if (updates.conversationId !== undefined) payload.conversation_id = updates.conversationId;
+    if (Object.keys(payload).length === 0) {
+      throw new Error(
+        "Invalid device state update. Expected cwd or permissionMode.",
+      );
+    }
 
     this.controller.send({
       type: "change_device_state",

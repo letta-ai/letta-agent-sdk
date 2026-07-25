@@ -227,6 +227,17 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
     return;
   }
 
+  if (command.type === "remove_queue_item" && typeof command.request_id === "string") {
+    fakeControlSocket().serverMessage({
+      type: "remove_queue_item_response",
+      request_id: command.request_id,
+      runtime: command.runtime,
+      success: command.item_id !== "missing-item",
+      item_id: command.item_id,
+    });
+    return;
+  }
+
   if (command.type === "abort_message" && typeof command.request_id === "string") {
     fakeControlSocket().serverMessage({
       type: "abort_message_response",
@@ -1504,7 +1515,7 @@ describe("LettaAgentClient", () => {
         toolset_preference: "developer",
       });
 
-      await asAdvanced(session).changeDeviceState({ cwd: "/workspace/method" });
+      await session.changeDeviceState({ cwd: "/workspace/method" });
       const cwdOnlyDeviceState = fakeControlSocket().sent.at(-1) as {
         payload?: Record<string, unknown>;
       };
@@ -1515,12 +1526,15 @@ describe("LettaAgentClient", () => {
       });
       expect(cwdOnlyDeviceState.payload).not.toHaveProperty("mode");
 
-      await asAdvanced(session).changeDeviceState({ permissionMode: "unrestricted" });
+      await session.changeDeviceState({ permissionMode: "unrestricted" });
       expect(fakeControlSocket().sent.at(-1)).toMatchObject({
         type: "change_device_state",
         runtime: { agent_id: "agent-123", conversation_id: "default" },
         payload: { mode: "unrestricted" },
       });
+      await expect(session.changeDeviceState({})).rejects.toThrow(
+        "Expected cwd or permissionMode",
+      );
 
       await session.sendCommand({
         type: "change_device_state",
@@ -1543,7 +1557,7 @@ describe("LettaAgentClient", () => {
       );
       expect(syncResponse.success).toBe(true);
 
-      await expect(asAdvanced(session).recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
+      await expect(session.recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
         recovered: true,
         unsupported: false,
       });
@@ -1553,6 +1567,24 @@ describe("LettaAgentClient", () => {
         recover_approvals: true,
         force_device_status: true,
       });
+
+      await expect(session.removeQueuedMessage("queue-1")).resolves.toEqual({
+        itemId: "queue-1",
+        removed: true,
+      });
+      expect(fakeControlSocket().sent.at(-1)).toMatchObject({
+        type: "remove_queue_item",
+        runtime: { agent_id: "agent-123", conversation_id: "default" },
+        item_id: "queue-1",
+      });
+
+      await expect(session.removeQueuedMessage("missing-item")).resolves.toEqual({
+        itemId: "missing-item",
+        removed: false,
+      });
+      await expect(session.removeQueuedMessage("  ")).rejects.toThrow(
+        "Invalid queue item id",
+      );
     } finally {
       session.close();
     }

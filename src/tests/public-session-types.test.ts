@@ -12,12 +12,14 @@ type _HasSendCommand = AssertTrue<HasKey<"sendCommand">>;
 type _HasListMessages = AssertTrue<HasKey<"listMessages">>;
 type _HasListModels = AssertTrue<HasKey<"listModels">>;
 type _HasUpdateModel = AssertTrue<HasKey<"updateModel">>;
+type _HasBootstrapState = AssertTrue<HasKey<"bootstrapState">>;
+type _HasRecoverPendingApprovals = AssertTrue<HasKey<"recoverPendingApprovals">>;
+type _HasChangeDeviceState = AssertTrue<HasKey<"changeDeviceState">>;
+type _HasRemoveQueuedMessage = AssertTrue<HasKey<"removeQueuedMessage">>;
 type _HasClose = AssertTrue<HasKey<"close">>;
 type _NoInitialize = AssertFalse<HasKey<"initialize">>;
 type _NoRunTurn = AssertFalse<HasKey<"runTurn">>;
-type _NoRecoverPendingApprovals = AssertFalse<HasKey<"recoverPendingApprovals">>;
 type _NoUpdateToolset = AssertFalse<HasKey<"updateToolset">>;
-type _NoBootstrapState = AssertFalse<HasKey<"bootstrapState">>;
 
 describe("public LettaCodeSession type", () => {
   test("keeps the canonical public session surface", () => {
