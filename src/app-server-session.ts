@@ -234,11 +234,16 @@ export async function createAgentBody(
 
   if (options.embedding !== undefined) body.embedding = options.embedding;
   if (options.hidden !== undefined) body.hidden = options.hidden;
-  if (options.baseTools !== undefined) {
+  // When baseTools is omitted, the harness applies its created-agent
+  // defaults (web_search, fetch_webpage). An explicit list is pinned exactly:
+  // `tools` alone does not suppress the Letta agent type's defaults, so both
+  // default tool attachment and its default tool rules are disabled here.
+  if (options.baseTools === undefined) {
+    delete body.tools;
+    delete body.include_base_tools;
+    delete body.include_base_tool_rules;
+  } else {
     body.tools = options.baseTools;
-    // `tools: []` alone does not suppress the Letta agent type's defaults.
-    // Keep the SDK's documented `baseTools: []` contract by disabling both
-    // default tool attachment and its corresponding default tool rules.
     body.include_base_tools = false;
     body.include_base_tool_rules = false;
   }
@@ -601,6 +606,10 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
     if (this.clientToolAllowlist !== undefined) {
       payload.client_tool_allowlist = [...new Set(this.clientToolAllowlist)];
     }
+    // SDK sessions are headless: interactive user-input tools are always
+    // excluded from the toolset (harnesses without support ignore the flag
+    // and the SDK's runtime denial still applies).
+    payload.exclude_interactive_tools = true;
     this.client.input({
       runtime,
       payload,

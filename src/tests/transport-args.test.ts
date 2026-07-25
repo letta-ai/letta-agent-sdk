@@ -243,6 +243,28 @@ describe("buildCliArgs — tools and tags", () => {
     expect(args[idx + 1]).toBe("EnterPlanMode");
   });
 
+  test("createOnly leaves base tools to the CLI defaults when baseTools is omitted", () => {
+    const args = buildCliArgs({ createOnly: true });
+    expect(args).not.toContain("--base-tools");
+  });
+
+  test("createOnly passes --base-tools none for baseTools: []", () => {
+    const args = buildCliArgs({ createOnly: true, baseTools: [] });
+    const idx = args.indexOf("--base-tools");
+    expect(args[idx + 1]).toBe("none");
+  });
+
+  test("createOnly passes explicit baseTools through", () => {
+    const args = buildCliArgs({ createOnly: true, baseTools: ["web_search"] });
+    const idx = args.indexOf("--base-tools");
+    expect(args[idx + 1]).toBe("web_search");
+  });
+
+  test("existing-agent sessions never pass --base-tools", () => {
+    const args = buildCliArgs({ agentId: "agent-1", baseTools: ["web_search"] });
+    expect(args).not.toContain("--base-tools");
+  });
+
   test("tags → --tags joined with comma", () => {
     const args = buildCliArgs({ tags: ["production", "v2"] });
     const idx = args.indexOf("--tags");

@@ -663,8 +663,8 @@ export function assertCloudSessionOptionsSupported(
   if (options.systemPrompt !== undefined) {
     throw new Error(`Constellation ${action}() cannot rewrite an existing agent's systemPrompt from the SDK adapter yet.`);
   }
-  if (options.allowedTools !== undefined || options.disallowedTools !== undefined) {
-    throw new Error(`Constellation ${action}() has not wired allowedTools/disallowedTools to the remote device protocol yet.`);
+  if (options.disallowedTools !== undefined) {
+    throw new Error(`Constellation ${action}() has not wired disallowedTools to the remote device protocol yet.`);
   }
   if (options.systemInfoReminder !== undefined) {
     throw new Error(`Constellation ${action}() has not wired systemInfoReminder to the remote device protocol yet.`);
@@ -748,9 +748,13 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       const tools = agentToolNames(response.agent);
       const skillSources = this.currentOptions().skillSources;
       return {
-        controller: new AppServerRuntimeController(client, {
-          requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
-        }),
+        controller: new AppServerRuntimeController(
+          client,
+          {
+            requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
+          },
+          this.currentOptions().allowedTools,
+        ),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
         modelSettings: response.agent?.model_settings ?? null,

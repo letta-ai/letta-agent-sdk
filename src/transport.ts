@@ -160,7 +160,8 @@ export function buildCliArgs(options: InternalSessionOptions): string[] {
     args.push("--permission-mode", mode);
   }
 
-  // Allowed / disallowed tools
+  // Allowed / disallowed tools. Interactive user-input tools need no handling
+  // here: the CLI's headless path already excludes them from the toolset.
   if (options.allowedTools) {
     args.push("--allowedTools", options.allowedTools.join(","));
   }
@@ -179,6 +180,14 @@ export function buildCliArgs(options: InternalSessionOptions): string[] {
   // SDK-created agents always use the git-backed memory filesystem.
   if (applyNewAgentDefaults) {
     args.push("--memfs");
+    // When omitted, the CLI applies its created-agent defaults. An explicit
+    // list is forwarded; "none" is the CLI's sentinel for an empty list.
+    if (options.baseTools !== undefined) {
+      args.push(
+        "--base-tools",
+        options.baseTools.length > 0 ? options.baseTools.join(",") : "none",
+      );
+    }
   }
 
   // Skills sources

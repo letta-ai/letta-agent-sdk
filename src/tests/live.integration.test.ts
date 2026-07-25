@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { createSession, resumeSession } from "../index.js";
+import { createAgent, createSession, resumeSession } from "../index.js";
 import { asAdvanced } from "./advanced-session.js";
 import type {
   SDKMessage,
@@ -76,6 +76,28 @@ async function importAgentFile(
 
   const payload = (await response.json()) as { agent_ids: string[] };
   return { agentIds: payload.agent_ids };
+}
+
+async function fetchAgentWithTools(agentIdToFetch: string): Promise<AgentSummary> {
+  if (!API_KEY) throw new Error("LETTA_API_KEY is required");
+
+  // Newer servers only include tools when asked for them; older servers
+  // ignore the include parameter and return tools unconditionally.
+  const response = await fetch(
+    `${BASE_URL}/v1/agents/${agentIdToFetch}?include=agent.tools`,
+    {
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to fetch agent ${agentIdToFetch}: ${response.status} ${text}`);
+  }
+
+  return (await response.json()) as AgentSummary;
 }
 
 async function deleteAgent(agentIdToDelete: string): Promise<void> {
@@ -319,6 +341,28 @@ describeLive("live integration: letta-agent-sdk", () => {
         selectedAgentName,
         init,
       });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "createAgent attaches exactly the default server-side toolset",
+    async () => {
+      const createdAgentId = await createAgent({
+        name: `sdk-toolset-test-${Date.now()}`,
+        tags: ["sdk-live-test"],
+      });
+
+      try {
+        const agent = await fetchAgentWithTools(createdAgentId);
+        const toolNames = (agent.tools ?? [])
+          .map((t) => t?.name)
+          .filter((name): name is string => typeof name === "string")
+          .sort();
+        expect(toolNames).toEqual(["fetch_webpage", "web_search"]);
+      } finally {
+        await deleteAgent(createdAgentId);
+      }
     },
     TEST_TIMEOUT_MS,
   );

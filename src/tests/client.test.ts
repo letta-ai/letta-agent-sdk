@@ -681,6 +681,60 @@ describe("LettaAgentClient", () => {
     }
   });
 
+  test("excludes interactive tools by default without pinning an allowlist", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123");
+    try {
+      await asAdvanced(session).initialize();
+      await asAdvanced(session).runTurn("hello");
+
+      const inputCommand = fakeControlSocket().sent.find(
+        (command): command is Record<string, unknown> =>
+          typeof command === "object" && command !== null && "type" in command && command.type === "input",
+      );
+      const payload = inputCommand?.payload as Record<string, unknown> | undefined;
+      // No allowlist by default — the harness default toolset applies…
+      expect(payload).not.toHaveProperty("client_tool_allowlist");
+      // …with interactive user-input tools excluded via the protocol flag.
+      expect(payload?.exclude_interactive_tools).toBe(true);
+    } finally {
+      session.close();
+    }
+  });
+
+  test("interactive tools stay excluded even with an explicit allowlist", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123", {
+      allowedTools: ["Bash", "Read"],
+    });
+    try {
+      await asAdvanced(session).initialize();
+      await asAdvanced(session).runTurn("hello");
+
+      const inputCommand = fakeControlSocket().sent.find(
+        (command): command is Record<string, unknown> =>
+          typeof command === "object" && command !== null && "type" in command && command.type === "input",
+      );
+      const payload = inputCommand?.payload as Record<string, unknown> | undefined;
+      expect(payload?.client_tool_allowlist).toEqual(["Bash", "Read"]);
+      expect(payload?.exclude_interactive_tools).toBe(true);
+    } finally {
+      session.close();
+    }
+  });
+
   test("websocket protocol sessions respond to can_use_tool control requests through the shared approval bridge", async () => {
     FakeAppServerSocket.instances = [];
     const approvals: Array<{ toolName: string; input: Record<string, unknown> }> = [];
@@ -979,7 +1033,28 @@ describe("LettaAgentClient", () => {
     });
   });
 
-  test("baseTools overrides App Server agent defaults", async () => {
+  test("createAgent leaves server-side tools to the harness defaults when baseTools is omitted", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    await client.createAgent({
+      model: "anthropic/claude-sonnet-4",
+    });
+
+    const command = fakeControlSocket().sent[0] as {
+      create_agent?: { body?: Record<string, unknown> };
+    };
+    // The harness applies its created-agent defaults (web_search,
+    // fetch_webpage); the SDK does not pin them client-side.
+    expect(command.create_agent?.body).not.toHaveProperty("tools");
+    expect(command.create_agent?.body).not.toHaveProperty("include_base_tools");
+  });
+
+  test("baseTools: [] attaches no server-side tools", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({
       backend: "remote",
@@ -1002,6 +1077,70 @@ describe("LettaAgentClient", () => {
         },
       },
     });
+  });
+
+  test("an explicit baseTools list overrides the default server-side tools", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    await client.createAgent({
+      model: "anthropic/claude-sonnet-4",
+      baseTools: ["web_search"],
+    });
+
+    expect(fakeControlSocket().sent[0]).toMatchObject({
+      type: "runtime_start",
+      create_agent: {
+        body: {
+          tools: ["web_search"],
+          include_base_tools: false,
+          include_base_tool_rules: false,
+        },
+      },
+    });
+  });
+
+  test("default toolset contract: harness owns both defaults; SDK only excludes interactive tools", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    // 1. Creation sends no tool fields — the harness applies its
+    //    created-agent defaults (web_search, fetch_webpage).
+    const agentId = await client.createAgent({
+      model: "anthropic/claude-sonnet-4",
+    });
+    const createCommand = fakeControlSocket().sent[0] as {
+      create_agent?: { body?: Record<string, unknown> };
+    };
+    expect(createCommand.create_agent?.body).not.toHaveProperty("tools");
+    expect(createCommand.create_agent?.body).not.toHaveProperty("include_base_tools");
+
+    // 2. Every turn keeps the harness default toolset (no pinned allowlist)
+    //    and excludes interactive user-input tools via the protocol flag.
+    FakeAppServerSocket.instances = [];
+    const session = client.createSession(agentId);
+    try {
+      await asAdvanced(session).initialize();
+      await asAdvanced(session).runTurn("hello");
+
+      const inputCommand = fakeControlSocket().sent.find(
+        (command): command is Record<string, unknown> =>
+          typeof command === "object" && command !== null && "type" in command && command.type === "input",
+      );
+      const payload = inputCommand?.payload as Record<string, unknown> | undefined;
+      expect(payload).not.toHaveProperty("client_tool_allowlist");
+      expect(payload?.exclude_interactive_tools).toBe(true);
+    } finally {
+      session.close();
+    }
   });
 
   test("forwards an empty skillSources override when creating app-server agents", async () => {
@@ -1179,6 +1318,142 @@ describe("LettaAgentClient", () => {
           content: [{ type: "text", text: "tool-call-1:LET-9239" }],
         },
       });
+    } finally {
+      session.close();
+    }
+  });
+
+  test("custom client-side tools register, stay in the default allowlist, execute locally, and return results", async () => {
+    FakeAppServerSocket.instances = [];
+    const executions: Array<{ toolCallId: string; input: unknown }> = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("agent-123", {
+      tools: [
+        {
+          name: "get_weather",
+          label: "Get weather",
+          description: "Get the weather for a city",
+          parameters: {
+            type: "object",
+            properties: { city: { type: "string" } },
+            required: ["city"],
+          },
+          execute: async (toolCallId, input) => {
+            executions.push({ toolCallId, input });
+            return {
+              content: [
+                { type: "text", text: `sunny in ${(input as { city: string }).city}` },
+              ],
+              details: { temperatureC: 21 },
+            };
+          },
+        },
+      ],
+    });
+
+    try {
+      await asAdvanced(session).initialize();
+
+      // Registered with the harness at runtime start.
+      expect(fakeControlSocket().sent[0]).toMatchObject({
+        type: "runtime_start",
+        external_tools: [
+          {
+            tools: [{ name: "get_weather", label: "Get weather" }],
+          },
+        ],
+      });
+
+      // No default allowlist is sent, so the custom tool is never filtered
+      // by the harness; interactive tools are excluded via the flag instead.
+      await asAdvanced(session).runTurn("hello");
+      const inputCommand = fakeControlSocket().sent.find(
+        (command): command is Record<string, unknown> =>
+          typeof command === "object" && command !== null && "type" in command && command.type === "input",
+      );
+      const payload = inputCommand?.payload as Record<string, unknown> | undefined;
+      expect(payload).not.toHaveProperty("client_tool_allowlist");
+      expect(payload?.exclude_interactive_tools).toBe(true);
+
+      // Harness asks the SDK to execute the tool; it runs client-side and
+      // the result is sent back over the wire.
+      fakeControlSocket().serverMessage({
+        type: "external_tool_call_request",
+        request_id: "external-tool-42",
+        runtime: { agent_id: "agent-123", conversation_id: "default" },
+        tool_call_id: "tool-call-42",
+        tool_name: "get_weather",
+        input: { city: "Tokyo" },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(executions).toEqual([
+        { toolCallId: "tool-call-42", input: { city: "Tokyo" } },
+      ]);
+      expect(fakeControlSocket().sent.at(-1)).toMatchObject({
+        type: "external_tool_call_response",
+        request_id: "external-tool-42",
+        result: {
+          content: [{ type: "text", text: "sunny in Tokyo" }],
+        },
+      });
+    } finally {
+      session.close();
+    }
+  });
+
+  test("explicit allowedTools remains authoritative over registered custom tools", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("agent-123", {
+      allowedTools: ["Read"],
+      tools: [
+        {
+          name: "get_weather",
+          label: "Get weather",
+          description: "Get the weather for a city",
+          parameters: {
+            type: "object",
+            properties: { city: { type: "string" } },
+            required: ["city"],
+          },
+          execute: async () => ({
+            content: [{ type: "text", text: "sunny" }],
+          }),
+        },
+      ],
+    });
+
+    try {
+      await asAdvanced(session).initialize();
+      expect(fakeControlSocket().sent[0]).toMatchObject({
+        type: "runtime_start",
+        external_tools: [
+          {
+            tools: [{ name: "get_weather" }],
+          },
+        ],
+      });
+
+      await asAdvanced(session).runTurn("hello");
+      const inputCommand = fakeControlSocket().sent.find(
+        (command): command is Record<string, unknown> =>
+          typeof command === "object" && command !== null && "type" in command && command.type === "input",
+      );
+      const payload = inputCommand?.payload as Record<string, unknown> | undefined;
+      expect(payload?.client_tool_allowlist).toEqual(["Read"]);
+      expect(payload?.exclude_interactive_tools).toBe(true);
     } finally {
       session.close();
     }
