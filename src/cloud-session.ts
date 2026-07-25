@@ -239,11 +239,22 @@ function responseErrorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
-function assertOkResponse(response: Response, body: unknown, action: string): void {
+function assertOkResponse(response: Response, body: unknown, action: string, url?: string): void {
   if (!response.ok) {
-    throw new Error(
-      responseErrorMessage(body, `${action} failed with HTTP ${response.status}`),
-    );
+    const detail = responseErrorMessage(body, `HTTP ${response.status}`);
+    const parts = [`${action} failed`, detail];
+    if (url) parts.push(`URL: ${url}`);
+    if (response.status === 401 || response.status === 403) {
+      const env = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+        .process?.env;
+      const hasKey = !!(env?.LETTA_API_KEY ?? env?.LETTA_CLOUD_API_KEY);
+      parts.push(
+        hasKey
+          ? "Authentication failed — the API key may be invalid or lack permissions for this resource."
+          : "No API key found. Set LETTA_API_KEY (or pass apiKey in client options).",
+      );
+    }
+    throw new Error(parts.join(" — "));
   }
 }
 
@@ -986,7 +997,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       body: JSON.stringify({}),
     });
     const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud createSession()");
+    assertOkResponse(response, body, "Cloud createSession()", url.toString());
     if (!isCloudConversation(body)) {
       throw new Error("Cloud createSession() response did not include a conversation id.");
     }
@@ -1001,7 +1012,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       { headers: cloudHeaders(this.cloudOptions) },
     );
     const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud resumeSession()");
+    assertOkResponse(response, body, "Cloud resumeSession()", `${baseUrl}/v1/conversations/${encodeURIComponent(conversationId)}`);
     if (!isCloudConversation(body)) {
       throw new Error(`Cloud resumeSession() could not retrieve conversation ${conversationId}.`);
     }
@@ -1078,7 +1089,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       },
     );
     const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud create managed sandbox");
+    assertOkResponse(response, body, "Cloud create managed sandbox", `${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/sandboxes`);
     if (!isCloudAgentSandbox(body)) {
       throw new Error("Cloud create managed sandbox response did not include sandbox connection details.");
     }
@@ -1180,7 +1191,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       },
     );
     const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud refresh managed sandbox");
+    assertOkResponse(response, body, "Cloud refresh managed sandbox", `${baseUrl}/v1/agents/${encodeURIComponent(sandbox.agentId)}/sandboxes/refresh`);
     if (!isCloudAgentSandboxRefresh(body) || !body.success) {
       throw new Error("Cloud refresh managed sandbox response did not confirm refresh.");
     }
@@ -1225,7 +1236,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     );
     const body = await parseJsonResponse(response);
     if (response.status === 404) return;
-    assertOkResponse(response, body, "Cloud terminate managed sandbox");
+    assertOkResponse(response, body, "Cloud terminate managed sandbox", `${baseUrl}/v1/agents/${encodeURIComponent(sandbox.agentId)}/sandboxes`);
   }
 
   private async waitForManagedSandboxConnection(
