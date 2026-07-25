@@ -238,7 +238,11 @@ export async function createAgentBody(
   // defaults (web_search, fetch_webpage). An explicit list is pinned exactly:
   // `tools` alone does not suppress the Letta agent type's defaults, so both
   // default tool attachment and its default tool rules are disabled here.
-  if (options.baseTools !== undefined) {
+  if (options.baseTools === undefined) {
+    delete body.tools;
+    delete body.include_base_tools;
+    delete body.include_base_tool_rules;
+  } else {
     body.tools = options.baseTools;
     body.include_base_tools = false;
     body.include_base_tool_rules = false;
