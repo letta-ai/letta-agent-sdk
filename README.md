@@ -69,6 +69,43 @@ Native, pass the platform WebSocket through
 Native's third constructor argument. Cloud clients should prefer query
 authentication as shown above.
 
+### Agent and conversation management
+
+The same management API works with Cloud REST and the Letta Code app-server
+protocol, including from the portable `/client` entry:
+
+```ts
+const agents = await client.agents.list({
+  query: "support",
+  tags: ["mobile"],
+});
+const agent = await client.agents.retrieve(agents[0].id);
+await client.agents.update(agent.id, { name: "Mobile support" });
+
+const conversations = await client.conversations.list({
+  agentId: agent.id,
+  orderBy: "lastMessageAt",
+  order: "desc",
+});
+const conversation = await client.conversations.create({
+  agentId: agent.id,
+  summary: "New mobile thread",
+});
+await client.conversations.update(conversation.id, {
+  summary: "Onboarding question",
+});
+const history = await client.conversations.listMessages(conversation.id, {
+  limit: 50,
+  order: "desc",
+});
+```
+
+Agent creation intentionally remains the high-level
+`client.createAgent(options)` method. It uses Letta Code's centralized
+personality, memory-filesystem, origin-tag, and preset logic on every backend.
+For an active session, `session.listMessages()` remains the convenient
+conversation-scoped form of `client.conversations.listMessages()`.
+
 ### Persistent agent with multi-turn conversations
 
 ```ts

@@ -1,5 +1,8 @@
 import { LettaAgentClientBase } from "./client-base.js";
+import { AppServerManagementTransport } from "./app-server-management.js";
+import type { ManagementTransport } from "./management.js";
 import { createLocalAppServerSession } from "./local-app-server-session.js";
+import { startLocalAppServer } from "./local-app-server.js";
 import { Session } from "./session.js";
 import type {
   CreateAgentOptions,
@@ -10,6 +13,35 @@ import type {
 } from "./types.js";
 
 export class LettaAgentClient extends LettaAgentClientBase {
+  protected override createLocalManagementTransport(): ManagementTransport {
+    if (this.useLegacyLocalStdio()) {
+      throw new Error(
+        'client.agents and client.conversations require the local "app-server" transport.',
+      );
+    }
+    const localOptions = (
+      this.options as LettaCodeLocalClientOptions
+    ).appServer;
+    return new AppServerManagementTransport({
+      ...(localOptions?.url !== undefined
+        ? { url: localOptions.url }
+        : {
+            connect: () =>
+              startLocalAppServer({
+                listen: localOptions?.listen,
+                backend: localOptions?.harnessBackend ?? "local",
+                startupTimeoutMs: localOptions?.startupTimeoutMs,
+              }),
+          }),
+      ...(localOptions?.WebSocket !== undefined
+        ? { WebSocket: localOptions.WebSocket }
+        : {}),
+      ...(localOptions?.requestTimeoutMs !== undefined
+        ? { requestTimeoutMs: localOptions.requestTimeoutMs }
+        : {}),
+    });
+  }
+
   protected override async createLocalAgent(
     options: CreateAgentOptions,
   ): Promise<string> {

@@ -135,6 +135,20 @@ export type {
   AgentToolUpdateCallback,
   AnyAgentTool,
 } from "./types.js";
+export type {
+  AgentsClient,
+  ConversationsClient,
+  LettaAgent,
+  LettaConversation,
+  LettaConversationMessage,
+  ListAgentsOptions,
+  UpdateAgentOptions,
+  ListConversationsOptions,
+  CreateConversationOptions,
+  UpdateConversationOptions,
+  ConversationMessagesOptions,
+  ConversationMessagesResult,
+} from "./management-types.js";
 
 export { Session } from "./session.js";
 export { RepositoriesClient } from "./repositories.js";
