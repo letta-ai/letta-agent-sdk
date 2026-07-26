@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { createAgent, createSession, resumeSession } from "../index.js";
+import { LettaAgentClient, createAgent, createSession, resumeSession } from "../index.js";
 import { asAdvanced } from "./advanced-session.js";
 import type {
   SDKMessage,
@@ -341,6 +341,35 @@ describeLive("live integration: letta-agent-sdk", () => {
         selectedAgentName,
         init,
       });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "cloud createAgent uses a route production accepts",
+    async () => {
+      // Guards the REST create path against server routing drift: production
+      // 404s `POST /v1/agents/` (trailing slash) while accepting
+      // `POST /v1/agents` — a mocked fetch cannot catch this class of bug.
+      const client = new LettaAgentClient({
+        backend: "cloud",
+        apiKey: API_KEY!,
+        apiBaseUrl: BASE_URL,
+      });
+      const createdAgentId = await client.createAgent({
+        name: `sdk-cloud-route-test-${Date.now()}`,
+        model: "anthropic/claude-haiku-4-5",
+        tags: ["sdk-live-test"],
+        memfs: false,
+      });
+      try {
+        expect(createdAgentId.startsWith("agent-")).toBe(true);
+      } finally {
+        await fetch(`${BASE_URL}/v1/agents/${createdAgentId}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${API_KEY}` },
+        });
+      }
     },
     TEST_TIMEOUT_MS,
   );

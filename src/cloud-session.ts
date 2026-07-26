@@ -643,8 +643,10 @@ export async function createCloudAgent(
 ): Promise<string> {
   const body = await createAgentBody(agentOptions);
 
+  // No trailing slash: production api.letta.com 404s `POST /v1/agents/` at
+  // the router (GET tolerates the slash; POST does not).
   const response = await getFetch(clientOptions.fetch)(
-    `${normalizeCloudApiBaseUrl(clientOptions.apiBaseUrl)}/v1/agents/`,
+    `${normalizeCloudApiBaseUrl(clientOptions.apiBaseUrl)}/v1/agents`,
     {
       method: "POST",
       headers: cloudHeaders(clientOptions),
