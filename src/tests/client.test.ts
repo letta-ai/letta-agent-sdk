@@ -1077,6 +1077,7 @@ describe("LettaAgentClient", () => {
     expect(fakeControlSocket().sent[0]).toMatchObject({
       type: "runtime_start",
       create_agent: {
+        pin_global: true,
         body: {
           model: "anthropic/claude-sonnet-4",
           tags: ["origin:letta-code", "git-memory-enabled", "sdk-test"],
@@ -1085,6 +1086,60 @@ describe("LettaAgentClient", () => {
           ]),
         },
       },
+    });
+  });
+
+  test("creates remote app-server agents with an explicit pinning preference", async () => {
+    for (const pinGlobalAgent of [true, false]) {
+      FakeAppServerSocket.instances = [];
+      const client = new LettaAgentClient({
+        backend: "remote",
+        url: "ws://127.0.0.1:4500/ws",
+        WebSocket: FakeAppServerSocket,
+        pinGlobalAgent,
+      });
+
+      await client.createAgent();
+
+      expect(fakeControlSocket().sent[0]).toMatchObject({
+        type: "runtime_start",
+        create_agent: { pin_global: pinGlobalAgent },
+      });
+    }
+  });
+
+  test("hidden remote app-server agents default to unpinned", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    await client.createAgent({ hidden: true });
+
+    expect(fakeControlSocket().sent[0]).toMatchObject({
+      type: "runtime_start",
+      create_agent: { pin_global: false },
+    });
+  });
+
+  test("forwards local app-server agent pinning preferences", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "local",
+      appServer: {
+        url: "ws://127.0.0.1:4500/ws",
+        WebSocket: FakeAppServerSocket,
+        pinGlobalAgent: false,
+      },
+    });
+
+    await client.createAgent();
+
+    expect(fakeControlSocket().sent[0]).toMatchObject({
+      type: "runtime_start",
+      create_agent: { pin_global: false },
     });
   });
 

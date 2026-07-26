@@ -125,8 +125,6 @@ export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
   connect?: (
     sessionEnv?: Record<string, string>,
   ) => Promise<{ url: string; close(): void }>;
-  /** Whether create-agent runtime_start should pin the created agent globally. */
-  pinGlobalAgent?: boolean;
   /** Whether SDK create-agent payloads should add the origin tag automatically. */
   includeSdkOriginTag?: boolean;
 };
