@@ -56,6 +56,7 @@ function createManagementFetch(
           display_name: "Claude Haiku 4.5",
           context_window: 200_000,
         },
+        { name: "malformed-without-handle" },
       ]);
     }
     if (url.pathname === "/v1/conversations/" && method === "GET") {
@@ -165,6 +166,8 @@ class ManagementSocket {
             isDefault: true,
           },
         ],
+        available_handles: ["anthropic/claude-haiku-4-5"],
+        byok_provider_aliases: { "lc-anthropic": "anthropic" },
       },
       conversation_list: {
         conversations: [
@@ -239,11 +242,14 @@ async function exerciseManagementApi(
   await expect(client.agents.delete("agent-1")).resolves.toBeUndefined();
 
   const models = await client.models.list();
-  expect(models).toHaveLength(1);
-  expect(models[0]).toMatchObject({
+  expect(models.entries).toHaveLength(1);
+  expect(models.entries[0]).toMatchObject({
     handle: "anthropic/claude-haiku-4-5",
-    displayName: "Claude Haiku 4.5",
+    label: "Claude Haiku 4.5",
   });
+  expect(models.availableHandles).toEqual([
+    "anthropic/claude-haiku-4-5",
+  ]);
 
   await expect(
     client.conversations.list({
@@ -296,6 +302,11 @@ describe("portable management namespaces", () => {
       apiKey: "sk-test",
       fetch: createManagementFetch(requests),
     });
+
+    await expect(client.agents.delete("  ")).rejects.toThrow(
+      "Invalid agent id. Expected a non-empty string.",
+    );
+    expect(requests).toHaveLength(0);
 
     await exerciseManagementApi(client);
 
@@ -447,6 +458,10 @@ describe("portable management namespaces", () => {
           socket.options?.headers?.Authorization === "Bearer remote-token",
       ),
     ).toBe(true);
+    await expect(client.models.list()).resolves.toMatchObject({
+      availableHandles: ["anthropic/claude-haiku-4-5"],
+      byokProviderAliases: { "lc-anthropic": "anthropic" },
+    });
   });
 
   test("uses the app-server protocol for the Node local backend too", async () => {

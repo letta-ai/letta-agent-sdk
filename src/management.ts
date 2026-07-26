@@ -5,7 +5,6 @@ import type {
   CreateConversationOptions,
   LettaAgent,
   LettaConversation,
-  LettaModelEntry,
   ListAgentsOptions,
   ListConversationsOptions,
   ModelsClient,
@@ -13,6 +12,7 @@ import type {
   UpdateConversationOptions,
   ConversationMessagesOptions,
 } from "./management-types.js";
+import type { ListModelsResult } from "./types.js";
 
 export type ManagementQuery = Record<
   string,
@@ -27,7 +27,7 @@ export interface ManagementTransport {
     body: Record<string, unknown>,
   ): Promise<LettaAgent>;
   deleteAgent(agentId: string): Promise<void>;
-  listModels(): Promise<LettaModelEntry[]>;
+  listModels(): Promise<ListModelsResult>;
   listConversations(
     query: ManagementQuery,
   ): Promise<LettaConversation[]>;
@@ -55,6 +55,12 @@ function definedEntries(
   return Object.fromEntries(
     Object.entries(values).filter(([, value]) => value !== undefined),
   );
+}
+
+function assertNonEmptyId(value: string, name: string): void {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`Invalid ${name}. Expected a non-empty string.`);
+  }
 }
 
 function agentListQuery(options: ListAgentsOptions): ManagementQuery {
@@ -154,7 +160,10 @@ export function createAgentsClient(
     retrieve: (agentId) => transport().retrieveAgent(agentId),
     update: (agentId, options) =>
       transport().updateAgent(agentId, agentUpdateBody(options)),
-    delete: (agentId) => transport().deleteAgent(agentId),
+    delete: async (agentId) => {
+      assertNonEmptyId(agentId, "agent id");
+      await transport().deleteAgent(agentId);
+    },
   };
 }
 

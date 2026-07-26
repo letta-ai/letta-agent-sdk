@@ -1,4 +1,4 @@
-import type { ListMessagesResult } from "./types.js";
+import type { ListMessagesResult, ListModelsResult } from "./types.js";
 
 /** Agent state returned by either the Cloud API or Letta Code app-server. */
 export type LettaAgent = Record<string, unknown> & {
@@ -28,34 +28,6 @@ export type LettaConversation = Record<string, unknown> & {
 
 /** Raw Letta API message returned from conversation history. */
 export type LettaConversationMessage = Record<string, unknown>;
-
-/**
- * Model entry unified across backends.
- *
- * The Cloud API (`GET /v1/models`) provides `handle`, `name`, and
- * `display_name` (surfaced here as `displayName`). The app-server
- * `list_models` command provides `id`, `handle`, `label` (surfaced here as
- * `displayName`), `description`, and the optional flags. Only `handle` is
- * guaranteed by every backend; raw backend fields are preserved on the entry.
- */
-export type LettaModelEntry = Record<string, unknown> & {
-  /** Internal model id (app-server backends only). */
-  id?: string;
-  /** Provider-qualified handle, e.g. "anthropic/claude-haiku-4-5". */
-  handle: string;
-  /** Raw model name (Cloud backend only). */
-  name?: string;
-  /** Human-readable name (Cloud `display_name` / app-server `label`). */
-  displayName?: string;
-  /** Model description (app-server backends only). */
-  description?: string;
-  /** Whether this is the default model (app-server backends only). */
-  isDefault?: boolean;
-  /** Whether this model is featured (app-server backends only). */
-  isFeatured?: boolean;
-  /** Whether this model is free to use (app-server backends only). */
-  free?: boolean;
-};
 
 export interface ListAgentsOptions {
   before?: string;
@@ -135,8 +107,13 @@ export interface AgentsClient {
 }
 
 export interface ModelsClient {
-  /** List available models. Does not require an open session. */
-  list(): Promise<LettaModelEntry[]>;
+  /**
+   * List the model catalog without opening a session.
+   *
+   * Uses the same normalized result shape as `session.listModels()`, including
+   * availability and BYOK-alias metadata when the backend provides it.
+   */
+  list(): Promise<ListModelsResult>;
 }
 
 export interface ConversationsClient {

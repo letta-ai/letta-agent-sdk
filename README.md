@@ -126,7 +126,7 @@ const conversations = await client.conversations.list({
 });
 
 // No open session required — safe for model pickers and settings screens.
-const models = await client.models.list();
+const { entries: models, availableHandles } = await client.models.list();
 
 await client.agents.delete(agents[0].id);
 
