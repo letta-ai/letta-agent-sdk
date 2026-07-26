@@ -7,7 +7,11 @@ import type {
   LettaAgent,
   LettaConversation,
 } from "./management-types.js";
-import type { LettaCodeCloudClientOptions } from "./types.js";
+import type {
+  LettaCodeCloudClientOptions,
+  LettaCodeModelEntry,
+  ListModelsResult,
+} from "./types.js";
 
 const DEFAULT_CLOUD_API_BASE_URL = "https://api.letta.com";
 
@@ -121,6 +125,31 @@ function asArray<T>(body: unknown, action: string): T[] {
   return body as T[];
 }
 
+function cloudModelEntry(
+  raw: Record<string, unknown>,
+): LettaCodeModelEntry | null {
+  if (typeof raw.handle !== "string" || raw.handle.length === 0) {
+    return null;
+  }
+  const label =
+    typeof raw.display_name === "string"
+      ? raw.display_name
+      : typeof raw.name === "string"
+        ? raw.name
+        : raw.handle;
+  return {
+    ...raw,
+    id:
+      typeof raw.id === "string" && raw.id.length > 0
+        ? raw.id
+        : raw.handle,
+    handle: raw.handle,
+    label,
+    description:
+      typeof raw.description === "string" ? raw.description : "",
+  };
+}
+
 export class CloudManagementTransport implements ManagementTransport {
   constructor(private readonly options: LettaCodeCloudClientOptions) {}
 
@@ -146,6 +175,38 @@ export class CloudManagementTransport implements ManagementTransport {
       body,
       "Cloud update agent",
     );
+  }
+
+  async deleteAgent(agentId: string): Promise<void> {
+    // No trailing slash: the production api.letta.com router 404s
+    // trailing-slash non-GET agent routes (see `POST /v1/agents` in
+    // cloud-session.ts — GET tolerates the slash; DELETE does not).
+    await this.requestUrl(
+      this.url(`/v1/agents/${encodeURIComponent(agentId)}`),
+      "DELETE",
+      undefined,
+      "Cloud delete agent",
+    );
+  }
+
+  async listModels(): Promise<ListModelsResult> {
+    // No trailing slash for consistency with the non-GET routes above (the
+    // production router only tolerates trailing slashes on GET).
+    const entries = await this.getArray<Record<string, unknown>>(
+      "/v1/models",
+      {},
+      "Cloud list models",
+    );
+    const normalized = entries.flatMap((entry) => {
+      const model = cloudModelEntry(entry);
+      return model ? [model] : [];
+    });
+    return {
+      entries: normalized,
+      // Cloud's authenticated endpoint already returns the models available to
+      // this user, so its catalog is also the authoritative availability set.
+      availableHandles: normalized.map((entry) => entry.handle),
+    };
   }
 
   listConversations(

@@ -14,11 +14,13 @@ import {
 import {
   createAgentsClient,
   createConversationsClient,
+  createModelsClient,
   type ManagementTransport,
 } from "./management.js";
 import type {
   AgentsClient,
   ConversationsClient,
+  ModelsClient,
 } from "./management-types.js";
 import type {
   CreateAgentOptions,
@@ -98,6 +100,7 @@ export class LettaAgentClientBase {
   readonly environment: LettaCodeEnvironment | undefined;
   readonly agents: AgentsClient;
   readonly conversations: ConversationsClient;
+  readonly models: ModelsClient;
   protected readonly options: LettaCodeClientOptions;
   private repositoriesClient: RepositoriesClient | null = null;
   private managementTransport: ManagementTransport | null = null;
@@ -117,6 +120,7 @@ export class LettaAgentClientBase {
     this.conversations = createConversationsClient(
       () => this.getManagementTransport(),
     );
+    this.models = createModelsClient(() => this.getManagementTransport());
 
     if (this.backend === "local" && this.environment !== undefined) {
       throw new Error(

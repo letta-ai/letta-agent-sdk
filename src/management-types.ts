@@ -1,4 +1,4 @@
-import type { ListMessagesResult } from "./types.js";
+import type { ListMessagesResult, ListModelsResult } from "./types.js";
 
 /** Agent state returned by either the Cloud API or Letta Code app-server. */
 export type LettaAgent = Record<string, unknown> & {
@@ -103,6 +103,17 @@ export interface AgentsClient {
     agentId: string,
     options: UpdateAgentOptions,
   ): Promise<LettaAgent>;
+  delete(agentId: string): Promise<void>;
+}
+
+export interface ModelsClient {
+  /**
+   * List the model catalog without opening a session.
+   *
+   * Uses the same normalized result shape as `session.listModels()`, including
+   * availability and BYOK-alias metadata when the backend provides it.
+   */
+  list(): Promise<ListModelsResult>;
 }
 
 export interface ConversationsClient {

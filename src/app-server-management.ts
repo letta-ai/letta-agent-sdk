@@ -13,7 +13,11 @@ import type {
   LettaAgent,
   LettaConversation,
 } from "./management-types.js";
-import type { LettaCodeRemoteClientOptions } from "./types.js";
+import type {
+  LettaCodeModelEntry,
+  LettaCodeRemoteClientOptions,
+  ListModelsResult,
+} from "./types.js";
 
 type OwnedConnection = { url: string; close(): void };
 
@@ -43,6 +47,12 @@ type ConversationMessagesResponse = ManagementResponse & {
   messages: Record<string, unknown>[];
 };
 
+type ListModelsResponse = ManagementResponse & {
+  entries?: unknown;
+  available_handles?: unknown;
+  byok_provider_aliases?: unknown;
+};
+
 export type AppServerManagementOptions =
   Partial<LettaCodeRemoteClientOptions> & {
     url?: string;
@@ -58,6 +68,39 @@ function ensureResponse<T>(
     throw new Error(response.error ?? fallback);
   }
   return value;
+}
+
+function modelEntries(value: unknown): LettaCodeModelEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const record = entry as Record<string, unknown>;
+    if (
+      typeof record.id !== "string" ||
+      typeof record.handle !== "string" ||
+      typeof record.label !== "string" ||
+      typeof record.description !== "string"
+    ) {
+      return [];
+    }
+    return [{
+      ...record,
+      id: record.id,
+      handle: record.handle,
+      label: record.label,
+      description: record.description,
+    }];
+  });
+}
+
+function stringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const entries = Object.entries(value as Record<string, unknown>).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string",
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 export class AppServerManagementTransport
@@ -104,6 +147,43 @@ export class AppServerManagementTransport
       response.agent,
       `Failed to update agent ${agentId}.`,
     );
+  }
+
+  async deleteAgent(agentId: string): Promise<void> {
+    const response = await this.request<ManagementResponse>(
+      "agent_delete",
+      { agent_id: agentId },
+      "agent_delete_response",
+    );
+    if (!response.success) {
+      throw new Error(response.error ?? `Failed to delete agent ${agentId}.`);
+    }
+  }
+
+  async listModels(): Promise<ListModelsResult> {
+    // A bare list_models command (no runtime scope) is answered on the
+    // control channel, so no session or conversation is required.
+    const response = await this.request<ListModelsResponse>(
+      "list_models",
+      {},
+      "list_models_response",
+    );
+    if (!response.success) {
+      throw new Error(response.error ?? "Failed to list models.");
+    }
+    const result: ListModelsResult = {
+      entries: modelEntries(response.entries),
+    };
+    if (response.available_handles === null) {
+      result.availableHandles = null;
+    } else if (Array.isArray(response.available_handles)) {
+      result.availableHandles = response.available_handles.filter(
+        (handle): handle is string => typeof handle === "string",
+      );
+    }
+    const aliases = stringRecord(response.byok_provider_aliases);
+    if (aliases) result.byokProviderAliases = aliases;
+    return result;
   }
 
   async listConversations(

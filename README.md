@@ -115,7 +115,7 @@ For authenticated Remote App Servers in React Native, pass the platform WebSocke
 
 ## Management APIs
 
-The client exposes agent, conversation, and Cloud repository management alongside active sessions:
+The client exposes agent, conversation, model, and Cloud repository management alongside active sessions:
 
 ```ts
 const agents = await client.agents.list({ tags: ["support"] });
@@ -124,6 +124,11 @@ const conversations = await client.conversations.list({
   orderBy: "lastMessageAt",
   order: "desc",
 });
+
+// No open session required — safe for model pickers and settings screens.
+const { entries: models, availableHandles } = await client.models.list();
+
+await client.agents.delete(agents[0].id);
 
 const repository = await client.repositories.create({ name: "inputs" });
 await client.repositories.files.create(repository.id, {

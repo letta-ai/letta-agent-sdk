@@ -616,7 +616,7 @@ export type ReasoningEffort =
   | "high"
   | "xhigh";
 
-export interface LettaCodeModelEntry {
+export type LettaCodeModelEntry = Record<string, unknown> & {
   id: string;
   handle: string;
   label: string;
@@ -625,7 +625,7 @@ export interface LettaCodeModelEntry {
   isFeatured?: boolean;
   free?: boolean;
   updateArgs?: Record<string, unknown>;
-}
+};
 
 export interface ListModelsResult {
   entries: LettaCodeModelEntry[];

@@ -145,6 +145,7 @@ export type {
   LettaAgent,
   LettaConversation,
   LettaConversationMessage,
+  ModelsClient,
   ListAgentsOptions,
   UpdateAgentOptions,
   ListConversationsOptions,
