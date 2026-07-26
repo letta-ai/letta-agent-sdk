@@ -495,11 +495,49 @@ export interface GetRepositoryVersionParams {
 // ═══════════════════════════════════════════════════════════════
 
 /**
+ * A suggested permission grant attached to a `can_use_tool` approval request.
+ * Approval UIs can render these as selectable chips and echo the chosen ids
+ * back via `CanUseToolResponseAllow.updatedPermissions`.
+ */
+export interface CanUseToolPermissionSuggestion {
+  id: string;
+  text: string;
+}
+
+/**
+ * Additional context for a `can_use_tool` approval request, passed as the
+ * optional third argument to {@link CanUseToolCallback}.
+ *
+ * All fields are optional: transports pass through whatever subset the wire
+ * protocol provides, leaving absent fields undefined.
+ */
+export interface CanUseToolContext {
+  /** Id of the control request carrying this approval (for logging/correlation). */
+  requestId?: string;
+  /** Tool call id — links the approval to its tool_call card in the message stream. */
+  toolCallId?: string;
+  /** Suggested permission grants the user can select. */
+  permissionSuggestions?: CanUseToolPermissionSuggestion[];
+  /** Path that triggered the permission check, when the tool was blocked on a path rule. */
+  blockedPath?: string | null;
+  /**
+   * Diff previews for file-editing tools, passed through verbatim.
+   * Shape matches letta-code's `DiffPreview` (mode: "advanced" | "fallback" | "unpreviewable").
+   */
+  diffs?: unknown[];
+}
+
+/**
  * Callback for custom permission handling.
+ *
+ * The optional third argument carries approval context (tool call id,
+ * permission suggestions, diff previews). Two-argument callbacks remain
+ * fully supported.
  */
 export type CanUseToolCallback = (
   toolName: string,
   toolInput: Record<string, unknown>,
+  context?: CanUseToolContext,
 ) => Promise<CanUseToolResponse> | CanUseToolResponse;
 
 /**
