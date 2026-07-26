@@ -6,6 +6,7 @@ import type {
   ConversationMessagesResult,
   LettaAgent,
   LettaConversation,
+  LettaModelEntry,
 } from "./management-types.js";
 import type { LettaCodeCloudClientOptions } from "./types.js";
 
@@ -121,6 +122,16 @@ function asArray<T>(body: unknown, action: string): T[] {
   return body as T[];
 }
 
+function cloudModelEntry(raw: Record<string, unknown>): LettaModelEntry {
+  return {
+    ...raw,
+    handle: String(raw.handle ?? ""),
+    ...(typeof raw.display_name === "string"
+      ? { displayName: raw.display_name }
+      : {}),
+  } as LettaModelEntry;
+}
+
 export class CloudManagementTransport implements ManagementTransport {
   constructor(private readonly options: LettaCodeCloudClientOptions) {}
 
@@ -146,6 +157,29 @@ export class CloudManagementTransport implements ManagementTransport {
       body,
       "Cloud update agent",
     );
+  }
+
+  async deleteAgent(agentId: string): Promise<void> {
+    // No trailing slash: the production api.letta.com router 404s
+    // trailing-slash non-GET agent routes (see `POST /v1/agents` in
+    // cloud-session.ts — GET tolerates the slash; DELETE does not).
+    await this.requestUrl(
+      this.url(`/v1/agents/${encodeURIComponent(agentId)}`),
+      "DELETE",
+      undefined,
+      "Cloud delete agent",
+    );
+  }
+
+  async listModels(): Promise<LettaModelEntry[]> {
+    // No trailing slash for consistency with the non-GET routes above (the
+    // production router only tolerates trailing slashes on GET).
+    const entries = await this.getArray<Record<string, unknown>>(
+      "/v1/models",
+      {},
+      "Cloud list models",
+    );
+    return entries.map(cloudModelEntry);
   }
 
   listConversations(

@@ -5,8 +5,10 @@ import type {
   CreateConversationOptions,
   LettaAgent,
   LettaConversation,
+  LettaModelEntry,
   ListAgentsOptions,
   ListConversationsOptions,
+  ModelsClient,
   UpdateAgentOptions,
   UpdateConversationOptions,
   ConversationMessagesOptions,
@@ -24,6 +26,8 @@ export interface ManagementTransport {
     agentId: string,
     body: Record<string, unknown>,
   ): Promise<LettaAgent>;
+  deleteAgent(agentId: string): Promise<void>;
+  listModels(): Promise<LettaModelEntry[]>;
   listConversations(
     query: ManagementQuery,
   ): Promise<LettaConversation[]>;
@@ -150,6 +154,15 @@ export function createAgentsClient(
     retrieve: (agentId) => transport().retrieveAgent(agentId),
     update: (agentId, options) =>
       transport().updateAgent(agentId, agentUpdateBody(options)),
+    delete: (agentId) => transport().deleteAgent(agentId),
+  };
+}
+
+export function createModelsClient(
+  transport: TransportProvider,
+): ModelsClient {
+  return {
+    list: () => transport().listModels(),
   };
 }
 

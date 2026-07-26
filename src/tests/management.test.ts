@@ -45,6 +45,19 @@ function createManagementFetch(
     if (url.pathname === "/v1/agents/agent-1" && method === "PATCH") {
       return jsonResponse({ id: "agent-1", name: "Renamed", ...body as object });
     }
+    if (url.pathname === "/v1/agents/agent-1" && method === "DELETE") {
+      return new Response(null, { status: 204 });
+    }
+    if (url.pathname === "/v1/models" && method === "GET") {
+      return jsonResponse([
+        {
+          handle: "anthropic/claude-haiku-4-5",
+          name: "claude-haiku-4-5",
+          display_name: "Claude Haiku 4.5",
+          context_window: 200_000,
+        },
+      ]);
+    }
     if (url.pathname === "/v1/conversations/" && method === "GET") {
       return jsonResponse([
         { id: "conv-1", agent_id: "agent-1", summary: "First" },
@@ -139,6 +152,20 @@ class ManagementSocket {
           ...(command.body as object),
         },
       },
+      agent_delete: {
+        agent_id: command.agent_id,
+      },
+      list_models: {
+        entries: [
+          {
+            id: "claude-haiku-4-5",
+            handle: "anthropic/claude-haiku-4-5",
+            label: "Claude Haiku 4.5",
+            description: "Fast everyday model.",
+            isDefault: true,
+          },
+        ],
+      },
       conversation_list: {
         conversations: [
           { id: "conv-1", agent_id: "agent-1", summary: "First" },
@@ -209,6 +236,14 @@ async function exerciseManagementApi(
       contextWindowLimit: 32_000,
     }),
   ).resolves.toMatchObject({ id: "agent-1", name: "Renamed" });
+  await expect(client.agents.delete("agent-1")).resolves.toBeUndefined();
+
+  const models = await client.models.list();
+  expect(models).toHaveLength(1);
+  expect(models[0]).toMatchObject({
+    handle: "anthropic/claude-haiku-4-5",
+    displayName: "Claude Haiku 4.5",
+  });
 
   await expect(
     client.conversations.list({
@@ -295,6 +330,18 @@ describe("portable management namespaces", () => {
         body: { name: "Renamed", context_window_limit: 32_000 },
       },
       {
+        path: "/v1/agents/agent-1",
+        query: {},
+        method: "DELETE",
+        body: undefined,
+      },
+      {
+        path: "/v1/models",
+        query: {},
+        method: "GET",
+        body: undefined,
+      },
+      {
         path: "/v1/conversations/",
         query: {
           agent_id: "agent-1",
@@ -334,6 +381,12 @@ describe("portable management namespaces", () => {
       "mobile",
       "example",
     ]);
+    // Production api.letta.com 404s trailing-slash non-GET agent routes, so
+    // the delete URL must never gain a trailing slash.
+    const deleteRequest = requests.find(({ method }) => method === "DELETE");
+    expect(deleteRequest?.url.toString()).toBe(
+      "https://api.test/v1/agents/agent-1",
+    );
   });
 
   test("maps the same API to app-server protocol commands", async () => {
@@ -354,6 +407,8 @@ describe("portable management namespaces", () => {
       "agent_list",
       "agent_retrieve",
       "agent_update",
+      "agent_delete",
+      "list_models",
       "conversation_list",
       "conversation_retrieve",
       "conversation_create",
@@ -369,7 +424,17 @@ describe("portable management namespaces", () => {
         order_by: "last_run_completion",
       },
     });
-    expect(commands[5]).toMatchObject({
+    expect(commands[3]).toMatchObject({
+      type: "agent_delete",
+      agent_id: "agent-1",
+    });
+    // list_models must stay session-less: a bare command (no runtime scope)
+    // is answered on the control channel.
+    expect(Object.keys(commands[4] ?? {}).sort()).toEqual([
+      "request_id",
+      "type",
+    ]);
+    expect(commands[7]).toMatchObject({
       body: {
         agent_id: "agent-1",
         summary: "Mobile thread",

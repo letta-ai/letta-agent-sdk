@@ -12,6 +12,7 @@ import type {
   ConversationMessagesResult,
   LettaAgent,
   LettaConversation,
+  LettaModelEntry,
 } from "./management-types.js";
 import type { LettaCodeRemoteClientOptions } from "./types.js";
 
@@ -41,6 +42,20 @@ type ConversationResponse = ManagementResponse & {
 
 type ConversationMessagesResponse = ManagementResponse & {
   messages: Record<string, unknown>[];
+};
+
+type ListModelsEntry = Record<string, unknown> & {
+  id: string;
+  handle: string;
+  label: string;
+  description: string;
+  isDefault?: boolean;
+  isFeatured?: boolean;
+  free?: boolean;
+};
+
+type ListModelsResponse = ManagementResponse & {
+  entries: ListModelsEntry[];
 };
 
 export type AppServerManagementOptions =
@@ -104,6 +119,34 @@ export class AppServerManagementTransport
       response.agent,
       `Failed to update agent ${agentId}.`,
     );
+  }
+
+  async deleteAgent(agentId: string): Promise<void> {
+    const response = await this.request<ManagementResponse>(
+      "agent_delete",
+      { agent_id: agentId },
+      "agent_delete_response",
+    );
+    if (!response.success) {
+      throw new Error(response.error ?? `Failed to delete agent ${agentId}.`);
+    }
+  }
+
+  async listModels(): Promise<LettaModelEntry[]> {
+    // A bare list_models command (no runtime scope) is answered on the
+    // control channel, so no session or conversation is required.
+    const response = await this.request<ListModelsResponse>(
+      "list_models",
+      {},
+      "list_models_response",
+    );
+    if (!response.success) {
+      throw new Error(response.error ?? "Failed to list models.");
+    }
+    return response.entries.map((entry) => ({
+      ...entry,
+      displayName: entry.label,
+    }));
   }
 
   async listConversations(
