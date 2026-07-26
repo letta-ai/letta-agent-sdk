@@ -3,6 +3,7 @@ import type {
   BootstrapStateResult,
   ChangeDeviceStateOptions,
   CreateAgentOptions,
+  GetDeviceStatusOptions,
   LettaCodeClientSessionOptions,
   LettaCodeSession,
   LettaCodeModelEntry,
@@ -27,6 +28,11 @@ import type {
   SDKStreamEventPayload,
   SendCommandOptions,
   SendMessage,
+  SessionDiffHunk,
+  SessionDiffPreview,
+  SessionDeviceStatus,
+  SessionPendingControlRequest,
+  SessionPermissionSuggestion,
   SkillSource,
   UpdateModelOptions,
   UpdateModelResult,
@@ -505,6 +511,166 @@ function queueItems(message: ProtocolMessage): SDKQueueItem[] {
   });
 }
 
+function deviceStatusRecord(message: ProtocolMessage): Record<string, unknown> | null {
+  if (message.type !== "update_device_status") return null;
+  const status = message.device_status;
+  return status && typeof status === "object" && !Array.isArray(status)
+    ? (status as Record<string, unknown>)
+    : null;
+}
+
+function pendingControlRequests(
+  status: Record<string, unknown>,
+): SessionPendingControlRequest[] {
+  const pending = status.pending_control_requests;
+  if (!Array.isArray(pending)) return [];
+  return pending.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    if (typeof record.request_id !== "string") return [];
+    const request =
+      record.request && typeof record.request === "object" && !Array.isArray(record.request)
+        ? (record.request as Record<string, unknown>)
+        : null;
+    if (!request || typeof request.tool_name !== "string") return [];
+    const entry: SessionPendingControlRequest = {
+      requestId: record.request_id,
+      toolName: request.tool_name,
+      permissionSuggestions: permissionSuggestions(
+        request.permission_suggestions,
+      ),
+      blockedPath:
+        typeof request.blocked_path === "string" ||
+        request.blocked_path === null
+          ? request.blocked_path
+          : null,
+    };
+    if (typeof request.tool_call_id === "string") entry.toolCallId = request.tool_call_id;
+    if (request.input && typeof request.input === "object" && !Array.isArray(request.input)) {
+      entry.toolInput = request.input as Record<string, unknown>;
+    }
+    const previews = diffPreviews(request.diffs);
+    if (previews !== undefined) entry.diffs = previews;
+    return [entry];
+  });
+}
+
+function permissionSuggestions(
+  value: unknown,
+): SessionPermissionSuggestion[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    return typeof record.id === "string" && typeof record.text === "string"
+      ? [{ id: record.id, text: record.text }]
+      : [];
+  });
+}
+
+function diffPreviews(value: unknown): SessionDiffPreview[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.flatMap<SessionDiffPreview>((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    if (
+      record.mode === "advanced" &&
+      typeof record.fileName === "string" &&
+      Array.isArray(record.hunks)
+    ) {
+      return [{
+        mode: "advanced" as const,
+        fileName: record.fileName,
+        hunks: diffHunks(record.hunks),
+      }];
+    }
+    if (
+      (record.mode === "fallback" || record.mode === "unpreviewable") &&
+      typeof record.fileName === "string" &&
+      typeof record.reason === "string"
+    ) {
+      return [{
+        mode: record.mode,
+        fileName: record.fileName,
+        reason: record.reason,
+      }];
+    }
+    return [];
+  });
+}
+
+function diffHunks(value: unknown[]): SessionDiffHunk[] {
+  return value.flatMap<SessionDiffHunk>((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    if (
+      typeof record.oldStart !== "number" ||
+      typeof record.oldLines !== "number" ||
+      typeof record.newStart !== "number" ||
+      typeof record.newLines !== "number" ||
+      !Array.isArray(record.lines)
+    ) {
+      return [];
+    }
+    const lines: SessionDiffHunk["lines"] = [];
+    for (const line of record.lines) {
+      if (!line || typeof line !== "object" || Array.isArray(line)) continue;
+      const lineRecord = line as Record<string, unknown>;
+      const type = lineRecord.type;
+      if (
+        (
+          type !== "context" &&
+          type !== "add" &&
+          type !== "remove"
+        ) ||
+        typeof lineRecord.content !== "string"
+      ) {
+        continue;
+      }
+      lines.push({
+        type,
+        content: lineRecord.content,
+      });
+    }
+    return [{
+      oldStart: record.oldStart,
+      oldLines: record.oldLines,
+      newStart: record.newStart,
+      newLines: record.newLines,
+      lines,
+    }];
+  });
+}
+
+function toSessionDeviceStatus(
+  status: Record<string, unknown>,
+): SessionDeviceStatus | null {
+  const permissionMode = normalizePermissionMode(
+    status.current_permission_mode as
+      | LettaCodeClientSessionOptions["permissionMode"]
+      | undefined,
+  );
+  if (
+    typeof status.is_online !== "boolean" ||
+    typeof status.is_processing !== "boolean" ||
+    permissionMode === undefined ||
+    !(
+      typeof status.current_working_directory === "string" ||
+      status.current_working_directory === null
+    )
+  ) {
+    return null;
+  }
+  return {
+    isOnline: status.is_online,
+    isProcessing: status.is_processing,
+    permissionMode,
+    workingDirectory: status.current_working_directory,
+    pendingControlRequests: pendingControlRequests(status),
+    raw: { ...status },
+  };
+}
+
 export function normalizeSendMessage(message: SendMessage): string | MessageContentItem[] {
   return message;
 }
@@ -532,6 +698,8 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   private messageCounter = 0;
   private clientMessageCounter = 0;
   private toolNames: string[] | undefined;
+  private deviceStatusListeners = new Set<(status: SessionDeviceStatus) => void>();
+  private deviceStatusRefreshCancels = new Set<(error: Error) => void>();
 
   protected constructor(
     protected readonly mode: RuntimeSessionMode,
@@ -772,6 +940,109 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     };
   }
 
+  async getDeviceStatus(
+    options: GetDeviceStatusOptions = {},
+  ): Promise<SessionDeviceStatus> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+    if (!this.controller || !this.runtime) {
+      throw new Error("Session is not initialized");
+    }
+    const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs ?? 30_000;
+    if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+      throw new Error(
+        "Invalid device status timeout. Expected a positive integer.",
+      );
+    }
+    return this.refreshDeviceStatus(timeoutMs);
+  }
+
+  onDeviceStatus(listener: (status: SessionDeviceStatus) => void): () => void {
+    if (typeof listener !== "function") {
+      throw new Error("Invalid device status listener. Expected a function.");
+    }
+    this.deviceStatusListeners.add(listener);
+    return () => {
+      this.deviceStatusListeners.delete(listener);
+    };
+  }
+
+  private refreshDeviceStatus(timeoutMs: number): Promise<SessionDeviceStatus> {
+    const controller = this.controller;
+    const runtime = this.runtime;
+    if (!controller || !runtime) {
+      return Promise.reject(new Error("Session is not initialized"));
+    }
+    return new Promise<SessionDeviceStatus>((resolve, reject) => {
+      let status: SessionDeviceStatus | null = null;
+      let syncAcknowledged = false;
+      let settled = false;
+      const cleanup = () => {
+        clearTimeout(timer);
+        unsubscribe();
+        this.deviceStatusRefreshCancels.delete(cancel);
+      };
+      const rejectOnce = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+      const resolveIfComplete = () => {
+        if (settled || !syncAcknowledged || !status) return;
+        settled = true;
+        cleanup();
+        resolve(status);
+      };
+      const cancel = (error: Error) => rejectOnce(error);
+      const timer = setTimeout(() => {
+        rejectOnce(
+          new Error(`Timed out waiting for ${this.label} device status`),
+        );
+      }, timeoutMs);
+      (timer as { unref?: () => void }).unref?.();
+      const unsubscribe = this.onDeviceStatus((nextStatus) => {
+        status = nextStatus;
+        resolveIfComplete();
+      });
+      this.deviceStatusRefreshCancels.add(cancel);
+
+      void controller.request(
+        "sync",
+        {
+          runtime,
+          recover_approvals: false,
+          force_device_status: true,
+        },
+        {
+          timeoutMs,
+          predicate: (message) => message.type === "sync_response",
+        },
+      ).then(
+        (response) => {
+          if (response.success === false) {
+            rejectOnce(
+              new Error(
+                typeof response.error === "string"
+                  ? response.error
+                  : `Failed to refresh ${this.label} device status`,
+              ),
+            );
+            return;
+          }
+          syncAcknowledged = true;
+          resolveIfComplete();
+        },
+        (error) => {
+          rejectOnce(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        },
+      );
+    });
+  }
+
   async listMessages(options: ListMessagesOptions = {}): Promise<ListMessagesResult> {
     if (!this.initialized) {
       await this.initialize();
@@ -826,6 +1097,11 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     }
     this.activeTurn = null;
     this.pendingTurns.length = 0;
+    for (const cancel of [...this.deviceStatusRefreshCancels]) {
+      cancel(new Error(`Session closed while waiting for ${this.label} device status`));
+    }
+    this.deviceStatusRefreshCancels.clear();
+    this.deviceStatusListeners.clear();
     this.controller?.close();
     this.controller = null;
     this.onCoreClose();
@@ -1136,6 +1412,20 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
 
   private handleProtocolMessage = (message: ProtocolMessage): void => {
     if (!this.runtime || !sameRuntime(message, this.runtime)) return;
+
+    const deviceStatus = deviceStatusRecord(message);
+    if (deviceStatus) {
+      const status = toSessionDeviceStatus(deviceStatus);
+      if (!status) return;
+      for (const listener of [...this.deviceStatusListeners]) {
+        try {
+          listener(status);
+        } catch {
+          // Subscriber errors must not break the protocol message pump.
+        }
+      }
+      return;
+    }
 
     if (message.type === "update_queue") {
       const sdkMessage: SDKQueueUpdateMessage = {

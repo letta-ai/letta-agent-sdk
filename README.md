@@ -67,6 +67,29 @@ await session.recoverPendingApprovals();
 `changeDeviceState()` currently confirms command transport only because the
 underlying protocol does not acknowledge that mutation.
 
+The read side of the device state is exposed as a one-shot getter and a
+subscription — enough to restore permission-mode UI and re-surface pending
+approvals when a mobile or web client returns to the foreground:
+
+```ts
+const status = await session.getDeviceStatus();
+// status.permissionMode, status.workingDirectory, status.isOnline,
+// status.isProcessing, status.pendingControlRequests, status.raw
+
+const unsubscribe = session.onDeviceStatus((status) => {
+  // Called for every device-status update pushed by the runtime.
+});
+unsubscribe();
+```
+
+`getDeviceStatus()` always sends a lightweight, request-correlated `sync`
+(`recover_approvals: false`, `force_device_status: true`) and resolves only
+after the runtime acknowledges it and replays a fresh status. This makes the
+getter safe for foreground reconciliation instead of returning a snapshot
+cached before the app was backgrounded. Pending approval request IDs are for
+correlation; decisions continue through `recoverPendingApprovals()` and the
+session's `canUseTool` callback.
+
 ## Deployment options
 
 | Backend | Agent state | Tool execution |

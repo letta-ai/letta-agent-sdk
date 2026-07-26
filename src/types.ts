@@ -804,6 +804,20 @@ export interface LettaCodeSession extends AsyncDisposable {
    * Remove one queued user message and wait for the runtime acknowledgement.
    */
   removeQueuedMessage(itemId: string): Promise<RemoveQueuedMessageResult>;
+  /**
+   * Read the device execution context (online/processing flags, permission
+   * mode, working directory, pending approvals).
+   *
+   * Sends a lightweight, request-correlated `sync` and resolves only after the
+   * runtime acknowledges it and pushes a fresh `update_device_status`
+   * snapshot for this runtime scope.
+   */
+  getDeviceStatus(options?: GetDeviceStatusOptions): Promise<SessionDeviceStatus>;
+  /**
+   * Subscribe to every incoming device-status update for this session's
+   * runtime scope. Returns an unsubscribe function.
+   */
+  onDeviceStatus(listener: (status: SessionDeviceStatus) => void): () => void;
   close(): void;
   readonly agentId: string | null;
   readonly sessionId: string | null;
@@ -820,6 +834,88 @@ export interface RemoveQueuedMessageResult {
   itemId: string;
   /** False when the item was no longer present in the authoritative queue. */
   removed: boolean;
+}
+
+export interface GetDeviceStatusOptions {
+  /**
+   * Timeout in milliseconds for the authoritative sync and status replay.
+   * Defaults to the session's request timeout.
+   */
+  timeoutMs?: number;
+}
+
+/** A suggested permission grant attached to a pending approval. */
+export interface SessionPermissionSuggestion {
+  id: string;
+  text: string;
+}
+
+export interface SessionDiffHunkLine {
+  type: "context" | "add" | "remove";
+  content: string;
+}
+
+export interface SessionDiffHunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: SessionDiffHunkLine[];
+}
+
+/** Portable projection of a file-edit diff preview. */
+export type SessionDiffPreview =
+  | {
+      mode: "advanced";
+      fileName: string;
+      hunks: SessionDiffHunk[];
+    }
+  | {
+      mode: "fallback" | "unpreviewable";
+      fileName: string;
+      reason: string;
+    };
+
+/** One tool approval the device is still waiting on. */
+export interface SessionPendingControlRequest {
+  /**
+   * Control request id for correlation only. Approval decisions must still
+   * resolve through `recoverPendingApprovals()` and `canUseTool`.
+   */
+  requestId: string;
+  /** Tool awaiting approval. */
+  toolName: string;
+  /** Tool call id awaiting approval, when reported. */
+  toolCallId?: string;
+  /** Tool input awaiting approval, when reported. */
+  toolInput?: Record<string, unknown>;
+  /** Permission grants offered by the runtime. */
+  permissionSuggestions: SessionPermissionSuggestion[];
+  /** Path that triggered the permission check, when reported. */
+  blockedPath: string | null;
+  /** File-edit previews supplied with the approval, when reported. */
+  diffs?: SessionDiffPreview[];
+}
+
+/**
+ * Typed projection of the wire `update_device_status` payload.
+ *
+ * `raw` carries the full wire `device_status` object for fields that are not
+ * projected (git context, toolsets, background processes, ...).
+ */
+export interface SessionDeviceStatus {
+  /** Whether the executing device is connected. */
+  isOnline: boolean;
+  /** Whether the device is currently processing a turn. */
+  isProcessing: boolean;
+  /** Permission mode currently applied to this runtime scope. */
+  permissionMode: PermissionMode;
+  /** Working directory currently applied to this runtime scope. */
+  workingDirectory: string | null;
+  /** Approvals the device is still waiting on (foreground-resume UI). */
+  pendingControlRequests: SessionPendingControlRequest[];
+  /** Full wire `device_status` payload as an escape hatch. */
+  raw: Record<string, unknown>;
 }
 
 /**
