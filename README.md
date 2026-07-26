@@ -82,10 +82,13 @@ const unsubscribe = session.onDeviceStatus((status) => {
 unsubscribe();
 ```
 
-`getDeviceStatus()` resolves with the latest cached `update_device_status`
-snapshot. When nothing has been received yet it sends a lightweight `sync`
-(`recover_approvals: false`, `force_device_status: true`) and resolves with
-the next status the runtime replays.
+`getDeviceStatus()` always sends a lightweight, request-correlated `sync`
+(`recover_approvals: false`, `force_device_status: true`) and resolves only
+after the runtime acknowledges it and replays a fresh status. This makes the
+getter safe for foreground reconciliation instead of returning a snapshot
+cached before the app was backgrounded. Pending approval request IDs are for
+correlation; decisions continue through `recoverPendingApprovals()` and the
+session's `canUseTool` callback.
 
 ## Deployment options
 

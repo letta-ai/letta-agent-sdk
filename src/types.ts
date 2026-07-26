@@ -770,9 +770,9 @@ export interface LettaCodeSession extends AsyncDisposable {
    * Read the device execution context (online/processing flags, permission
    * mode, working directory, pending approvals).
    *
-   * Resolves with the latest cached `update_device_status` snapshot for this
-   * runtime scope. When no snapshot has been received yet, a lightweight
-   * `sync` is sent and the next status pushed by the runtime is returned.
+   * Sends a lightweight, request-correlated `sync` and resolves only after the
+   * runtime acknowledges it and pushes a fresh `update_device_status`
+   * snapshot for this runtime scope.
    */
   getDeviceStatus(options?: GetDeviceStatusOptions): Promise<SessionDeviceStatus>;
   /**
@@ -800,16 +800,50 @@ export interface RemoveQueuedMessageResult {
 
 export interface GetDeviceStatusOptions {
   /**
-   * Timeout in milliseconds for the sync-triggered refresh used when no
-   * device status has been cached yet. Defaults to the session's request
-   * timeout.
+   * Timeout in milliseconds for the authoritative sync and status replay.
+   * Defaults to the session's request timeout.
    */
   timeoutMs?: number;
 }
 
+/** A suggested permission grant attached to a pending approval. */
+export interface SessionPermissionSuggestion {
+  id: string;
+  text: string;
+}
+
+export interface SessionDiffHunkLine {
+  type: "context" | "add" | "remove";
+  content: string;
+}
+
+export interface SessionDiffHunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: SessionDiffHunkLine[];
+}
+
+/** Portable projection of a file-edit diff preview. */
+export type SessionDiffPreview =
+  | {
+      mode: "advanced";
+      fileName: string;
+      hunks: SessionDiffHunk[];
+    }
+  | {
+      mode: "fallback" | "unpreviewable";
+      fileName: string;
+      reason: string;
+    };
+
 /** One tool approval the device is still waiting on. */
 export interface SessionPendingControlRequest {
-  /** Control request id used to respond to the approval. */
+  /**
+   * Control request id for correlation only. Approval decisions must still
+   * resolve through `recoverPendingApprovals()` and `canUseTool`.
+   */
   requestId: string;
   /** Tool awaiting approval. */
   toolName: string;
@@ -817,6 +851,12 @@ export interface SessionPendingControlRequest {
   toolCallId?: string;
   /** Tool input awaiting approval, when reported. */
   toolInput?: Record<string, unknown>;
+  /** Permission grants offered by the runtime. */
+  permissionSuggestions: SessionPermissionSuggestion[];
+  /** Path that triggered the permission check, when reported. */
+  blockedPath: string | null;
+  /** File-edit previews supplied with the approval, when reported. */
+  diffs?: SessionDiffPreview[];
 }
 
 /**

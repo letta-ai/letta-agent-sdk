@@ -237,8 +237,17 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
                 tool_name: "Bash",
                 tool_call_id: "call-1",
                 input: { command: "pwd" },
-                permission_suggestions: [],
-                blocked_path: null,
+                permission_suggestions: [
+                  { id: "allow-pwd", text: "Always allow pwd" },
+                ],
+                blocked_path: "/workspace/project",
+                diffs: [
+                  {
+                    mode: "fallback",
+                    fileName: "project",
+                    reason: "Not a file edit",
+                  },
+                ],
               },
             },
           ],
@@ -1621,7 +1630,7 @@ describe("LettaAgentClient", () => {
         "Invalid queue item id",
       );
 
-      // Device status: sync-triggered getter plus cached reads and pushes.
+      // Device status: every getter performs a correlated, authoritative sync.
       FakeAppServerSocket.deviceStatusOnSync = true;
       const seenStatuses: SessionDeviceStatus[] = [];
       const unsubscribe = session.onDeviceStatus((status) => seenStatuses.push(status));
@@ -1637,6 +1646,17 @@ describe("LettaAgentClient", () => {
             toolName: "Bash",
             toolCallId: "call-1",
             toolInput: { command: "pwd" },
+            permissionSuggestions: [
+              { id: "allow-pwd", text: "Always allow pwd" },
+            ],
+            blockedPath: "/workspace/project",
+            diffs: [
+              {
+                mode: "fallback",
+                fileName: "project",
+                reason: "Not a file edit",
+              },
+            ],
           },
         ],
       });
@@ -1650,14 +1670,18 @@ describe("LettaAgentClient", () => {
       expect(seenStatuses).toHaveLength(1);
       expect(seenStatuses[0]).toBe(deviceStatus);
 
-      // Cached read: no additional sync round-trip.
+      // A second read must not reuse the pre-foreground snapshot.
       const syncsSoFar = fakeControlSocket().sent.filter(
         (command) => (command as { type?: string }).type === "sync",
       ).length;
-      expect(await session.getDeviceStatus()).toBe(deviceStatus);
+      expect(await session.getDeviceStatus()).toMatchObject({
+        permissionMode: "acceptEdits",
+        workingDirectory: "/workspace/project",
+      });
       expect(fakeControlSocket().sent.filter(
         (command) => (command as { type?: string }).type === "sync",
-      )).toHaveLength(syncsSoFar);
+      )).toHaveLength(syncsSoFar + 1);
+      expect(seenStatuses).toHaveLength(2);
 
       // Unsubscribe stops delivery.
       unsubscribe();
@@ -1672,13 +1696,17 @@ describe("LettaAgentClient", () => {
           pending_control_requests: [],
         },
       });
-      expect(seenStatuses).toHaveLength(1);
+      expect(seenStatuses).toHaveLength(2);
+      // Even though a newer-looking push was observed while backgrounded, a
+      // getter forces the runtime to replay its authoritative current state.
       expect(await session.getDeviceStatus()).toMatchObject({
-        permissionMode: "unrestricted",
-        isProcessing: true,
-        workingDirectory: "/workspace/method",
-        pendingControlRequests: [],
+        permissionMode: "acceptEdits",
+        isProcessing: false,
+        workingDirectory: "/workspace/project",
       });
+      await expect(session.getDeviceStatus({ timeoutMs: 0 })).rejects.toThrow(
+        "Invalid device status timeout",
+      );
     } finally {
       FakeAppServerSocket.deviceStatusOnSync = false;
       session.close();

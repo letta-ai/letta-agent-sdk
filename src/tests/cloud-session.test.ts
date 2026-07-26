@@ -305,8 +305,17 @@ class FakeCloudSocket {
                   tool_name: "Bash",
                   tool_call_id: "call-1",
                   input: { command: "pwd" },
-                  permission_suggestions: [],
-                  blocked_path: null,
+                  permission_suggestions: [
+                    { id: "allow-pwd", text: "Always allow pwd" },
+                  ],
+                  blocked_path: "/workspace/project",
+                  diffs: [
+                    {
+                      mode: "fallback",
+                      fileName: "project",
+                      reason: "Not a file edit",
+                    },
+                  ],
                 },
               },
             ],
@@ -1175,8 +1184,8 @@ describe("CloudEnvironmentSession", () => {
           (command) => command.type === "sync" && command.recover_approvals === false,
         );
 
-      // Nothing cached and no replay from the device: the sync-triggered
-      // read times out instead of resolving with stale data.
+      // No replay from the device: the request-correlated sync is acknowledged,
+      // but the read still times out instead of inventing status.
       await expect(session.getDeviceStatus({ timeoutMs: 50 })).rejects.toThrow(
         "Timed out waiting for cloud device status",
       );
@@ -1187,8 +1196,7 @@ describe("CloudEnvironmentSession", () => {
         force_device_status: true,
       });
 
-      // Sync-triggered path: nothing cached, the device replays
-      // update_device_status in response to the forced sync.
+      // The device replays update_device_status in response to the forced sync.
       FakeCloudSocket.deviceStatusOnSync = true;
       const status = await session.getDeviceStatus();
       expect(status).toMatchObject({
@@ -1202,6 +1210,17 @@ describe("CloudEnvironmentSession", () => {
             toolName: "Bash",
             toolCallId: "call-1",
             toolInput: { command: "pwd" },
+            permissionSuggestions: [
+              { id: "allow-pwd", text: "Always allow pwd" },
+            ],
+            blockedPath: "/workspace/project",
+            diffs: [
+              {
+                mode: "fallback",
+                fileName: "project",
+                reason: "Not a file edit",
+              },
+            ],
           },
         ],
       });
@@ -1211,9 +1230,12 @@ describe("CloudEnvironmentSession", () => {
       });
       expect(statusSyncs()).toHaveLength(2);
 
-      // Cached path: no extra sync round-trip.
-      expect(await session.getDeviceStatus()).toBe(status);
-      expect(statusSyncs()).toHaveLength(2);
+      // Every getter is fresh, including after a prior snapshot exists.
+      expect(await session.getDeviceStatus()).toMatchObject({
+        permissionMode: "acceptEdits",
+        workingDirectory: "/workspace/project",
+      });
+      expect(statusSyncs()).toHaveLength(3);
 
       // Subscription: every incoming update_device_status is delivered.
       const seen: SessionDeviceStatus[] = [];
@@ -1238,9 +1260,15 @@ describe("CloudEnvironmentSession", () => {
         pendingControlRequests: [],
       });
 
-      // The getter tracks the newest push without another sync.
-      expect(await session.getDeviceStatus()).toBe(seen[0]!);
-      expect(statusSyncs()).toHaveLength(2);
+      // The getter does not trust a push that may predate foreground resume;
+      // it forces an authoritative replay.
+      expect(await session.getDeviceStatus()).toMatchObject({
+        permissionMode: "acceptEdits",
+        isProcessing: false,
+        workingDirectory: "/workspace/project",
+      });
+      expect(statusSyncs()).toHaveLength(4);
+      expect(seen).toHaveLength(2);
 
       // Updates scoped to another runtime are ignored.
       controlSocket.serverMessage({
@@ -1254,9 +1282,9 @@ describe("CloudEnvironmentSession", () => {
           pending_control_requests: [],
         },
       });
-      expect(seen).toHaveLength(1);
+      expect(seen).toHaveLength(2);
 
-      // Unsubscribe stops delivery; the cache still tracks pushes.
+      // Unsubscribe stops delivery.
       unsubscribe();
       controlSocket.serverMessage({
         type: "update_device_status",
@@ -1269,11 +1297,29 @@ describe("CloudEnvironmentSession", () => {
           pending_control_requests: [],
         },
       });
-      expect(seen).toHaveLength(1);
+      expect(seen).toHaveLength(2);
       expect(await session.getDeviceStatus()).toMatchObject({
-        isOnline: false,
-        permissionMode: "standard",
+        isOnline: true,
+        permissionMode: "acceptEdits",
       });
+      expect(statusSyncs()).toHaveLength(5);
+
+      // A failed sync rejects immediately even if a status frame was observed.
+      FakeCloudSocket.syncSucceeds = false;
+      await expect(session.getDeviceStatus()).rejects.toThrow("sync failed");
+      FakeCloudSocket.syncSucceeds = true;
+
+      await expect(session.getDeviceStatus({ timeoutMs: 0 })).rejects.toThrow(
+        "Invalid device status timeout",
+      );
+
+      FakeCloudSocket.deviceStatusOnSync = false;
+      const pendingRead = session.getDeviceStatus({ timeoutMs: 1_000 });
+      await Promise.resolve();
+      session.close();
+      await expect(pendingRead).rejects.toThrow(
+        "Session closed while waiting for cloud device status",
+      );
     } finally {
       session.close();
     }
