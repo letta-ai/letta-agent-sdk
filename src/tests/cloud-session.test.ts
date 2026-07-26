@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   CloudManagedSandboxExpiredError,
   LettaAgentClient,
+  type CanUseToolContext,
 } from "../index.js";
 import { asAdvanced } from "./advanced-session.js";
 
@@ -351,6 +352,12 @@ class FakeCloudSocket {
           subtype: "can_use_tool",
           tool_name: "Bash",
           input: { command: "pwd" },
+          tool_call_id: "toolu-approval-1",
+          permission_suggestions: [
+            { id: "suggestion-1", text: "Allow Bash(pwd) for this session" },
+          ],
+          blocked_path: null,
+          diffs: [{ mode: "fallback", fileName: "unused.txt", reason: "not a file edit" }],
         },
       });
       return;
@@ -1370,7 +1377,11 @@ describe("CloudEnvironmentSession", () => {
     resetFakeCloud();
     FakeCloudSocket.scenario = "approval";
     const requests: RecordedRequest[] = [];
-    const decisions: Array<{ toolName: string; input: Record<string, unknown> }> = [];
+    const decisions: Array<{
+      toolName: string;
+      input: Record<string, unknown>;
+      context: CanUseToolContext | undefined;
+    }> = [];
     const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
@@ -1382,8 +1393,8 @@ describe("CloudEnvironmentSession", () => {
     });
 
     const session = client.resumeSession("agent-1", {
-      canUseTool: (toolName, input) => {
-        decisions.push({ toolName, input });
+      canUseTool: (toolName, input, context) => {
+        decisions.push({ toolName, input, context });
         return { behavior: "allow", updatedInput: { command: "echo approved" } };
       },
     });
@@ -1391,7 +1402,21 @@ describe("CloudEnvironmentSession", () => {
     const result = await asAdvanced(session).runTurn("run pwd");
 
     expect(result).toMatchObject({ success: true, result: "approved" });
-    expect(decisions).toEqual([{ toolName: "Bash", input: { command: "pwd" } }]);
+    expect(decisions).toEqual([
+      {
+        toolName: "Bash",
+        input: { command: "pwd" },
+        context: {
+          requestId: "approval-1",
+          toolCallId: "toolu-approval-1",
+          permissionSuggestions: [
+            { id: "suggestion-1", text: "Allow Bash(pwd) for this session" },
+          ],
+          blockedPath: null,
+          diffs: [{ mode: "fallback", fileName: "unused.txt", reason: "not a file edit" }],
+        },
+      },
+    ]);
     const approvalCommand = FakeCloudSocket.socket("control")!.sent.find((command) => {
       const payload = command.payload as Record<string, unknown> | undefined;
       return command.type === "input" && payload?.kind === "approval_response";
@@ -1407,6 +1432,36 @@ describe("CloudEnvironmentSession", () => {
         },
       },
     });
+
+    session.close();
+  });
+
+  test("legacy two-argument canUseTool callbacks still work for approval requests", async () => {
+    resetFakeCloud();
+    FakeCloudSocket.scenario = "approval";
+    const requests: RecordedRequest[] = [];
+    const decisions: Array<{ toolName: string; input: Record<string, unknown> }> = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("agent-1", {
+      canUseTool: (toolName, input) => {
+        decisions.push({ toolName, input });
+        return { behavior: "allow" };
+      },
+    });
+
+    const result = await asAdvanced(session).runTurn("run pwd");
+
+    expect(result).toMatchObject({ success: true, result: "approved" });
+    expect(decisions).toEqual([{ toolName: "Bash", input: { command: "pwd" } }]);
 
     session.close();
   });

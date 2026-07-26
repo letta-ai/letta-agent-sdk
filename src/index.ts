@@ -95,6 +95,8 @@ export type {
   PermissionMode,
   ReasoningEffort,
   CanUseToolCallback,
+  CanUseToolContext,
+  CanUseToolPermissionSuggestion,
   CanUseToolResponse,
   CanUseToolResponseAllow,
   CanUseToolResponseDeny,

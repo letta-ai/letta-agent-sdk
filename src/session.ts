@@ -40,6 +40,7 @@ import type {
   UpdateModelResult,
 } from "./types.js";
 import {
+  buildCanUseToolContext,
   isHeadlessAutoAllowTool,
   requiresRuntimeUserInput,
 } from "./interactiveToolPolicy.js";
@@ -997,7 +998,11 @@ export class Session implements AsyncDisposable {
       } satisfies CanUseToolResponseAllow;
     } else if (hasCallback) {
       try {
-        const result = await this.options.canUseTool!(toolName, req.input);
+        const result = await this.options.canUseTool!(
+          toolName,
+          req.input,
+          buildCanUseToolContext(req as unknown as Record<string, unknown>, requestId),
+        );
         if (result.behavior === "allow") {
           response = {
             behavior: "allow",

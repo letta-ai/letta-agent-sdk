@@ -470,6 +470,46 @@ describe("Session", () => {
         },
       });
     });
+
+    test("passes approval context as third canUseTool argument", async () => {
+      const received: unknown[] = [];
+      const session = new Session({
+        permissionMode: "standard",
+        canUseTool: (toolName, toolInput, context) => {
+          received.push({ toolName, toolInput, context });
+          return { behavior: "allow" };
+        },
+      });
+
+      // @ts-expect-error - accessing private method for testing
+      const handleCanUseTool = session.handleCanUseTool.bind(session);
+      // @ts-expect-error - accessing private property for testing
+      session.transport.write = async () => {};
+
+      await handleCanUseTool("req-42", {
+        subtype: "can_use_tool",
+        tool_name: "Edit",
+        tool_call_id: "toolu-edit-1",
+        input: { file_path: "/tmp/a.txt" },
+        permission_suggestions: [{ id: "sugg-1", text: "Always allow edits in /tmp" }],
+        blocked_path: "/tmp/a.txt",
+        diffs: [{ mode: "fallback", fileName: "a.txt", reason: "test" }],
+      });
+
+      expect(received).toEqual([
+        {
+          toolName: "Edit",
+          toolInput: { file_path: "/tmp/a.txt" },
+          context: {
+            requestId: "req-42",
+            toolCallId: "toolu-edit-1",
+            permissionSuggestions: [{ id: "sugg-1", text: "Always allow edits in /tmp" }],
+            blockedPath: "/tmp/a.txt",
+            diffs: [{ mode: "fallback", fileName: "a.txt", reason: "test" }],
+          },
+        },
+      ]);
+    });
   });
 
   describe("transformMessage tool-call mapping", () => {

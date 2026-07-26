@@ -11,6 +11,7 @@ import {
   LETTA_CODE_ORIGIN_TAG,
 } from "@letta-ai/letta-code/agent-presets";
 import {
+  buildCanUseToolContext,
   isHeadlessAutoAllowTool,
   requiresRuntimeUserInput,
 } from "./interactiveToolPolicy.js";
@@ -29,6 +30,7 @@ import {
 } from "./remote-client-session-core.js";
 import type {
   AnyAgentTool,
+  CanUseToolContext,
   CanUseToolResponse,
   CreateAgentOptions,
   LettaCodeRemoteClientOptions,
@@ -352,6 +354,7 @@ export async function resolveAppServerToolApproval(
   options: AppServerApprovalOptions,
   toolName: string,
   toolInput: Record<string, unknown>,
+  context?: CanUseToolContext,
 ): Promise<CanUseToolResponse> {
   const hasCallback = typeof options.canUseTool === "function";
   const toolNeedsRuntimeUserInput = requiresRuntimeUserInput(toolName);
@@ -370,7 +373,7 @@ export async function resolveAppServerToolApproval(
 
   if (hasCallback) {
     try {
-      const result = await options.canUseTool!(toolName, toolInput);
+      const result = await options.canUseTool!(toolName, toolInput, context);
       if (result.behavior === "allow") {
         return {
           behavior: "allow",
@@ -560,7 +563,12 @@ async function respondToAppServerControlRequest(
     requestRecord.input && typeof requestRecord.input === "object" && !Array.isArray(requestRecord.input)
       ? (requestRecord.input as Record<string, unknown>)
       : {};
-  const decision = await resolveAppServerToolApproval(config.getOptions(), toolName, toolInput);
+  const decision = await resolveAppServerToolApproval(
+    config.getOptions(),
+    toolName,
+    toolInput,
+    buildCanUseToolContext(requestRecord, requestId),
+  );
   config.client.input({
     runtime,
     payload: {
