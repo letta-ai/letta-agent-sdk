@@ -3,6 +3,7 @@ import {
   CloudManagedSandboxExpiredError,
   LettaAgentClient,
 } from "../index.js";
+import type { SessionDeviceStatus } from "../index.js";
 import { asAdvanced } from "./advanced-session.js";
 
 type Listener = (event: unknown) => void;
@@ -212,6 +213,7 @@ class FakeCloudSocket {
     | "stale_idle_then_error"
     | "duplicate_idempotency" = "normal";
   static syncSucceeds = true;
+  static deviceStatusOnSync = false;
   readyState = 0;
   sent: Array<Record<string, unknown>> = [];
   private listeners = new Map<string, Set<Listener>>();
@@ -285,14 +287,41 @@ class FakeCloudSocket {
       return;
     }
 
-    if (command.type === "sync" && typeof command.request_id === "string") {
-      this.serverMessage({
-        type: "sync_response",
-        request_id: command.request_id,
-        runtime: command.runtime,
-        success: FakeCloudSocket.syncSucceeds,
-        ...(FakeCloudSocket.syncSucceeds ? {} : { error: "sync failed" }),
-      });
+    if (command.type === "sync") {
+      if (FakeCloudSocket.deviceStatusOnSync && command.force_device_status === true) {
+        this.serverMessageTo("control", {
+          type: "update_device_status",
+          runtime: command.runtime,
+          device_status: {
+            is_online: true,
+            is_processing: false,
+            current_permission_mode: "acceptEdits",
+            current_working_directory: "/workspace/project",
+            pending_control_requests: [
+              {
+                request_id: "approval-1",
+                request: {
+                  subtype: "can_use_tool",
+                  tool_name: "Bash",
+                  tool_call_id: "call-1",
+                  input: { command: "pwd" },
+                  permission_suggestions: [],
+                  blocked_path: null,
+                },
+              },
+            ],
+          },
+        });
+      }
+      if (typeof command.request_id === "string") {
+        this.serverMessage({
+          type: "sync_response",
+          request_id: command.request_id,
+          runtime: command.runtime,
+          success: FakeCloudSocket.syncSucceeds,
+          ...(FakeCloudSocket.syncSucceeds ? {} : { error: "sync failed" }),
+        });
+      }
       return;
     }
 
@@ -521,6 +550,7 @@ function resetFakeCloud(): void {
   FakeCloudSocket.instances = [];
   FakeCloudSocket.scenario = "normal";
   FakeCloudSocket.syncSucceeds = true;
+  FakeCloudSocket.deviceStatusOnSync = false;
 }
 
 describe("CloudEnvironmentSession", () => {
@@ -1116,6 +1146,133 @@ describe("CloudEnvironmentSession", () => {
         runtime: { agent_id: "agent-1", conversation_id: "default" },
         recover_approvals: true,
         force_device_status: true,
+      });
+    } finally {
+      session.close();
+    }
+  });
+
+  test("reads device status via getDeviceStatus and onDeviceStatus", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("agent-1");
+    try {
+      await asAdvanced(session).initialize();
+      const controlSocket = FakeCloudSocket.socket("control")!;
+      const runtime = { agent_id: "agent-1", conversation_id: "default" };
+      const statusSyncs = () =>
+        controlSocket.sent.filter(
+          (command) => command.type === "sync" && command.recover_approvals === false,
+        );
+
+      // Nothing cached and no replay from the device: the sync-triggered
+      // read times out instead of resolving with stale data.
+      await expect(session.getDeviceStatus({ timeoutMs: 50 })).rejects.toThrow(
+        "Timed out waiting for cloud device status",
+      );
+      expect(statusSyncs()).toHaveLength(1);
+      expect(statusSyncs()[0]).toMatchObject({
+        runtime,
+        recover_approvals: false,
+        force_device_status: true,
+      });
+
+      // Sync-triggered path: nothing cached, the device replays
+      // update_device_status in response to the forced sync.
+      FakeCloudSocket.deviceStatusOnSync = true;
+      const status = await session.getDeviceStatus();
+      expect(status).toMatchObject({
+        isOnline: true,
+        isProcessing: false,
+        permissionMode: "acceptEdits",
+        workingDirectory: "/workspace/project",
+        pendingControlRequests: [
+          {
+            requestId: "approval-1",
+            toolName: "Bash",
+            toolCallId: "call-1",
+            toolInput: { command: "pwd" },
+          },
+        ],
+      });
+      expect(status.raw).toMatchObject({
+        current_permission_mode: "acceptEdits",
+        current_working_directory: "/workspace/project",
+      });
+      expect(statusSyncs()).toHaveLength(2);
+
+      // Cached path: no extra sync round-trip.
+      expect(await session.getDeviceStatus()).toBe(status);
+      expect(statusSyncs()).toHaveLength(2);
+
+      // Subscription: every incoming update_device_status is delivered.
+      const seen: SessionDeviceStatus[] = [];
+      const unsubscribe = session.onDeviceStatus((update) => seen.push(update));
+      controlSocket.serverMessage({
+        type: "update_device_status",
+        runtime,
+        device_status: {
+          is_online: true,
+          is_processing: true,
+          current_permission_mode: "unrestricted",
+          current_working_directory: "/workspace/elsewhere",
+          pending_control_requests: [],
+        },
+      });
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toMatchObject({
+        isOnline: true,
+        isProcessing: true,
+        permissionMode: "unrestricted",
+        workingDirectory: "/workspace/elsewhere",
+        pendingControlRequests: [],
+      });
+
+      // The getter tracks the newest push without another sync.
+      expect(await session.getDeviceStatus()).toBe(seen[0]!);
+      expect(statusSyncs()).toHaveLength(2);
+
+      // Updates scoped to another runtime are ignored.
+      controlSocket.serverMessage({
+        type: "update_device_status",
+        runtime: { agent_id: "agent-other", conversation_id: "default" },
+        device_status: {
+          is_online: false,
+          is_processing: false,
+          current_permission_mode: "standard",
+          current_working_directory: null,
+          pending_control_requests: [],
+        },
+      });
+      expect(seen).toHaveLength(1);
+
+      // Unsubscribe stops delivery; the cache still tracks pushes.
+      unsubscribe();
+      controlSocket.serverMessage({
+        type: "update_device_status",
+        runtime,
+        device_status: {
+          is_online: false,
+          is_processing: false,
+          current_permission_mode: "standard",
+          current_working_directory: "/workspace/elsewhere",
+          pending_control_requests: [],
+        },
+      });
+      expect(seen).toHaveLength(1);
+      expect(await session.getDeviceStatus()).toMatchObject({
+        isOnline: false,
+        permissionMode: "standard",
       });
     } finally {
       session.close();

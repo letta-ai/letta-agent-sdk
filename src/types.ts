@@ -766,6 +766,20 @@ export interface LettaCodeSession extends AsyncDisposable {
    * Remove one queued user message and wait for the runtime acknowledgement.
    */
   removeQueuedMessage(itemId: string): Promise<RemoveQueuedMessageResult>;
+  /**
+   * Read the device execution context (online/processing flags, permission
+   * mode, working directory, pending approvals).
+   *
+   * Resolves with the latest cached `update_device_status` snapshot for this
+   * runtime scope. When no snapshot has been received yet, a lightweight
+   * `sync` is sent and the next status pushed by the runtime is returned.
+   */
+  getDeviceStatus(options?: GetDeviceStatusOptions): Promise<SessionDeviceStatus>;
+  /**
+   * Subscribe to every incoming device-status update for this session's
+   * runtime scope. Returns an unsubscribe function.
+   */
+  onDeviceStatus(listener: (status: SessionDeviceStatus) => void): () => void;
   close(): void;
   readonly agentId: string | null;
   readonly sessionId: string | null;
@@ -782,6 +796,48 @@ export interface RemoveQueuedMessageResult {
   itemId: string;
   /** False when the item was no longer present in the authoritative queue. */
   removed: boolean;
+}
+
+export interface GetDeviceStatusOptions {
+  /**
+   * Timeout in milliseconds for the sync-triggered refresh used when no
+   * device status has been cached yet. Defaults to the session's request
+   * timeout.
+   */
+  timeoutMs?: number;
+}
+
+/** One tool approval the device is still waiting on. */
+export interface SessionPendingControlRequest {
+  /** Control request id used to respond to the approval. */
+  requestId: string;
+  /** Tool awaiting approval. */
+  toolName: string;
+  /** Tool call id awaiting approval, when reported. */
+  toolCallId?: string;
+  /** Tool input awaiting approval, when reported. */
+  toolInput?: Record<string, unknown>;
+}
+
+/**
+ * Typed projection of the wire `update_device_status` payload.
+ *
+ * `raw` carries the full wire `device_status` object for fields that are not
+ * projected (git context, toolsets, background processes, ...).
+ */
+export interface SessionDeviceStatus {
+  /** Whether the executing device is connected. */
+  isOnline: boolean;
+  /** Whether the device is currently processing a turn. */
+  isProcessing: boolean;
+  /** Permission mode currently applied to this runtime scope. */
+  permissionMode: PermissionMode;
+  /** Working directory currently applied to this runtime scope. */
+  workingDirectory: string | null;
+  /** Approvals the device is still waiting on (foreground-resume UI). */
+  pendingControlRequests: SessionPendingControlRequest[];
+  /** Full wire `device_status` payload as an escape hatch. */
+  raw: Record<string, unknown>;
 }
 
 /**

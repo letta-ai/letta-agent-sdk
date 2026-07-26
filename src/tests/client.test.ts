@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { LettaAgentClient, Session } from "../index.js";
+import type { SessionDeviceStatus } from "../index.js";
 import { asAdvanced } from "./advanced-session.js";
 
 type Listener = (event: unknown) => void;
@@ -27,6 +28,7 @@ function urlOf(input: FetchInput | URL): string {
 class FakeAppServerSocket {
   static instances: FakeAppServerSocket[] = [];
   static mirrorStreamToControl = false;
+  static deviceStatusOnSync = false;
   static reportedAgentTools: Array<{ name: string }> | undefined;
   static inputScenario:
     | "normal"
@@ -217,13 +219,40 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
     return;
   }
 
-  if (command.type === "sync" && typeof command.request_id === "string") {
-    fakeControlSocket().serverMessage({
-      type: "sync_response",
-      request_id: command.request_id,
-      runtime: command.runtime,
-      success: true,
-    });
+  if (command.type === "sync") {
+    if (FakeAppServerSocket.deviceStatusOnSync && command.force_device_status === true) {
+      fakeControlSocket().serverMessage({
+        type: "update_device_status",
+        runtime: command.runtime,
+        device_status: {
+          is_online: true,
+          is_processing: false,
+          current_permission_mode: "acceptEdits",
+          current_working_directory: "/workspace/project",
+          pending_control_requests: [
+            {
+              request_id: "approval-1",
+              request: {
+                subtype: "can_use_tool",
+                tool_name: "Bash",
+                tool_call_id: "call-1",
+                input: { command: "pwd" },
+                permission_suggestions: [],
+                blocked_path: null,
+              },
+            },
+          ],
+        },
+      });
+    }
+    if (typeof command.request_id === "string") {
+      fakeControlSocket().serverMessage({
+        type: "sync_response",
+        request_id: command.request_id,
+        runtime: command.runtime,
+        success: true,
+      });
+    }
     return;
   }
 
@@ -500,6 +529,12 @@ describe("LettaAgentClient", () => {
       expect(session).toBeInstanceOf(Session);
       await expect(asAdvanced(session).updateToolset("developer")).rejects.toThrow(
         "updateToolset() is not supported by this session",
+      );
+      await expect(session.getDeviceStatus()).rejects.toThrow(
+        "getDeviceStatus() is not supported by the legacy stdio transport",
+      );
+      expect(() => session.onDeviceStatus(() => {})).toThrow(
+        "onDeviceStatus() is not supported by the legacy stdio transport",
       );
     } finally {
       session.close();
@@ -1585,7 +1620,67 @@ describe("LettaAgentClient", () => {
       await expect(session.removeQueuedMessage("  ")).rejects.toThrow(
         "Invalid queue item id",
       );
+
+      // Device status: sync-triggered getter plus cached reads and pushes.
+      FakeAppServerSocket.deviceStatusOnSync = true;
+      const seenStatuses: SessionDeviceStatus[] = [];
+      const unsubscribe = session.onDeviceStatus((status) => seenStatuses.push(status));
+      const deviceStatus = await session.getDeviceStatus();
+      expect(deviceStatus).toMatchObject({
+        isOnline: true,
+        isProcessing: false,
+        permissionMode: "acceptEdits",
+        workingDirectory: "/workspace/project",
+        pendingControlRequests: [
+          {
+            requestId: "approval-1",
+            toolName: "Bash",
+            toolCallId: "call-1",
+            toolInput: { command: "pwd" },
+          },
+        ],
+      });
+      expect(fakeControlSocket().sent.at(-1)).toMatchObject({
+        type: "sync",
+        runtime: { agent_id: "agent-123", conversation_id: "default" },
+        recover_approvals: false,
+        force_device_status: true,
+      });
+      // The subscription observed the same sync-triggered push.
+      expect(seenStatuses).toHaveLength(1);
+      expect(seenStatuses[0]).toBe(deviceStatus);
+
+      // Cached read: no additional sync round-trip.
+      const syncsSoFar = fakeControlSocket().sent.filter(
+        (command) => (command as { type?: string }).type === "sync",
+      ).length;
+      expect(await session.getDeviceStatus()).toBe(deviceStatus);
+      expect(fakeControlSocket().sent.filter(
+        (command) => (command as { type?: string }).type === "sync",
+      )).toHaveLength(syncsSoFar);
+
+      // Unsubscribe stops delivery.
+      unsubscribe();
+      fakeControlSocket().serverMessage({
+        type: "update_device_status",
+        runtime: { agent_id: "agent-123", conversation_id: "default" },
+        device_status: {
+          is_online: true,
+          is_processing: true,
+          current_permission_mode: "unrestricted",
+          current_working_directory: "/workspace/method",
+          pending_control_requests: [],
+        },
+      });
+      expect(seenStatuses).toHaveLength(1);
+      expect(await session.getDeviceStatus()).toMatchObject({
+        permissionMode: "unrestricted",
+        isProcessing: true,
+        workingDirectory: "/workspace/method",
+        pendingControlRequests: [],
+      });
     } finally {
+      FakeAppServerSocket.deviceStatusOnSync = false;
       session.close();
     }
   });

@@ -28,6 +28,8 @@ import type {
   BootstrapStateOptions,
   BootstrapStateResult,
   ChangeDeviceStateOptions,
+  GetDeviceStatusOptions,
+  SessionDeviceStatus,
   SDKStreamEventPayload,
   RunTurnOptions,
   RecoverPendingApprovalsOptions,
@@ -1192,6 +1194,18 @@ export class Session implements AsyncDisposable {
   async removeQueuedMessage(_itemId: string): Promise<RemoveQueuedMessageResult> {
     throw new Error(
       "removeQueuedMessage() is not supported by the legacy stdio transport. Use a Cloud, Remote, or local app-server session.",
+    );
+  }
+
+  async getDeviceStatus(_options?: GetDeviceStatusOptions): Promise<SessionDeviceStatus> {
+    throw new Error(
+      "getDeviceStatus() is not supported by the legacy stdio transport. Use a Cloud, Remote, or local app-server session.",
+    );
+  }
+
+  onDeviceStatus(_listener: (status: SessionDeviceStatus) => void): () => void {
+    throw new Error(
+      "onDeviceStatus() is not supported by the legacy stdio transport. Use a Cloud, Remote, or local app-server session.",
     );
   }
 
