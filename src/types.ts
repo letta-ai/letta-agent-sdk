@@ -742,10 +742,46 @@ export interface LettaCodeSession extends AsyncDisposable {
   listMessages(options?: ListMessagesOptions): Promise<ListMessagesResult>;
   listModels(): Promise<ListModelsResult>;
   updateModel(update: string | UpdateModelOptions): Promise<UpdateModelResult>;
+  /**
+   * Fetch the initial conversation projection used to hydrate or reconcile a
+   * resumed session.
+   */
+  bootstrapState(options?: BootstrapStateOptions): Promise<BootstrapStateResult>;
+  /**
+   * Ask the runtime to recover any approval that was pending across a
+   * disconnect.
+   */
+  recoverPendingApprovals(
+    options?: RecoverPendingApprovalsOptions,
+  ): Promise<RecoverPendingApprovalsResult>;
+  /**
+   * Update runtime controls for subsequent work in this conversation.
+   *
+   * The current app-server protocol does not acknowledge this command. The
+   * promise confirms that the command was accepted for transport, not that the
+   * runtime has applied it.
+   */
+  changeDeviceState(updates: ChangeDeviceStateOptions): Promise<void>;
+  /**
+   * Remove one queued user message and wait for the runtime acknowledgement.
+   */
+  removeQueuedMessage(itemId: string): Promise<RemoveQueuedMessageResult>;
   close(): void;
   readonly agentId: string | null;
   readonly sessionId: string | null;
   readonly conversationId: string | null;
+}
+
+export interface ChangeDeviceStateOptions {
+  cwd?: string;
+  permissionMode?: PermissionMode;
+}
+
+export interface RemoveQueuedMessageResult {
+  /** Queue item identifier echoed by the runtime. */
+  itemId: string;
+  /** False when the item was no longer present in the authoritative queue. */
+  removed: boolean;
 }
 
 /**

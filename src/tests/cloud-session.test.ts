@@ -952,7 +952,7 @@ describe("CloudEnvironmentSession", () => {
       toolset_preference: "developer",
     }));
 
-    await expect(asAdvanced(session).recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
+    await expect(session.recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
       recovered: true,
       unsupported: false,
     });
@@ -1064,7 +1064,7 @@ describe("CloudEnvironmentSession", () => {
     const session = client.resumeSession("agent-1");
     try {
       await asAdvanced(session).initialize();
-      await expect(asAdvanced(session).recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
+      await expect(session.recoverPendingApprovals({ timeoutMs: 1_000 })).resolves.toEqual({
         recovered: false,
         unsupported: false,
         detail: "sync failed",
@@ -1236,7 +1236,7 @@ describe("CloudEnvironmentSession", () => {
 
     const session = client.resumeSession("conv-1");
     try {
-      const state = await asAdvanced(session).bootstrapState({ limit: 3 });
+      const state = await session.bootstrapState({ limit: 3 });
       expect(state).toMatchObject({
         agentId: "agent-from-conv",
         conversationId: "conv-1",
