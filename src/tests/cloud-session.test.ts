@@ -697,6 +697,45 @@ describe("CloudEnvironmentSession", () => {
     }
   });
 
+  test("clones configured GitHub repositories into a managed sandbox", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+    });
+
+    const session = client.resumeSession("conv-1", {
+      sandbox: {
+        githubRepositories: [
+          { owner: "letta-ai", repo: "letta-docs" },
+          { owner: "letta-ai", repo: "letta-code" },
+        ],
+      },
+    });
+    try {
+      await asAdvanced(session).initialize();
+
+      expect(requests).toContainEqual(expect.objectContaining({
+        method: "POST",
+        url: "https://api.test/v1/agents/agent-from-conv/sandboxes",
+        body: {
+          conversationId: "conv-1",
+          githubRepositories: [
+            { owner: "letta-ai", repo: "letta-docs" },
+            { owner: "letta-ai", repo: "letta-code" },
+          ],
+        },
+      }));
+    } finally {
+      session.close();
+    }
+  });
+
   test("falls back to the agent-scoped sandbox lifecycle against legacy servers", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
@@ -1840,6 +1879,42 @@ describe("CloudEnvironmentSession", () => {
       WebSocket: FakeCloudSocket,
       sandbox: { ttlMinutes: 61 },
     })).toThrow("Invalid sandbox.ttlMinutes");
+
+    expect(() => new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock([]),
+      WebSocket: FakeCloudSocket,
+      sandbox: {
+        githubRepositories: Array.from({ length: 11 }, (_, index) => ({
+          owner: "letta-ai",
+          repo: `repo-${index}`,
+        })),
+      },
+    })).toThrow("Expected at most 10 repositories");
+
+    expect(() => new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock([]),
+      WebSocket: FakeCloudSocket,
+      sandbox: {
+        githubRepositories: [{ owner: "letta ai", repo: "letta-code" }],
+      },
+    })).toThrow("githubRepositories[0].owner");
+
+    expect(() => new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock([]),
+      WebSocket: FakeCloudSocket,
+      sandbox: {
+        githubRepositories: [{ owner: "letta-ai", repo: "letta/code" }],
+      },
+    })).toThrow("githubRepositories[0].repo");
 
     const clientWithEnvironment = new LettaAgentClient({
       backend: "cloud",

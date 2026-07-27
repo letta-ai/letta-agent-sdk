@@ -108,6 +108,23 @@ await using session = client.createSession(agentId, {
 });
 ```
 
+### Managed Cloud sandbox repositories
+
+Cloud sessions can clone up to 10 GitHub repositories into the managed
+sandbox. Public repositories clone directly; private repositories require
+access through the organization's GitHub integration.
+
+```ts
+await using session = client.createSession(agentId, {
+  sandbox: {
+    githubRepositories: [
+      { owner: "letta-ai", repo: "letta-docs-md" },
+      { owner: "letta-ai", repo: "letta-code" },
+    ],
+  },
+});
+```
+
 ### Remote App Server
 
 ```ts

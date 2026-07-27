@@ -27,6 +27,11 @@ export type {
 // Import types for use in this file
 import type { CreateBlock, CanUseToolResponse } from "./protocol.js";
 import type { PersonalityId } from "@letta-ai/letta-code/agent-presets";
+import type { LettaCodeCloudSandboxOptions } from "./cloud-sandbox.js";
+export type {
+  GitHubRepositoryRef,
+  LettaCodeCloudSandboxOptions,
+} from "./cloud-sandbox.js";
 
 /** Letta Code personality preset used to seed a new agent. */
 export type LettaCodePersonalityId = PersonalityId;
@@ -346,27 +351,6 @@ export interface LettaCodeRemoteClientOptions {
   idleLingerMs?: number;
   /** Whether agents created through this app-server are added to Letta Code's global pinned-agent list. */
   pinGlobalAgent?: boolean;
-}
-
-export interface LettaCodeCloudSandboxOptions {
-  /**
-   * TTL to request when refreshing an SDK-managed sandbox. Defaults to 5
-   * minutes, matching the Cloud API default. Valid range: 1-60.
-   */
-  ttlMinutes?: number;
-  /** Timeout waiting for a newly created sandbox environment to come online. */
-  readyTimeoutMs?: number;
-  /** Poll interval while waiting for a newly created sandbox environment. */
-  readyPollIntervalMs?: number;
-  /** Interval for proactive TTL refreshes while the session is open. */
-  refreshIntervalMs?: number;
-  /**
-   * Best-effort terminate the SDK-managed sandbox on session close. Defaults to
-   * false so other sessions for the same conversation and reconnecting clients
-   * can continue using it. Set true to restore eager cleanup when this session
-   * exclusively owns the sandbox.
-   */
-  terminateOnClose?: boolean;
 }
 
 export interface LettaCodeCloudClientOptions {
