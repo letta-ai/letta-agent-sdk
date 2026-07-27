@@ -18,8 +18,10 @@ import {
   queueItems,
   sameRuntime,
   streamDeltaMessageType,
+  streamDeltaOtid,
   streamDeltaRecord,
   streamDeltaRunId,
+  streamDeltaSeqId,
   streamDeltaStopReason,
   toSdkErrorCode,
   toSessionDeviceStatus,
@@ -303,6 +305,8 @@ export class RemoteTurnCoordinator {
     const messageType =
       typeof delta.message_type === "string" ? delta.message_type : undefined;
     const runId = typeof delta.run_id === "string" ? delta.run_id : undefined;
+    const otid = streamDeltaOtid(delta);
+    const seqId = streamDeltaSeqId(delta);
     const uuid =
       typeof delta.id === "string"
         ? delta.id
@@ -312,7 +316,14 @@ export class RemoteTurnCoordinator {
       const content = extractTextFromContent(delta.content);
       if (!content) return null;
       if (this.activeTurn) this.activeTurn.assistantText += content;
-      return { type: "assistant", content, uuid, runId };
+      return {
+        type: "assistant",
+        content,
+        uuid,
+        ...(otid !== undefined ? { otid } : {}),
+        ...(seqId !== undefined ? { seqId } : {}),
+        runId,
+      };
     }
 
     if (messageType === "reasoning_message") {
@@ -321,7 +332,14 @@ export class RemoteTurnCoordinator {
           ? delta.reasoning
           : extractTextFromContent(delta.content);
       if (!content) return null;
-      return { type: "reasoning", content, uuid, runId };
+      return {
+        type: "reasoning",
+        content,
+        uuid,
+        ...(otid !== undefined ? { otid } : {}),
+        ...(seqId !== undefined ? { seqId } : {}),
+        runId,
+      };
     }
 
     if (

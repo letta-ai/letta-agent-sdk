@@ -1044,7 +1044,12 @@ export interface SDKInitMessage {
 export interface SDKAssistantMessage {
   type: "assistant";
   content: string;
+  /** Legacy transport identifier. Prefer `otid` for message lineage. */
   uuid: string;
+  /** Stable lineage key for this typed message slice, when provided. */
+  otid?: string | null;
+  /** Per-run replay cursor. Compare only within the same `runId`. */
+  seqId?: number;
   /** Run ID from the Letta API for this event (used for stale-run detection). */
   runId?: string;
 }
@@ -1074,7 +1079,12 @@ export interface SDKToolResultMessage {
 export interface SDKReasoningMessage {
   type: "reasoning";
   content: string;
+  /** Legacy transport identifier. Prefer `otid` for message lineage. */
   uuid: string;
+  /** Stable lineage key for this typed message slice, when provided. */
+  otid?: string | null;
+  /** Per-run replay cursor. Compare only within the same `runId`. */
+  seqId?: number;
   /** Run ID from the Letta API for this event (used for stale-run detection). */
   runId?: string;
 }
@@ -1126,6 +1136,8 @@ export interface SDKStreamEventMessagePayload {
   message_type: string;
   id?: string;
   otid?: string | null;
+  seq_id?: number;
+  run_id?: string;
   content?: unknown;
   reasoning?: string;
   name?: string;
