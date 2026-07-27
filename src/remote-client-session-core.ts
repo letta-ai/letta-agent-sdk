@@ -689,6 +689,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
 
   private readonly label: string;
   private readonly requestTimeoutMs: number | undefined;
+  private initializePromise: Promise<SDKInitMessage> | null = null;
   private streamQueue: SDKMessage[] = [];
   private streamResolvers: Array<(msg: SDKMessage | null) => void> = [];
   private removeMessageHandler: (() => void) | null = null;
@@ -709,51 +710,88 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     this.requestTimeoutMs = config.requestTimeoutMs;
   }
 
+  /**
+   * Initialize the session.
+   *
+   * Single-flight: the first caller starts initialization and every
+   * concurrent caller (including the lazily-initializing entry points such
+   * as send()/stream()/listMessages()) awaits the same promise, so a fresh
+   * session never opens more than one runtime connection. A failed attempt
+   * clears the memo so a later call can retry; it only releases the
+   * resources that failed attempt created.
+   */
   async initialize(): Promise<SDKInitMessage> {
-    if (this.initialized) {
-      throw new Error("Session already initialized");
-    }
     if (this.closed) {
       throw new Error("Session is closed");
     }
-
-    try {
-      const init = await this.initializeRuntimeController();
-      this.controller = init.controller;
-      this.runtime = init.runtime;
-      this._agentId = init.runtime.agent_id;
-      this._conversationId = init.runtime.conversation_id;
-      this._sessionId = `${init.runtime.agent_id}:${init.runtime.conversation_id}`;
-      this._modelSettings = init.modelSettings ?? null;
-      this._model =
-        typeof init.model === "string"
-          ? init.model
-          : typeof this._modelSettings?.model === "string"
-            ? this._modelSettings.model
-            : "";
-      this.toolNames = init.tools;
-      this.removeMessageHandler = this.controller.onMessage(this.handleProtocolMessage);
-      this.initialized = true;
-
-      await this.afterRuntimeInitialized();
-      await this.applyPostInitializeOptions();
-
-      const initMessage: SDKInitMessage = {
-        type: "init",
-        agentId: init.runtime.agent_id,
-        sessionId: this._sessionId,
-        conversationId: init.runtime.conversation_id,
-        model: this._model,
-      };
-      if (this.toolNames !== undefined) initMessage.tools = this.toolNames;
-      if (init.skillSources !== undefined) {
-        initMessage.skillSources = init.skillSources;
-      }
-      return initMessage;
-    } catch (error) {
-      this.close();
-      throw error;
+    if (this.initializePromise) {
+      return this.initializePromise;
     }
+    let memo: Promise<SDKInitMessage> | null = null;
+    memo = this.performInitialize().catch((error: unknown) => {
+      // Clear the memo so a later initialize() can retry, and tear down only
+      // this attempt's partial state. Never close() here: single-flight means
+      // no concurrent initialize exists whose healthy connection a losing
+      // attempt could destroy, and the session itself stays usable.
+      if (this.initializePromise === memo) {
+        this.initializePromise = null;
+        this.cleanupFailedInitialize();
+      }
+      throw error;
+    });
+    this.initializePromise = memo;
+    return memo;
+  }
+
+  private async performInitialize(): Promise<SDKInitMessage> {
+    const init = await this.initializeRuntimeController();
+    this.controller = init.controller;
+    this.runtime = init.runtime;
+    this._agentId = init.runtime.agent_id;
+    this._conversationId = init.runtime.conversation_id;
+    this._sessionId = `${init.runtime.agent_id}:${init.runtime.conversation_id}`;
+    this._modelSettings = init.modelSettings ?? null;
+    this._model =
+      typeof init.model === "string"
+        ? init.model
+        : typeof this._modelSettings?.model === "string"
+          ? this._modelSettings.model
+          : "";
+    this.toolNames = init.tools;
+    this.removeMessageHandler = this.controller.onMessage(this.handleProtocolMessage);
+    this.initialized = true;
+
+    await this.afterRuntimeInitialized();
+    await this.applyPostInitializeOptions();
+
+    const initMessage: SDKInitMessage = {
+      type: "init",
+      agentId: init.runtime.agent_id,
+      sessionId: this._sessionId,
+      conversationId: init.runtime.conversation_id,
+      model: this._model,
+    };
+    if (this.toolNames !== undefined) initMessage.tools = this.toolNames;
+    if (init.skillSources !== undefined) {
+      initMessage.skillSources = init.skillSources;
+    }
+    return initMessage;
+  }
+
+  /**
+   * Release the partial state a failed initialize attempt created without
+   * closing the session, so a later initialize() can retry.
+   */
+  private cleanupFailedInitialize(): void {
+    this.removeMessageHandler?.();
+    this.removeMessageHandler = null;
+    this.controller?.close();
+    this.controller = null;
+    // Subclass-owned resources (spawned connections, sandboxes, handlers)
+    // are attempt-scoped too; their cleanup hooks are idempotent.
+    this.onCoreClose();
+    this.runtime = null;
+    this.initialized = false;
   }
 
   async send(message: SendMessage): Promise<void> {

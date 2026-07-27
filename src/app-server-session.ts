@@ -16,6 +16,7 @@ import {
   isHeadlessAutoAllowTool,
   requiresRuntimeUserInput,
 } from "./interactiveToolPolicy.js";
+import { applyUniqueRequestIds } from "./request-ids.js";
 import {
   RemoteClientSessionCore,
   ensureSuccess,
@@ -773,7 +774,7 @@ export class AppServerSession extends RemoteClientSessionCore {
     await this.remoteOptions.beforeConnect?.();
     const url = await this.resolveAppServerUrl();
     await releaseAppServerManagementConnections(url);
-    const client = createAppServerClient({
+    const client = applyUniqueRequestIds(createAppServerClient({
       url,
       ...(this.remoteOptions.authToken !== undefined
         ? { authToken: this.remoteOptions.authToken }
@@ -784,7 +785,7 @@ export class AppServerSession extends RemoteClientSessionCore {
       ...(this.remoteOptions.requestTimeoutMs !== undefined
         ? { requestTimeoutMs: this.remoteOptions.requestTimeoutMs }
         : {}),
-    });
+    }));
 
     this.removeControlRequestHandler = registerAppServerControlRequestHandler({
       client,

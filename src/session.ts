@@ -127,6 +127,7 @@ export class Session implements AsyncDisposable {
   private _sessionId: string | null = null;
   private _conversationId: string | null = null;
   private initialized = false;
+  private initializePromise: Promise<SDKInitMessage> | null = null;
   private externalTools: Map<string, AnyAgentTool> = new Map();
   private streamQueue: BufferedStreamMessage[] = [];
   private streamResolvers: Array<(msg: BufferedStreamMessage | null) => void> = [];
@@ -169,13 +170,29 @@ export class Session implements AsyncDisposable {
   }
 
   /**
-   * Initialize the session (called automatically on first send)
+   * Initialize the session (called automatically on first send).
+   *
+   * Single-flight: concurrent callers (including lazily-initializing entry
+   * points such as send()) share one in-flight initialization instead of
+   * each connecting the transport. A failed attempt clears the memo so a
+   * later call can retry.
    */
   async initialize(): Promise<SDKInitMessage> {
-    if (this.initialized) {
-      throw new Error("Session already initialized");
+    if (this.initializePromise) {
+      return this.initializePromise;
     }
+    let memo: Promise<SDKInitMessage> | null = null;
+    memo = this.performInitialize().catch((error: unknown) => {
+      if (this.initializePromise === memo) {
+        this.initializePromise = null;
+      }
+      throw error;
+    });
+    this.initializePromise = memo;
+    return memo;
+  }
 
+  private async performInitialize(): Promise<SDKInitMessage> {
     sessionLog("init", "connecting transport...");
     await this.transport.connect();
     sessionLog("init", "transport connected, sending initialize request");
