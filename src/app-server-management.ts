@@ -3,6 +3,7 @@ import {
   type AppServerClient,
   type AppServerRequestCommandWithId,
   type AppServerSocketConstructor,
+  type AppServerSocketLike,
 } from "@letta-ai/letta-code/app-server-client";
 import type {
   ManagementQuery,
@@ -78,7 +79,70 @@ type ActiveConnection = {
   client: AppServerClient;
   ownedConnection: OwnedConnection | null;
   detachDisconnect: () => void;
+  unregister: () => void;
 };
+
+type RegisteredManagementTransport = {
+  releaseIdleConnection(): Promise<void>;
+};
+
+type ManagementTransportRegistration = {
+  transport: RegisteredManagementTransport;
+};
+
+const registeredTransportsByUrl =
+  new Map<string, Set<ManagementTransportRegistration>>();
+
+function appServerUrlKey(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol === "http:") url.protocol = "ws:";
+    if (url.protocol === "https:") url.protocol = "wss:";
+    url.hash = "";
+    url.searchParams.delete("channel");
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
+function registerManagementTransport(
+  url: string,
+  transport: RegisteredManagementTransport,
+): () => void {
+  const key = appServerUrlKey(url);
+  const registration = { transport };
+  const transports =
+    registeredTransportsByUrl.get(key) ??
+    new Set<ManagementTransportRegistration>();
+  transports.add(registration);
+  registeredTransportsByUrl.set(key, transports);
+  return () => {
+    transports.delete(registration);
+    if (transports.size === 0) {
+      registeredTransportsByUrl.delete(key);
+    }
+  };
+}
+
+/**
+ * Wait for every management transport targeting this app-server to release
+ * its control connection. The registry is process-wide so a session created
+ * by a different `LettaAgentClient` instance can still take the server's
+ * single control slot safely.
+ */
+export async function releaseAppServerManagementConnections(
+  url: string,
+): Promise<void> {
+  const key = appServerUrlKey(url);
+  while (true) {
+    const transports = [...(registeredTransportsByUrl.get(key) ?? [])];
+    if (transports.length === 0) return;
+    await Promise.all(
+      transports.map(({ transport }) => transport.releaseIdleConnection()),
+    );
+  }
+}
 
 function ensureResponse<T>(
   response: { success: boolean; error?: string },
@@ -140,18 +204,21 @@ function stringRecord(value: unknown): Record<string, string> | undefined {
  * client while requests are in flight (bursts share one connection and one
  * request-id counter, so responses correlate correctly), then releases the
  * connection shortly after it goes idle ({@link DEFAULT_IDLE_LINGER_MS}) and
- * reconnects lazily on the next request. `LettaAgentClientBase` additionally
- * calls {@link releaseIdleConnection} before creating or resuming a session so
- * sessions never have to wait out the linger. The inverse contention — a
- * management request issued while a session holds the control slot — cannot be
- * solved client-side and still fails until the app-server allows multiple
- * control clients.
+ * reconnects lazily on the next request. Before a session connects, all
+ * management transports registered for the same app-server URL relinquish
+ * their connections; the handoff waits for in-flight work and for the control
+ * socket's close event. The inverse contention — a management request issued
+ * while a session holds the control slot — cannot be solved client-side and
+ * still fails until the app-server allows multiple control clients.
  */
 export class AppServerManagementTransport
   implements ManagementTransport
 {
   private connectionPromise: Promise<ActiveConnection> | null = null;
+  private releasePromise: Promise<void> | null = null;
+  private closingConnections = new Set<Promise<void>>();
   private inFlightRequests = 0;
+  private idleWaiters = new Set<() => void>();
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly idleLingerMs: number;
 
@@ -317,23 +384,32 @@ export class AppServerManagementTransport
   }
 
   /**
-   * Immediately release the pooled control connection if no request is in
-   * flight, instead of waiting out the idle linger.
+   * Release the pooled control connection instead of waiting out the idle
+   * linger. If requests are in flight, wait for them to settle first.
    *
    * The app-server accepts a single control client (see the class docs), so
-   * this is called before opening a session to hand the control slot over
-   * without a linger-sized race window.
+   * This is called before opening a session to hand the control slot over
+   * without a linger-sized or socket-close race window.
    */
-  releaseIdleConnection(): void {
-    if (this.inFlightRequests > 0) return;
+  releaseIdleConnection(): Promise<void> {
     this.clearIdleTimer();
-    const promise = this.connectionPromise;
-    if (!promise) return;
-    this.connectionPromise = null;
-    void promise.then(
-      (connection) => closeConnection(connection),
-      () => {},
+    if (this.releasePromise) return this.releasePromise;
+
+    const release = this.releaseConnectionWhenIdle();
+    this.releasePromise = release;
+    void release.then(
+      () => {
+        if (this.releasePromise === release) {
+          this.releasePromise = null;
+        }
+      },
+      () => {
+        if (this.releasePromise === release) {
+          this.releasePromise = null;
+        }
+      },
     );
+    return release;
   }
 
   private async request<TResponse extends { type: string }>(
@@ -341,6 +417,12 @@ export class AppServerManagementTransport
     body: Record<string, unknown>,
     responseType: string,
   ): Promise<TResponse> {
+    if (this.releasePromise) {
+      await this.releasePromise;
+    }
+    if (this.closingConnections.size > 0) {
+      await Promise.all([...this.closingConnections]);
+    }
     this.clearIdleTimer();
     this.inFlightRequests += 1;
     try {
@@ -362,8 +444,35 @@ export class AppServerManagementTransport
     } finally {
       this.inFlightRequests -= 1;
       if (this.inFlightRequests === 0) {
-        this.scheduleIdleRelease();
+        const waiters = [...this.idleWaiters];
+        this.idleWaiters.clear();
+        for (const resolve of waiters) resolve();
+        if (!this.releasePromise) {
+          this.scheduleIdleRelease();
+        }
       }
+    }
+  }
+
+  private async releaseConnectionWhenIdle(): Promise<void> {
+    if (this.inFlightRequests > 0) {
+      await new Promise<void>((resolve) => {
+        this.idleWaiters.add(resolve);
+      });
+    }
+
+    this.clearIdleTimer();
+    const promise = this.connectionPromise;
+    try {
+      if (promise) {
+        this.connectionPromise = null;
+        await this.trackClosingConnection(await promise);
+      }
+      if (this.closingConnections.size > 0) {
+        await Promise.all([...this.closingConnections]);
+      }
+    } catch {
+      // A failed connect already closes its partially-created resources.
     }
   }
 
@@ -397,6 +506,7 @@ export class AppServerManagementTransport
     if (!url) {
       throw new Error("App-server management requires a url or connect hook.");
     }
+    const unregister = registerManagementTransport(url, this);
 
     let client: AppServerClient | null = null;
     try {
@@ -417,11 +527,28 @@ export class AppServerManagementTransport
       });
       await client.connect();
     } catch (error) {
-      client?.close();
-      ownedConnection?.close();
+      try {
+        if (client) {
+          const controlClosed = waitForSocketClose(client.control);
+          client.close();
+          ownedConnection?.close();
+          await controlClosed;
+        } else {
+          ownedConnection?.close();
+        }
+      } catch {
+        // Preserve the original connect error after best-effort cleanup.
+      } finally {
+        unregister();
+      }
       throw error;
     }
-    return { client, ownedConnection, detachDisconnect: () => {} };
+    return {
+      client,
+      ownedConnection,
+      detachDisconnect: () => {},
+      unregister,
+    };
   }
 
   private discardConnection(
@@ -432,7 +559,19 @@ export class AppServerManagementTransport
       this.connectionPromise = null;
       this.clearIdleTimer();
     }
-    closeConnection(connection);
+    void this.trackClosingConnection(connection);
+  }
+
+  private trackClosingConnection(
+    connection: ActiveConnection,
+  ): Promise<void> {
+    const closing = closeConnection(connection);
+    this.closingConnections.add(closing);
+    void closing.then(
+      () => this.closingConnections.delete(closing),
+      () => this.closingConnections.delete(closing),
+    );
+    return closing;
   }
 
   private scheduleIdleRelease(): void {
@@ -454,8 +593,48 @@ export class AppServerManagementTransport
   }
 }
 
-function closeConnection(connection: ActiveConnection): void {
+async function closeConnection(connection: ActiveConnection): Promise<void> {
   connection.detachDisconnect();
-  connection.client.close();
-  connection.ownedConnection?.close();
+  const controlClosed = waitForSocketClose(connection.client.control);
+  try {
+    connection.client.close();
+    connection.ownedConnection?.close();
+    await controlClosed;
+  } finally {
+    connection.unregister();
+  }
+}
+
+function waitForSocketClose(socket: AppServerSocketLike): Promise<void> {
+  if (socket.readyState === 3) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let detach = () => {};
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      detach();
+      resolve();
+    };
+
+    if (socket.addEventListener) {
+      socket.addEventListener("close", finish);
+      detach = () => socket.removeEventListener?.("close", finish);
+    } else if (socket.once) {
+      socket.once("close", finish);
+      detach = () => socket.off?.("close", finish);
+    } else if (socket.on) {
+      socket.on("close", finish);
+      detach = () => socket.off?.("close", finish);
+    } else {
+      resolve();
+      return;
+    }
+
+    const timeout = setTimeout(finish, 1_000);
+    (timeout as unknown as { unref?: () => void }).unref?.();
+    if (socket.readyState === 3) finish();
+  });
 }

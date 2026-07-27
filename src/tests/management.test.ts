@@ -544,10 +544,17 @@ describe("portable management namespaces", () => {
 class SingleControlAppServerSocket extends ManagementSocket {
   static activeControl: SingleControlAppServerSocket | null = null;
   static rejectedControlSockets = 0;
+  static controlCloseDelayMs = 0;
+  static agentListResponseDelayMs = 0;
+  static agentListRequests = 0;
+  private closeScheduled = false;
 
   static reset(): void {
     SingleControlAppServerSocket.activeControl = null;
     SingleControlAppServerSocket.rejectedControlSockets = 0;
+    SingleControlAppServerSocket.controlCloseDelayMs = 0;
+    SingleControlAppServerSocket.agentListResponseDelayMs = 0;
+    SingleControlAppServerSocket.agentListRequests = 0;
     ManagementSocket.instances = [];
   }
 
@@ -570,14 +577,40 @@ class SingleControlAppServerSocket extends ManagementSocket {
   }
 
   override close(): void {
-    if (SingleControlAppServerSocket.activeControl === this) {
-      SingleControlAppServerSocket.activeControl = null;
+    if (this.closeScheduled || this.readyState === 3) return;
+    this.closeScheduled = true;
+    this.readyState = 2;
+    const finishClose = () => {
+      if (SingleControlAppServerSocket.activeControl === this) {
+        SingleControlAppServerSocket.activeControl = null;
+      }
+      super.close();
+    };
+    if (
+      this.url.includes("channel=control") &&
+      SingleControlAppServerSocket.controlCloseDelayMs > 0
+    ) {
+      setTimeout(
+        finishClose,
+        SingleControlAppServerSocket.controlCloseDelayMs,
+      );
+      return;
     }
-    super.close();
+    finishClose();
   }
 
   protected override respond(command: Record<string, unknown>): void {
     const type = String(command.type);
+    if (type === "agent_list") {
+      SingleControlAppServerSocket.agentListRequests += 1;
+      if (SingleControlAppServerSocket.agentListResponseDelayMs > 0) {
+        setTimeout(
+          () => super.respond(command),
+          SingleControlAppServerSocket.agentListResponseDelayMs,
+        );
+        return;
+      }
+    }
     if (type === "runtime_start") {
       this.serverMessage({
         type: "runtime_start_response",
@@ -685,6 +718,7 @@ describe("app-server management connection lifecycle", () => {
 
   test("a session created right after management calls gets the control channel", async () => {
     SingleControlAppServerSocket.reset();
+    SingleControlAppServerSocket.controlCloseDelayMs = 10;
     const client = new PortableLettaAgentClient({
       backend: "remote",
       url,
@@ -713,6 +747,64 @@ describe("app-server management connection lifecycle", () => {
       expect(SingleControlAppServerSocket.activeControl).not.toBe(
         managementControl,
       );
+    } finally {
+      session.close();
+    }
+  });
+
+  test("a session waits for an in-flight management request before taking the control channel", async () => {
+    SingleControlAppServerSocket.reset();
+    SingleControlAppServerSocket.agentListResponseDelayMs = 20;
+    SingleControlAppServerSocket.controlCloseDelayMs = 10;
+    const client = new PortableLettaAgentClient({
+      backend: "remote",
+      url,
+      WebSocket: SingleControlAppServerSocket,
+    });
+
+    const agentsPromise = client.agents.list();
+    while (SingleControlAppServerSocket.agentListRequests === 0) {
+      await Bun.sleep(1);
+    }
+
+    const session = client.resumeSession("conv-1");
+    try {
+      const [agents, init] = await Promise.all([
+        agentsPromise,
+        asAdvanced(session).initialize(),
+      ]);
+      expect(agents).toHaveLength(1);
+      expect(init.conversationId).toBe("conv-1");
+      expect(SingleControlAppServerSocket.rejectedControlSockets).toBe(0);
+    } finally {
+      session.close();
+    }
+  });
+
+  test("a session releases a lingering management connection owned by another client", async () => {
+    SingleControlAppServerSocket.reset();
+    SingleControlAppServerSocket.controlCloseDelayMs = 10;
+    const listClient = new PortableLettaAgentClient({
+      backend: "remote",
+      url,
+      WebSocket: SingleControlAppServerSocket,
+    });
+    const chatClient = new PortableLettaAgentClient({
+      backend: "remote",
+      url,
+      WebSocket: SingleControlAppServerSocket,
+    });
+
+    await listClient.agents.list();
+    const managementControl = SingleControlAppServerSocket.activeControl;
+    expect(managementControl).not.toBeNull();
+
+    const session = chatClient.resumeSession("conv-1");
+    try {
+      const init = await asAdvanced(session).initialize();
+      expect(init.conversationId).toBe("conv-1");
+      expect(managementControl?.readyState).toBe(3);
+      expect(SingleControlAppServerSocket.rejectedControlSockets).toBe(0);
     } finally {
       session.close();
     }
