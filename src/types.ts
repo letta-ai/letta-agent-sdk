@@ -758,6 +758,19 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
    * memory copy. Ignored on remote and cloud transports.
    */
   env?: Record<string, string>;
+  /**
+   * Constrain an SDK-owned local harness to memory-worker filesystem access.
+   * The harness may write its own memory and harness state, but not the project,
+   * temporary directories, the rest of the home directory, or other agents'
+   * memory. Requires
+   * `MEMORY_DIR` or `LETTA_MEMORY_DIR` in `env` and fails closed when the host
+   * has no supported kernel sandbox.
+   *
+   * Only supported by the default local app-server transport when the SDK owns
+   * the process. Remote URLs, Cloud execution, and the legacy stdio transport
+   * cannot enforce this option.
+   */
+  filesystemConfinement?: "memory";
 }
 
 export interface LettaCodeSession extends AsyncDisposable {

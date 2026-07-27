@@ -4,7 +4,10 @@ import {
   type AppServerSessionOptions,
 } from "./app-server-session.js";
 import { startLocalAppServer } from "./local-app-server.js";
-import type { LettaCodeLocalAppServerOptions } from "./types.js";
+import type {
+  LettaCodeClientSessionOptions,
+  LettaCodeLocalAppServerOptions,
+} from "./types.js";
 
 export function createLocalAppServerSession(
   options: LettaCodeLocalAppServerOptions | undefined,
@@ -22,6 +25,11 @@ export function createLocalAppServerSession(
               backend: appServer.harnessBackend ?? "local",
               startupTimeoutMs: appServer.startupTimeoutMs,
               env: sessionEnv,
+              filesystemConfinement:
+                mode.kind === "session"
+                  ? (mode.options as LettaCodeClientSessionOptions)
+                      .filesystemConfinement
+                  : undefined,
             }),
         }),
     ...(appServer.WebSocket !== undefined

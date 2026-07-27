@@ -74,6 +74,11 @@ export class LettaAgentClient extends LettaAgentClientBase {
     options: LettaCodeClientSessionOptions,
     sessionOptions: CreateSessionOptions,
   ): LettaCodeSession {
+    if (options.filesystemConfinement !== undefined && !agentId) {
+      throw new Error(
+        "createSession() filesystemConfinement requires an explicit agent id for the local app-server transport.",
+      );
+    }
     if (!this.useLegacyLocalStdio() && agentId) {
       const localOptions = this.options as LettaCodeLocalClientOptions;
       return createLocalAppServerSession(

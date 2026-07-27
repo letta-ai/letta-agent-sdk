@@ -1,4 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import {
+  createMemoryConfinementLauncher,
+  type MemoryConfinementLauncherInput,
+  type MemoryConfinementLauncherResult,
+} from "@letta-ai/letta-code/memory-confinement";
 import { findLettaCli } from "./cli-resolver.js";
 
 export interface LocalAppServerHandle {
@@ -12,7 +17,18 @@ export interface StartLocalAppServerOptions {
   startupTimeoutMs?: number;
   cliPath?: string;
   env?: Record<string, string | undefined>;
+  filesystemConfinement?: "memory";
 }
+
+interface LocalAppServerProcess {
+  command: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+}
+
+type MemoryConfinementLauncher = (
+  input: MemoryConfinementLauncherInput,
+) => MemoryConfinementLauncherResult;
 
 const DEFAULT_LISTEN_URL = "ws://127.0.0.1:0";
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
@@ -40,6 +56,32 @@ export function buildLocalAppServerArgs(
   ];
 }
 
+export function buildLocalAppServerProcess(
+  cliPath: string,
+  options: StartLocalAppServerOptions = {},
+  confineMemory: MemoryConfinementLauncher = createMemoryConfinementLauncher,
+): LocalAppServerProcess {
+  const env = { ...process.env, ...(options.env ?? {}) };
+  const launcher = [
+    process.execPath,
+    ...buildLocalAppServerArgs(cliPath, options),
+  ];
+  if (options.filesystemConfinement !== "memory") {
+    return {
+      command: launcher[0] as string,
+      args: launcher.slice(1),
+      env,
+    };
+  }
+
+  const confined = confineMemory({ launcher, env });
+  return {
+    command: confined.launcher[0] as string,
+    args: confined.launcher.slice(1),
+    env: confined.env,
+  };
+}
+
 function terminateProcess(child: ChildProcess): void {
   if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill("SIGTERM");
@@ -57,13 +99,13 @@ export function startLocalAppServer(
   options: StartLocalAppServerOptions = {},
 ): Promise<LocalAppServerHandle> {
   const cliPath = options.cliPath ?? findLettaCli();
-  const args = buildLocalAppServerArgs(cliPath, options);
+  const processSpec = buildLocalAppServerProcess(cliPath, options);
   const startupTimeoutMs = options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
 
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, args, {
+    const child = spawn(processSpec.command, processSpec.args, {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...(options.env ?? {}) },
+      env: processSpec.env,
     });
 
     let settled = false;
