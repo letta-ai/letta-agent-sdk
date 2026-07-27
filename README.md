@@ -118,7 +118,7 @@ access through the organization's GitHub integration.
 await using session = client.createSession(agentId, {
   sandbox: {
     githubRepositories: [
-      { owner: "letta-ai", repo: "letta-docs" },
+      { owner: "letta-ai", repo: "letta-docs-md" },
       { owner: "letta-ai", repo: "letta-code" },
     ],
   },
