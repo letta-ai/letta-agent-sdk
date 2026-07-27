@@ -31,19 +31,20 @@ import type {
   CreateAgentOptions,
   LettaCodeClientSessionOptions,
   LettaCodeCloudClientOptions,
-  LettaCodeCloudSandboxOptions,
   LettaCodeEnvironment,
   LettaCodeSocketConstructor,
   LettaCodeSocketLike,
   RepositoryResource,
 } from "./types.js";
+import {
+  type LettaCodeCloudSandboxOptions,
+  validateCloudSandboxOptions,
+} from "./cloud-sandbox.js";
 
 const DEFAULT_CLOUD_API_BASE_URL = "https://api.letta.com";
 const DEFAULT_TURN_TIMEOUT_MS = 120_000;
 const DEFAULT_PING_INTERVAL_MS = 30_000;
 const DEFAULT_SANDBOX_TTL_MINUTES = 5;
-const MIN_SANDBOX_TTL_MINUTES = 1;
-const MAX_SANDBOX_TTL_MINUTES = 60;
 const DEFAULT_SANDBOX_READY_TIMEOUT_MS = 120_000;
 const DEFAULT_SANDBOX_READY_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_REPOSITORY_ATTACH_TIMEOUT_MS = 10_000;
@@ -262,43 +263,6 @@ function assertOkResponse(response: Response, body: unknown, action: string, url
 function validatePositiveInteger(value: number | undefined, name: string): void {
   if (value !== undefined && (!Number.isInteger(value) || value <= 0)) {
     throw new Error(`Invalid ${name}. Expected a positive integer.`);
-  }
-}
-
-function validateIntegerRange(
-  value: number | undefined,
-  name: string,
-  min: number,
-  max: number,
-): void {
-  if (value === undefined) return;
-  if (!Number.isInteger(value) || value < min || value > max) {
-    throw new Error(`Invalid ${name}. Expected an integer between ${min} and ${max}.`);
-  }
-}
-
-function validateCloudSandboxOptions(
-  options: LettaCodeCloudSandboxOptions | undefined,
-  name: string,
-): void {
-  if (options === undefined) return;
-  if (options === null || typeof options !== "object" || Array.isArray(options)) {
-    throw new Error(`Invalid ${name}. Expected an object.`);
-  }
-  validateIntegerRange(
-    options.ttlMinutes,
-    `${name}.ttlMinutes`,
-    MIN_SANDBOX_TTL_MINUTES,
-    MAX_SANDBOX_TTL_MINUTES,
-  );
-  validatePositiveInteger(options.readyTimeoutMs, `${name}.readyTimeoutMs`);
-  validatePositiveInteger(options.readyPollIntervalMs, `${name}.readyPollIntervalMs`);
-  validatePositiveInteger(options.refreshIntervalMs, `${name}.refreshIntervalMs`);
-  if (
-    options.terminateOnClose !== undefined &&
-    typeof options.terminateOnClose !== "boolean"
-  ) {
-    throw new Error(`Invalid ${name}.terminateOnClose. Expected a boolean.`);
   }
 }
 
@@ -1083,12 +1047,19 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   ): Promise<ManagedCloudSandbox> {
     const fetchImpl = getFetch(this.cloudOptions.fetch);
     const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
+    const sandboxOptions = this.resolvedSandboxOptions();
+    const githubRepositories = sandboxOptions.githubRepositories;
     const response = await fetchImpl(
       `${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/sandboxes`,
       {
         method: "POST",
         headers: cloudHeaders(this.cloudOptions),
-        body: JSON.stringify(conversationId ? { conversationId } : {}),
+        body: JSON.stringify({
+          ...(conversationId ? { conversationId } : {}),
+          ...(githubRepositories && githubRepositories.length > 0
+            ? { githubRepositories }
+            : {}),
+        }),
       },
     );
     const body = await parseJsonResponse(response);
@@ -1108,7 +1079,6 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       );
     }
 
-    const sandboxOptions = this.resolvedSandboxOptions();
     const ttlMinutes = sandboxOptions.ttlMinutes ?? DEFAULT_SANDBOX_TTL_MINUTES;
     const readyTimeoutMs = sandboxOptions.readyTimeoutMs
       ?? DEFAULT_SANDBOX_READY_TIMEOUT_MS;
