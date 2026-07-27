@@ -740,6 +740,12 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
         runtime: resolved.runtime,
       }),
       requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
+      // Cloud status remains a split-channel relay. Keep it out of local
+      // app-server capability negotiation when the letta-code dependency
+      // advances to protocol v2.
+      transportMode: "split",
+    } as Parameters<typeof createAppServerClient>[0] & {
+      transportMode: "split";
     }));
     this.removeControlRequestHandler = registerAppServerControlRequestHandler({
       client,

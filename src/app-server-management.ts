@@ -192,14 +192,10 @@ function stringRecord(value: unknown): Record<string, string> | undefined {
 /**
  * Management transport that speaks the app-server control protocol.
  *
- * Connection lifecycle: the Letta Code app-server currently accepts a single
- * control client at a time — while one control socket is attached, additional
- * control sockets are rejected with close code 1008
- * `"control channel already connected"` (see letta-ai/letta-code
- * `src/websocket/app-server.ts`). Sessions (`AppServerSession`) need that same
- * control slot, so a management transport that holds an idle connection
- * starves any later `resumeSession()`/`createSession()` from the same process
- * (live-reproduced in the letta-mobile reference app, SDK-FEEDBACK.md #00).
+ * Protocol-v2 Letta Code app-servers accept multiple full-duplex clients, so
+ * management and runtime sessions coexist. Released protocol-v1 servers still
+ * have one control slot: a management connection can starve a later
+ * `resumeSession()`/`createSession()` from the same process.
  *
  * To stay out of the way, this transport pools a single lazily-connected
  * client while requests are in flight (bursts share one connection and one
@@ -208,9 +204,8 @@ function stringRecord(value: unknown): Record<string, string> | undefined {
  * reconnects lazily on the next request. Before a session connects, all
  * management transports registered for the same app-server URL relinquish
  * their connections; the handoff waits for in-flight work and for the control
- * socket's close event. The inverse contention — a management request issued
- * while a session holds the control slot — cannot be solved client-side and
- * still fails until the app-server allows multiple control clients.
+ * socket's close event. This compatibility lifecycle can be retired once the
+ * SDK no longer supports protocol-v1 app-servers.
  */
 export class AppServerManagementTransport
   implements ManagementTransport
