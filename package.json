@@ -21,12 +21,15 @@
   },
   "files": [
     "dist",
+    "src/*.ts",
+    "AGENTS.md",
     "README.md"
   ],
   "scripts": {
     "build": "bun run build.ts",
     "dev": "bun run build.ts --watch",
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && bun run check:source-size",
+    "check:source-size": "bun scripts/check-source-size.ts",
     "test": "bun test",
     "test:live": "LETTA_LIVE_INTEGRATION=1 bun test src/tests/live.integration.test.ts",
     "test:live:record": "LETTA_LIVE_INTEGRATION=1 LETTA_RECORD_FIXTURES=1 bun test src/tests/live.integration.test.ts"
