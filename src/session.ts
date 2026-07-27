@@ -127,6 +127,7 @@ export class Session implements AsyncDisposable {
   private _sessionId: string | null = null;
   private _conversationId: string | null = null;
   private initialized = false;
+  private closed = false;
   private initializePromise: Promise<SDKInitMessage> | null = null;
   private externalTools: Map<string, AnyAgentTool> = new Map();
   private streamQueue: BufferedStreamMessage[] = [];
@@ -174,20 +175,34 @@ export class Session implements AsyncDisposable {
    *
    * Single-flight: concurrent callers (including lazily-initializing entry
    * points such as send()) share one in-flight initialization instead of
-   * each connecting the transport. A failed attempt clears the memo so a
-   * later call can retry.
+   * each connecting the transport. A failed stdio attempt closes the session
+   * because its subprocess transport is no longer safe to reuse.
    */
   async initialize(): Promise<SDKInitMessage> {
+    if (this.closed) {
+      throw new Error("Session is closed");
+    }
     if (this.initializePromise) {
       return this.initializePromise;
     }
-    let memo: Promise<SDKInitMessage> | null = null;
-    memo = this.performInitialize().catch((error: unknown) => {
-      if (this.initializePromise === memo) {
-        this.initializePromise = null;
-      }
-      throw error;
-    });
+    if (this.initialized) {
+      throw new Error("Session already initialized");
+    }
+
+    const attempt = this.performInitialize();
+    const memo = attempt
+      .catch((error: unknown) => {
+        // A failed stdio initialization can leave its one subprocess
+        // transport unusable. Closing this session cannot affect another
+        // initialize attempt because all callers share this promise.
+        this.cleanupFailedInitialize();
+        throw error;
+      })
+      .finally(() => {
+        if (this.initializePromise === memo) {
+          this.initializePromise = null;
+        }
+      });
     this.initializePromise = memo;
     return memo;
   }
@@ -235,13 +250,17 @@ export class Session implements AsyncDisposable {
         this._agentId = initMsg.agent_id;
         this._sessionId = initMsg.session_id;
         this._conversationId = initMsg.conversation_id;
-        this.initialized = true;
-        this.startBackgroundPump();
 
         // Register external tools with CLI
         if (this.externalTools.size > 0) {
           await this.registerExternalTools();
         }
+        if (this.closed) {
+          throw new Error("Session is closed");
+        }
+
+        this.initialized = true;
+        this.startBackgroundPump();
 
         // Include external tool names in the tools list
         const allTools = [
@@ -279,6 +298,17 @@ export class Session implements AsyncDisposable {
     const detail = stderr ? `\nCLI stderr:\n${stderr}` : '';
     sessionLog("init", `ERROR: transport closed before init message received${detail}`);
     throw new Error(`Failed to initialize session - no init message received${detail}`);
+  }
+
+  private cleanupFailedInitialize(): void {
+    this.transport.close();
+    this.closed = true;
+    this.initialized = false;
+    this._agentId = null;
+    this._sessionId = null;
+    this._conversationId = null;
+    this.pumpClosed = true;
+    this.resolveAllStreamWaiters(null);
   }
 
   /**
@@ -1306,6 +1336,8 @@ export class Session implements AsyncDisposable {
    * Close the session
    */
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
     sessionLog("close", `closing session (agent=${this._agentId}, conversation=${this._conversationId})`);
     this.transport.close();
     this.pumpClosed = true;

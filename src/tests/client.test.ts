@@ -37,6 +37,9 @@ class FakeAppServerSocket {
     | "queuedSecond"
     | "hang" = "normal";
   static failNextRuntimeStart = false;
+  static deferReflectionSettingsResponse = false;
+  static failNextReflectionSettings = false;
+  static pendingReflectionSettingsResponse: (() => void) | null = null;
   readyState = 0;
   sent: unknown[] = [];
   private listeners = new Map<string, Set<Listener>>();
@@ -180,13 +183,26 @@ function fakeAppServerHandle(
   }
 
   if (command.type === "set_reflection_settings") {
-    control.serverMessage({
-      type: "set_reflection_settings_response",
-      request_id: command.request_id,
-      success: true,
-      scope: command.scope,
-      reflection_settings: command.settings,
-    });
+    const respond = () => {
+      const success = !FakeAppServerSocket.failNextReflectionSettings;
+      FakeAppServerSocket.failNextReflectionSettings = false;
+      control.serverMessage({
+        type: "set_reflection_settings_response",
+        request_id: command.request_id,
+        success,
+        ...(success
+          ? {
+              scope: command.scope,
+              reflection_settings: command.settings,
+            }
+          : { error: "reflection settings failed (fake)" }),
+      });
+    };
+    if (FakeAppServerSocket.deferReflectionSettingsResponse) {
+      FakeAppServerSocket.pendingReflectionSettingsResponse = respond;
+    } else {
+      respond();
+    }
     return;
   }
 
@@ -1436,7 +1452,114 @@ describe("LettaAgentClient", () => {
       expect(first).toEqual(second);
       expect(first.conversationId).toBe("conv-abc");
       expect(FakeAppServerSocket.instances).toHaveLength(2);
+      await expect(asAdvanced(session).initialize()).rejects.toThrow(
+        "Session already initialized",
+      );
     } finally {
+      session.close();
+    }
+  });
+
+  test("lazy callers wait until post-initialize options finish", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.deferReflectionSettingsResponse = true;
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("agent-123", {
+      dreaming: { trigger: "step-count", stepCount: 3 },
+    });
+    try {
+      const initialize = asAdvanced(session).initialize();
+      for (let i = 0; i < 100; i++) {
+        if (FakeAppServerSocket.pendingReflectionSettingsResponse) break;
+        await Promise.resolve();
+      }
+      expect(FakeAppServerSocket.pendingReflectionSettingsResponse).not.toBeNull();
+
+      const listMessages = session.listMessages({ limit: 1 });
+      await Promise.resolve();
+      expect(
+        fakeControlSocket().sent.filter(
+          (command) =>
+            (command as { type?: string }).type ===
+            "conversation_messages_list",
+        ),
+      ).toHaveLength(0);
+
+      FakeAppServerSocket.pendingReflectionSettingsResponse?.();
+      const [, page] = await Promise.all([initialize, listMessages]);
+      expect(page.messages).toHaveLength(2);
+    } finally {
+      FakeAppServerSocket.deferReflectionSettingsResponse = false;
+      FakeAppServerSocket.pendingReflectionSettingsResponse = null;
+      session.close();
+    }
+  });
+
+  test("failed post-initialize work clears partial session metadata", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.failNextReflectionSettings = true;
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("agent-123", {
+      dreaming: { trigger: "step-count", stepCount: 3 },
+    });
+    try {
+      await expect(asAdvanced(session).initialize()).rejects.toThrow(
+        "reflection settings failed (fake)",
+      );
+      expect(session.agentId).toBeNull();
+      expect(session.sessionId).toBeNull();
+      expect(session.conversationId).toBeNull();
+
+      const init = await asAdvanced(session).initialize();
+      expect(init.agentId).toBe("agent-123");
+    } finally {
+      FakeAppServerSocket.failNextReflectionSettings = false;
+      session.close();
+    }
+  });
+
+  test("closing during initialization cannot resurrect the session", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.deferReflectionSettingsResponse = true;
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("agent-123", {
+      dreaming: { trigger: "step-count", stepCount: 3 },
+    });
+    try {
+      const initialize = asAdvanced(session).initialize();
+      for (let i = 0; i < 100; i++) {
+        if (FakeAppServerSocket.pendingReflectionSettingsResponse) break;
+        await Promise.resolve();
+      }
+      expect(FakeAppServerSocket.pendingReflectionSettingsResponse).not.toBeNull();
+
+      session.close();
+      FakeAppServerSocket.pendingReflectionSettingsResponse?.();
+      await expect(initialize).rejects.toThrow();
+      await expect(asAdvanced(session).initialize()).rejects.toThrow(
+        "Session is closed",
+      );
+      expect(session.agentId).toBeNull();
+      expect(session.sessionId).toBeNull();
+      expect(session.conversationId).toBeNull();
+    } finally {
+      FakeAppServerSocket.deferReflectionSettingsResponse = false;
+      FakeAppServerSocket.pendingReflectionSettingsResponse = null;
       session.close();
     }
   });
