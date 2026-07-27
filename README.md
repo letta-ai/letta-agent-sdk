@@ -38,6 +38,12 @@ for await (const message of session.stream()) {
 }
 ```
 
+Assistant and reasoning messages are incremental text fragments. Reconcile
+fragments by `type` and `otid` when `otid` is available; `uuid` is a legacy
+transport identifier and is not a portable lineage key. After reconnecting,
+use `(runId, seqId)` to suppress replayed fragments. Sequence IDs are scoped to
+their run and must not be compared across runs.
+
 An agent is the persistent entity with memory. A conversation is a thread on that agent. A session is the active connection used to send messages, stream events, execute tools, and handle approvals.
 
 - `createSession(agentId)` starts a new conversation.
