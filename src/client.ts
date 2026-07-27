@@ -39,9 +39,6 @@ export class LettaAgentClient extends LettaAgentClientBase {
       ...(localOptions?.requestTimeoutMs !== undefined
         ? { requestTimeoutMs: localOptions.requestTimeoutMs }
         : {}),
-      ...(localOptions?.idleLingerMs !== undefined
-        ? { idleLingerMs: localOptions.idleLingerMs }
-        : {}),
     });
   }
 
@@ -56,7 +53,6 @@ export class LettaAgentClient extends LettaAgentClientBase {
           kind: "create-agent",
           options,
         },
-        () => this.releaseIdleManagementConnection(),
       );
       const initMsg = await session.initialize();
       session.close();
@@ -84,7 +80,6 @@ export class LettaAgentClient extends LettaAgentClientBase {
           newConversation: true,
           options,
         },
-        () => this.releaseIdleManagementConnection(),
       );
     }
     if (agentId) {
@@ -108,7 +103,6 @@ export class LettaAgentClient extends LettaAgentClientBase {
             conversationId: id,
             options,
           },
-          () => this.releaseIdleManagementConnection(),
         );
       }
       return createLocalAppServerSession(
@@ -119,7 +113,6 @@ export class LettaAgentClient extends LettaAgentClientBase {
           defaultConversation: true,
           options,
         },
-        () => this.releaseIdleManagementConnection(),
       );
     }
     if (looksLikeConversationId(id)) {
