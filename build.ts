@@ -23,6 +23,8 @@ const sharedBuildOptions = {
   format: "esm" as const,
   minify: false,
   sourcemap: "external" as const,
+  banner:
+    "// Generated bundle. Canonical modules are published under src/ and maintained in the letta-agent-sdk repository.",
 };
 
 // Keep the package root Node-focused for local process execution.

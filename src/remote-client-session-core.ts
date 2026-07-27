@@ -10,677 +10,64 @@ import type {
   ListModelsResult,
   ListMessagesOptions,
   ListMessagesResult,
-  MessageContentItem,
   RecoverPendingApprovalsOptions,
   RecoverPendingApprovalsResult,
   RemoveQueuedMessageResult,
-  ReasoningEffort,
   RunTurnOptions,
-  SDKErrorCode,
   SDKInitMessage,
-  SDKLoopStatusMessage,
   SDKMessage,
   SDKProtocolCommand,
   SDKProtocolMessage,
-  SDKQueueItem,
-  SDKQueueUpdateMessage,
   SDKResultMessage,
-  SDKStreamEventPayload,
   SendCommandOptions,
   SendMessage,
-  SessionDiffHunk,
-  SessionDiffPreview,
   SessionDeviceStatus,
-  SessionPendingControlRequest,
-  SessionPermissionSuggestion,
-  SkillSource,
   UpdateModelOptions,
   UpdateModelResult,
 } from "./types.js";
+import { RemoteTurnCoordinator } from "./remote-turn-coordinator.js";
 
-export type RuntimeScope = {
-  agent_id: string;
-  conversation_id: string;
-};
-
-export type ProtocolMessage = Record<string, unknown> & {
-  type: string;
-  request_id?: string;
-  runtime?: RuntimeScope;
-};
-
-export type RuntimeSessionMode =
-  | { kind: "create-agent"; options: CreateAgentOptions }
-  | {
-      kind: "session";
-      agentId?: string;
-      conversationId?: string;
-      newConversation?: boolean;
-      defaultConversation?: boolean;
-      options: LettaCodeClientSessionOptions;
-    };
-
-export type RuntimeTurnResult = {
-  runtime: RuntimeScope;
-  stopReason: string | null;
-  runIds: string[];
-  success?: boolean;
-  detail?: string;
-  errorCode?: SDKErrorCode;
-};
-
-export type RuntimeSendTurnOptions = {
-  clientMessageId: string;
-};
-
-export type RuntimeRequestOptions = {
-  timeoutMs?: number;
-  predicate?: (message: ProtocolMessage) => boolean;
-};
-
-export interface RemoteClientRuntimeController {
-  onMessage(handler: (message: ProtocolMessage, channel?: string) => void): () => void;
-  send(command: Record<string, unknown>): void;
-  sendTurnMessage(
-    runtime: RuntimeScope,
-    message: SendMessage,
-    options: RuntimeSendTurnOptions,
-  ): void;
-  abort(runtime: RuntimeScope): Promise<void>;
-  request(
-    type: string,
-    body: Record<string, unknown>,
-    options?: RuntimeRequestOptions,
-  ): Promise<ProtocolMessage>;
-  recoverPendingApprovals(
-    runtime: RuntimeScope,
-    options?: RecoverPendingApprovalsOptions,
-  ): Promise<RecoverPendingApprovalsResult>;
-  listMessages(
-    conversationId: string,
-    options?: ListMessagesOptions,
-  ): Promise<ListMessagesResult>;
-  listModels(): Promise<ListModelsResult>;
-  updateModel(
-    runtime: RuntimeScope,
-    payload: { model_id?: string; model_handle?: string },
-  ): Promise<UpdateModelResult>;
-  close(): void;
-}
-
-export type RuntimeSessionInit = {
-  controller: RemoteClientRuntimeController;
-  runtime: RuntimeScope;
-  model?: string | null;
-  modelSettings?: Record<string, unknown> | null;
-  tools?: string[];
-  /** Effective runtime skill source override, when explicitly requested. */
-  skillSources?: SkillSource[];
-};
-
-type RemoteClientSessionCoreConfig = {
-  label: string;
-  requestTimeoutMs?: number;
-};
-
-type ReflectionSettings = {
-  trigger: "off" | "step-count" | "compaction-event";
-  step_count: number;
-};
-
-type UpdateModelPayload = {
-  model_id?: string;
-  model_handle?: string;
-};
-
-type NormalizedUpdateModelInput = {
-  model?: string;
-  modelId?: string;
-  modelHandle?: string;
-  reasoningEffort?: ReasoningEffort;
-};
-
-type TurnTracker = {
-  id: number;
-  runtime: RuntimeScope;
-  clientMessageId: string;
-  queuedAt: number;
-  startedAt: number;
-  assistantText: string;
-  runIds: Set<string>;
-  observedTurnEvidence: boolean;
-  observedRequiresApprovalStop: boolean;
-  abortRequested: boolean;
-  timeout: ReturnType<typeof setTimeout> | null;
-};
-
-const FAILURE_STOP_REASONS = new Set([
-  "error",
-  "llm_api_error",
-  "max_steps",
-  "interrupted",
-  "cancelled",
-  "canceled",
-]);
-const REASONING_EFFORTS = new Set<ReasoningEffort>([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]);
-const KNOWN_SDK_ERROR_CODES = new Set<SDKErrorCode>([
-  "approval_conflict",
-  "approval_conflict_terminal",
-  "protocol_error",
-  "error",
-  "llm_api_error",
-  "max_steps",
-  "interrupted",
-  "stream_closed",
-]);
-
-type LegacyPermissionMode = "default" | "bypassPermissions" | "fullAccess";
-
-export function normalizePermissionMode(
-  mode:
-    | LettaCodeClientSessionOptions["permissionMode"]
-    | LegacyPermissionMode
-    | undefined,
-): LettaCodeClientSessionOptions["permissionMode"] | undefined {
-  if (mode === undefined || mode === "default") {
-    return "standard";
-  }
-  if (mode === "bypassPermissions" || mode === "fullAccess") {
-    return "unrestricted";
-  }
-  if (
-    mode === "standard" ||
-    mode === "acceptEdits" ||
-    mode === "unrestricted"
-  ) {
-    return mode;
-  }
-  return undefined;
-}
-
-export function mapPermissionMode(
-  mode:
-    | LettaCodeClientSessionOptions["permissionMode"]
-    | LegacyPermissionMode
-    | undefined,
-): string | undefined {
-  return normalizePermissionMode(mode);
-}
-
-export function isUnrestrictedPermissionMode(
-  mode:
-    | LettaCodeClientSessionOptions["permissionMode"]
-    | LegacyPermissionMode
-    | undefined,
-): boolean {
-  return normalizePermissionMode(mode) === "unrestricted";
-}
-
-export function ensureSuccess(message: Record<string, unknown>, fallback: string): void {
-  if (message.success === false) {
-    throw new Error(typeof message.error === "string" ? message.error : fallback);
-  }
-}
-
-function toSdkErrorCode(value: string | null | undefined): SDKErrorCode | undefined {
-  if (!value || value.length === 0) return undefined;
-  return KNOWN_SDK_ERROR_CODES.has(value as SDKErrorCode)
-    ? (value as SDKErrorCode)
-    : undefined;
-}
-
-function isReasoningEffort(value: unknown): value is ReasoningEffort {
-  return typeof value === "string" && REASONING_EFFORTS.has(value as ReasoningEffort);
-}
-
-function nonEmptyString(value: unknown, name: string): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`Invalid ${name}. Expected a non-empty string.`);
-  }
-  return value;
-}
-
-function normalizeUpdateModelInput(update: string | UpdateModelOptions): NormalizedUpdateModelInput {
-  if (typeof update === "string") {
-    if (update.length === 0) {
-      throw new Error("Invalid model. Expected a non-empty string.");
-    }
-    return { model: update };
-  }
-  if (!update || typeof update !== "object" || Array.isArray(update)) {
-    throw new Error("Invalid updateModel options. Expected a model string or options object.");
-  }
-
-  const model = nonEmptyString(update.model, "model");
-  const modelId = nonEmptyString(update.modelId, "modelId");
-  const modelHandle = nonEmptyString(update.modelHandle, "modelHandle");
-  const reasoningEffort = update.reasoningEffort;
-  if (reasoningEffort !== undefined && !isReasoningEffort(reasoningEffort)) {
-    throw new Error(
-      `Invalid reasoningEffort '${String(reasoningEffort)}'. Valid values: ${[...REASONING_EFFORTS].join(", ")}`,
-    );
-  }
-  if (model !== undefined && (modelId !== undefined || modelHandle !== undefined)) {
-    throw new Error("Invalid updateModel options. Use either model or explicit modelId/modelHandle, not both.");
-  }
-  if (
-    model === undefined &&
-    modelId === undefined &&
-    modelHandle === undefined &&
-    reasoningEffort === undefined
-  ) {
-    throw new Error("Invalid updateModel options. Provide model, modelId, modelHandle, or reasoningEffort.");
-  }
-  return {
-    ...(model !== undefined ? { model } : {}),
-    ...(modelId !== undefined ? { modelId } : {}),
-    ...(modelHandle !== undefined ? { modelHandle } : {}),
-    ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
-  };
-}
-
-function modelPayloadWithoutReasoning(input: NormalizedUpdateModelInput): UpdateModelPayload {
-  const payload: UpdateModelPayload = {};
-  if (input.modelId !== undefined) payload.model_id = input.modelId;
-  if (input.modelHandle !== undefined) payload.model_handle = input.modelHandle;
-  if (input.model !== undefined) {
-    if (input.model.includes("/")) payload.model_handle = input.model;
-    else payload.model_id = input.model;
-  }
-  return payload;
-}
-
-function toBaseModelHandle(
-  handle: string | undefined,
-  byokProviderAliases: Record<string, string> | undefined,
-): string | undefined {
-  if (!handle) return undefined;
-  const slashIndex = handle.indexOf("/");
-  if (slashIndex === -1) return handle;
-  const provider = handle.slice(0, slashIndex);
-  const model = handle.slice(slashIndex + 1);
-  const baseProvider = byokProviderAliases?.[provider];
-  return baseProvider ? `${baseProvider}/${model}` : handle;
-}
-
-function getContextWindow(value: Record<string, unknown> | null | undefined): number | undefined {
-  const contextWindow = value?.context_window;
-  return typeof contextWindow === "number" ? contextWindow : undefined;
-}
-
-function getReasoningEffort(entry: LettaCodeModelEntry): string | undefined {
-  const effort = entry.updateArgs?.reasoning_effort;
-  return typeof effort === "string" ? effort : undefined;
-}
-
-function sameContextCandidates(
-  candidates: LettaCodeModelEntry[],
-  contextWindow: number | undefined,
-): LettaCodeModelEntry[] {
-  if (contextWindow === undefined) return candidates;
-  const matches = candidates.filter(
-    (entry) => getContextWindow(entry.updateArgs) === contextWindow,
-  );
-  return matches.length > 0 ? matches : candidates;
-}
-
-function isApprovalConflictSignal(params: {
-  detail?: string;
-  message?: string;
-  stopReason?: string | null;
-}): boolean {
-  if (params.stopReason === "requires_approval") return true;
-  const haystack = [params.detail, params.message]
-    .filter((value): value is string => typeof value === "string" && value.length > 0)
-    .join("\n")
-    .toLowerCase();
-  return (
-    haystack.includes("waiting for approval on a tool call") ||
-    haystack.includes("cannot send a new message") ||
-    haystack.includes("requires_approval")
-  );
-}
-
-function resolveDreamingSettings(
-  dreaming: LettaCodeClientSessionOptions["dreaming"],
-): ReflectionSettings | null {
-  if (!dreaming) return null;
-  return {
-    trigger: dreaming.trigger ?? "step-count",
-    step_count: dreaming.stepCount ?? 5,
-  };
-}
-
-function extractTextFromContent(content: unknown): string | null {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    const pieces: string[] = [];
-    for (const part of content) {
-      if (typeof part === "string") {
-        pieces.push(part);
-        continue;
-      }
-      if (part && typeof part === "object") {
-        const record = part as Record<string, unknown>;
-        if (typeof record.text === "string") {
-          pieces.push(record.text);
-        }
-      }
-    }
-    const joined = pieces.join("");
-    return joined.length > 0 ? joined : null;
-  }
-  if (content && typeof content === "object") {
-    const record = content as Record<string, unknown>;
-    if (typeof record.text === "string") return record.text;
-  }
-  return null;
-}
-
-function toolInputFromArguments(args: unknown): { input: Record<string, unknown>; raw?: string } {
-  if (args && typeof args === "object" && !Array.isArray(args)) {
-    return { input: args as Record<string, unknown> };
-  }
-  const raw = typeof args === "string" ? args : "";
-  if (!raw) return { input: {} };
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return { input: parsed as Record<string, unknown>, raw };
-    }
-  } catch {
-    // Fall through to raw wrapper.
-  }
-  return { input: { raw }, raw };
-}
-
-function firstToolCall(delta: Record<string, unknown>): Record<string, unknown> | undefined {
-  const toolCalls = delta.tool_calls;
-  if (Array.isArray(toolCalls)) {
-    const first = toolCalls[0];
-    return first && typeof first === "object" ? (first as Record<string, unknown>) : undefined;
-  }
-  if (toolCalls && typeof toolCalls === "object") {
-    return toolCalls as Record<string, unknown>;
-  }
-  const toolCall = delta.tool_call;
-  return toolCall && typeof toolCall === "object" ? (toolCall as Record<string, unknown>) : undefined;
-}
-
-function firstToolReturn(delta: Record<string, unknown>): Record<string, unknown> | undefined {
-  const toolReturns = delta.tool_returns;
-  if (Array.isArray(toolReturns)) {
-    const first = toolReturns[0];
-    return first && typeof first === "object" ? (first as Record<string, unknown>) : undefined;
-  }
-  return undefined;
-}
-
-function sameRuntime(message: ProtocolMessage, runtime: RuntimeScope): boolean {
-  const msgRuntime = message.runtime;
-  if (msgRuntime) {
-    return (
-      msgRuntime.agent_id === runtime.agent_id &&
-      msgRuntime.conversation_id === runtime.conversation_id
-    );
-  }
-  const messageAgentId =
-    typeof message.agent_id === "string"
-      ? message.agent_id
-      : typeof message.agentId === "string"
-        ? message.agentId
-        : undefined;
-  const messageConversationId =
-    typeof message.conversation_id === "string"
-      ? message.conversation_id
-      : typeof message.conversationId === "string"
-        ? message.conversationId
-        : undefined;
-
-  if (messageAgentId && messageAgentId !== runtime.agent_id) return false;
-  if (messageConversationId && messageConversationId !== runtime.conversation_id) return false;
-  return true;
-}
-
-function streamDeltaRecord(message: ProtocolMessage): Record<string, unknown> | null {
-  if (message.type !== "stream_delta") return null;
-  const delta = message.delta;
-  return delta && typeof delta === "object" && !Array.isArray(delta)
-    ? (delta as Record<string, unknown>)
-    : null;
-}
-
-function streamDeltaMessageType(delta: Record<string, unknown>): string | undefined {
-  return typeof delta.message_type === "string" ? delta.message_type : undefined;
-}
-
-function streamDeltaRunId(delta: Record<string, unknown>): string | undefined {
-  return typeof delta.run_id === "string" ? delta.run_id : undefined;
-}
-
-function streamDeltaStopReason(delta: Record<string, unknown>): string | null | undefined {
-  return typeof delta.stop_reason === "string" ? delta.stop_reason : undefined;
-}
-
-function loopStatusRecord(message: ProtocolMessage): Record<string, unknown> | null {
-  if (message.type !== "update_loop_status") return null;
-  const loopStatus = message.loop_status;
-  return loopStatus && typeof loopStatus === "object" && !Array.isArray(loopStatus)
-    ? (loopStatus as Record<string, unknown>)
-    : null;
-}
-
-function loopStatusValue(message: ProtocolMessage): string | undefined {
-  const loopStatus = loopStatusRecord(message);
-  return typeof loopStatus?.status === "string" ? loopStatus.status : undefined;
-}
-
-function loopStatusRunIds(message: ProtocolMessage): string[] {
-  const activeRunIds = loopStatusRecord(message)?.active_run_ids;
-  return Array.isArray(activeRunIds)
-    ? activeRunIds.filter((runId): runId is string => typeof runId === "string")
-    : [];
-}
-
-function queueItems(message: ProtocolMessage): SDKQueueItem[] {
-  const queue = message.queue;
-  if (!Array.isArray(queue)) return [];
-  return queue.flatMap((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const record = item as Record<string, unknown>;
-    if (typeof record.id !== "string") return [];
-    return [
-      {
-        id: record.id,
-        clientMessageId:
-          typeof record.client_message_id === "string" ? record.client_message_id : "",
-        kind: typeof record.kind === "string" ? record.kind : "message",
-        source: typeof record.source === "string" ? record.source : "user",
-        content: record.content,
-        enqueuedAt: typeof record.enqueued_at === "string" ? record.enqueued_at : "",
-      },
-    ];
-  });
-}
-
-function deviceStatusRecord(message: ProtocolMessage): Record<string, unknown> | null {
-  if (message.type !== "update_device_status") return null;
-  const status = message.device_status;
-  return status && typeof status === "object" && !Array.isArray(status)
-    ? (status as Record<string, unknown>)
-    : null;
-}
-
-function pendingControlRequests(
-  status: Record<string, unknown>,
-): SessionPendingControlRequest[] {
-  const pending = status.pending_control_requests;
-  if (!Array.isArray(pending)) return [];
-  return pending.flatMap((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const record = item as Record<string, unknown>;
-    if (typeof record.request_id !== "string") return [];
-    const request =
-      record.request && typeof record.request === "object" && !Array.isArray(record.request)
-        ? (record.request as Record<string, unknown>)
-        : null;
-    if (!request || typeof request.tool_name !== "string") return [];
-    const entry: SessionPendingControlRequest = {
-      requestId: record.request_id,
-      toolName: request.tool_name,
-      permissionSuggestions: permissionSuggestions(
-        request.permission_suggestions,
-      ),
-      blockedPath:
-        typeof request.blocked_path === "string" ||
-        request.blocked_path === null
-          ? request.blocked_path
-          : null,
-    };
-    if (typeof request.tool_call_id === "string") entry.toolCallId = request.tool_call_id;
-    if (request.input && typeof request.input === "object" && !Array.isArray(request.input)) {
-      entry.toolInput = request.input as Record<string, unknown>;
-    }
-    const previews = diffPreviews(request.diffs);
-    if (previews !== undefined) entry.diffs = previews;
-    return [entry];
-  });
-}
-
-function permissionSuggestions(
-  value: unknown,
-): SessionPermissionSuggestion[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const record = item as Record<string, unknown>;
-    return typeof record.id === "string" && typeof record.text === "string"
-      ? [{ id: record.id, text: record.text }]
-      : [];
-  });
-}
-
-function diffPreviews(value: unknown): SessionDiffPreview[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  return value.flatMap<SessionDiffPreview>((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const record = item as Record<string, unknown>;
-    if (
-      record.mode === "advanced" &&
-      typeof record.fileName === "string" &&
-      Array.isArray(record.hunks)
-    ) {
-      return [{
-        mode: "advanced" as const,
-        fileName: record.fileName,
-        hunks: diffHunks(record.hunks),
-      }];
-    }
-    if (
-      (record.mode === "fallback" || record.mode === "unpreviewable") &&
-      typeof record.fileName === "string" &&
-      typeof record.reason === "string"
-    ) {
-      return [{
-        mode: record.mode,
-        fileName: record.fileName,
-        reason: record.reason,
-      }];
-    }
-    return [];
-  });
-}
-
-function diffHunks(value: unknown[]): SessionDiffHunk[] {
-  return value.flatMap<SessionDiffHunk>((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const record = item as Record<string, unknown>;
-    if (
-      typeof record.oldStart !== "number" ||
-      typeof record.oldLines !== "number" ||
-      typeof record.newStart !== "number" ||
-      typeof record.newLines !== "number" ||
-      !Array.isArray(record.lines)
-    ) {
-      return [];
-    }
-    const lines: SessionDiffHunk["lines"] = [];
-    for (const line of record.lines) {
-      if (!line || typeof line !== "object" || Array.isArray(line)) continue;
-      const lineRecord = line as Record<string, unknown>;
-      const type = lineRecord.type;
-      if (
-        (
-          type !== "context" &&
-          type !== "add" &&
-          type !== "remove"
-        ) ||
-        typeof lineRecord.content !== "string"
-      ) {
-        continue;
-      }
-      lines.push({
-        type,
-        content: lineRecord.content,
-      });
-    }
-    return [{
-      oldStart: record.oldStart,
-      oldLines: record.oldLines,
-      newStart: record.newStart,
-      newLines: record.newLines,
-      lines,
-    }];
-  });
-}
-
-function toSessionDeviceStatus(
-  status: Record<string, unknown>,
-): SessionDeviceStatus | null {
-  const permissionMode = normalizePermissionMode(
-    status.current_permission_mode as
-      | LettaCodeClientSessionOptions["permissionMode"]
-      | undefined,
-  );
-  if (
-    typeof status.is_online !== "boolean" ||
-    typeof status.is_processing !== "boolean" ||
-    permissionMode === undefined ||
-    !(
-      typeof status.current_working_directory === "string" ||
-      status.current_working_directory === null
-    )
-  ) {
-    return null;
-  }
-  return {
-    isOnline: status.is_online,
-    isProcessing: status.is_processing,
-    permissionMode,
-    workingDirectory: status.current_working_directory,
-    pendingControlRequests: pendingControlRequests(status),
-    raw: { ...status },
-  };
-}
-
-export function normalizeSendMessage(message: SendMessage): string | MessageContentItem[] {
-  return message;
-}
+export {
+  ensureSuccess,
+  isUnrestrictedPermissionMode,
+  mapPermissionMode,
+  normalizePermissionMode,
+  normalizeSendMessage,
+} from "./remote-session-protocol.js";
+import {
+  ensureSuccess,
+  getContextWindow,
+  getReasoningEffort,
+  mapPermissionMode,
+  modelPayloadWithoutReasoning,
+  normalizeUpdateModelInput,
+  resolveDreamingSettings,
+  sameContextCandidates,
+  toBaseModelHandle,
+  type NormalizedUpdateModelInput,
+  type RemoteClientSessionCoreConfig,
+  type RemoteClientRuntimeController,
+  type RuntimeScope,
+  type RuntimeSessionInit,
+  type RuntimeSessionMode,
+  type UpdateModelPayload,
+} from "./remote-session-protocol.js";
+export type {
+  ProtocolMessage,
+  RemoteClientRuntimeController,
+  RuntimeRequestOptions,
+  RuntimeScope,
+  RuntimeSendTurnOptions,
+  RuntimeSessionInit,
+  RuntimeSessionMode,
+  RuntimeTurnResult,
+} from "./remote-session-protocol.js";
 
 export abstract class RemoteClientSessionCore implements LettaCodeSession {
   protected controller: RemoteClientRuntimeController | null = null;
   protected runtime: RuntimeScope | null = null;
   protected initialized = false;
   protected closed = false;
-  protected activeTurnStartedAt = 0;
   protected _agentId: string | null = null;
   protected _sessionId: string | null = null;
   protected _conversationId: string | null = null;
@@ -690,14 +77,8 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   private readonly label: string;
   private readonly requestTimeoutMs: number | undefined;
   private initializePromise: Promise<SDKInitMessage> | null = null;
-  private streamQueue: SDKMessage[] = [];
-  private streamResolvers: Array<(msg: SDKMessage | null) => void> = [];
   private removeMessageHandler: (() => void) | null = null;
-  private activeTurn: TurnTracker | null = null;
-  private pendingTurns: TurnTracker[] = [];
-  private nextTurnId = 0;
-  private messageCounter = 0;
-  private clientMessageCounter = 0;
+  private readonly turns: RemoteTurnCoordinator;
   private toolNames: string[] | undefined;
   private deviceStatusListeners = new Set<(status: SessionDeviceStatus) => void>();
   private deviceStatusRefreshCancels = new Set<(error: Error) => void>();
@@ -708,6 +89,11 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   ) {
     this.label = config.label;
     this.requestTimeoutMs = config.requestTimeoutMs;
+    this.turns = new RemoteTurnCoordinator({
+      label: config.label,
+      requestTimeoutMs: config.requestTimeoutMs,
+      onDeviceStatus: (status) => this.emitDeviceStatus(status),
+    });
   }
 
   /**
@@ -766,7 +152,9 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
           ? this._modelSettings.model
           : "";
     this.toolNames = init.tools;
-    this.removeMessageHandler = this.controller.onMessage(this.handleProtocolMessage);
+    this.removeMessageHandler = this.controller.onMessage((message) => {
+      if (this.runtime) this.turns.handleProtocolMessage(message, this.runtime);
+    });
 
     await this.afterRuntimeInitialized();
     await this.applyPostInitializeOptions();
@@ -824,13 +212,13 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
 
     await this.beforeTurn();
 
-    const turn = this.trackSentTurn(this.runtime);
+    const turn = this.turns.trackSentTurn(this.runtime);
     try {
       this.controller.sendTurnMessage(this.runtime, message, {
         clientMessageId: turn.clientMessageId,
       });
     } catch (error) {
-      this.removeTrackedTurn(turn);
+      this.turns.removeTrackedTurn(turn);
       throw error;
     }
   }
@@ -839,7 +227,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     message: SendMessage,
     _options: RunTurnOptions = {},
   ): Promise<SDKResultMessage> {
-    if (this.activeTurn || this.pendingTurns.length > 0) {
+    if (this.turns.hasInFlightTurn()) {
       throw new Error(
         `A turn is already in flight for this ${this.label} session. Use send() and stream() to let the listener queue messages.`,
       );
@@ -857,14 +245,14 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       errorCode: "stream_closed",
       recoverable: false,
       errorDetail: "Stream ended before terminal result",
-      durationMs: Date.now() - this.activeTurnStartedAt,
+      durationMs: Date.now() - this.turns.activeTurnStartedAt,
       conversationId: this._conversationId,
     };
   }
 
   async *stream(): AsyncGenerator<SDKMessage> {
     while (true) {
-      const msg = await this.nextMessage();
+      const msg = await this.turns.nextMessage();
       if (!msg) break;
       yield msg;
       if (msg.type === "result") break;
@@ -874,7 +262,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   async abort(): Promise<void> {
     if (!this.initialized) return;
     if (!this.controller || !this.runtime) return;
-    if (this.activeTurn) this.activeTurn.abortRequested = true;
+    this.turns.markAbortRequested();
     await this.controller.abort(this.runtime);
   }
 
@@ -1157,12 +545,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     this.closed = true;
     this.removeMessageHandler?.();
     this.removeMessageHandler = null;
-    if (this.activeTurn?.timeout) clearTimeout(this.activeTurn.timeout);
-    for (const turn of this.pendingTurns) {
-      if (turn.timeout) clearTimeout(turn.timeout);
-    }
-    this.activeTurn = null;
-    this.pendingTurns.length = 0;
+    this.turns.close();
     for (const cancel of [...this.deviceStatusRefreshCancels]) {
       cancel(new Error(`Session closed while waiting for ${this.label} device status`));
     }
@@ -1171,7 +554,6 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     this.controller?.close();
     this.controller = null;
     this.onCoreClose();
-    this.resolveAll(null);
   }
 
   get agentId(): string | null {
@@ -1266,90 +648,6 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
 
   protected setModel(model: string): void {
     this._model = model;
-  }
-
-  private trackSentTurn(runtime: RuntimeScope): TurnTracker {
-    const turn: TurnTracker = {
-      id: ++this.nextTurnId,
-      runtime,
-      clientMessageId: `sdk-message-${Date.now()}-${++this.clientMessageCounter}`,
-      queuedAt: Date.now(),
-      startedAt: 0,
-      assistantText: "",
-      runIds: new Set<string>(),
-      observedTurnEvidence: false,
-      observedRequiresApprovalStop: false,
-      abortRequested: false,
-      timeout: null,
-    };
-
-    if (this.activeTurn) {
-      this.pendingTurns.push(turn);
-    } else {
-      this.activateTurn(turn);
-    }
-    return turn;
-  }
-
-  private activateTurn(turn: TurnTracker): void {
-    this.activeTurn = turn;
-    turn.startedAt = Date.now();
-    this.activeTurnStartedAt = turn.startedAt;
-    if (this.requestTimeoutMs !== undefined) {
-      turn.timeout = setTimeout(() => {
-        this.failTurn(turn, `Timed out waiting for ${this.label} turn`);
-      }, this.requestTimeoutMs);
-      (turn.timeout as { unref?: () => void }).unref?.();
-    }
-  }
-
-  private activateNextTurnFromProtocol(): TurnTracker | null {
-    if (this.activeTurn) return this.activeTurn;
-    const next = this.pendingTurns.shift();
-    if (!next) return null;
-    this.activateTurn(next);
-    return next;
-  }
-
-  private removeTrackedTurn(turn: TurnTracker): void {
-    if (turn.timeout) clearTimeout(turn.timeout);
-    if (this.activeTurn === turn) {
-      this.activeTurn = null;
-      return;
-    }
-    const index = this.pendingTurns.indexOf(turn);
-    if (index !== -1) this.pendingTurns.splice(index, 1);
-  }
-
-  private failTurn(turn: TurnTracker, detail: string): void {
-    if (this.activeTurn !== turn) return;
-    this.enqueue({
-      type: "error",
-      message: detail,
-      errorCode: "error",
-      stopReason: "error",
-      errorDetail: detail,
-      recoverable: false,
-    });
-    this.completeActiveTurn({
-      runtime: turn.runtime,
-      stopReason: "error",
-      runIds: [...turn.runIds],
-      success: false,
-      detail,
-      errorCode: "error",
-    });
-  }
-
-  private completeActiveTurn(turn: RuntimeTurnResult): void {
-    const active = this.activeTurn;
-    if (!active) return;
-    if (active.timeout) {
-      clearTimeout(active.timeout);
-      active.timeout = null;
-    }
-    this.enqueue(this.resultFromTurn(turn, active));
-    this.activeTurn = null;
   }
 
   private async resolveUpdateModelPayload(
@@ -1476,306 +774,13 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     // post-init mutations via changeDeviceState().
   }
 
-  private handleProtocolMessage = (message: ProtocolMessage): void => {
-    if (!this.runtime || !sameRuntime(message, this.runtime)) return;
-
-    const deviceStatus = deviceStatusRecord(message);
-    if (deviceStatus) {
-      const status = toSessionDeviceStatus(deviceStatus);
-      if (!status) return;
-      for (const listener of [...this.deviceStatusListeners]) {
-        try {
-          listener(status);
-        } catch {
-          // Subscriber errors must not break the protocol message pump.
-        }
+  private emitDeviceStatus(status: SessionDeviceStatus): void {
+    for (const listener of [...this.deviceStatusListeners]) {
+      try {
+        listener(status);
+      } catch {
+        // Subscriber errors must not break the protocol message pump.
       }
-      return;
-    }
-
-    if (message.type === "update_queue") {
-      const sdkMessage: SDKQueueUpdateMessage = {
-        type: "queue_update",
-        queue: queueItems(message),
-      };
-      this.enqueue(sdkMessage);
-      return;
-    }
-
-    if (message.type === "update_loop_status") {
-      this.handleLoopStatusMessage(message);
-      return;
-    }
-
-    const delta = streamDeltaRecord(message);
-    if (!delta) return;
-    const active = this.activateNextTurnFromProtocol();
-    if (active) {
-      active.observedTurnEvidence = true;
-      const runId = streamDeltaRunId(delta);
-      if (runId) active.runIds.add(runId);
-    }
-
-    const sdkMessage = this.transformStreamDelta(delta);
-    if (sdkMessage) {
-      this.enqueue(sdkMessage);
-    }
-
-    this.handleTurnTerminalDelta(delta, sdkMessage);
-  };
-
-  private handleLoopStatusMessage(message: ProtocolMessage): void {
-    const status = loopStatusValue(message);
-    if (!status) return;
-    const activeRunIds = loopStatusRunIds(message);
-    const sdkMessage: SDKLoopStatusMessage = {
-      type: "loop_status",
-      status,
-      activeRunIds,
-    };
-    this.enqueue(sdkMessage);
-
-    const active = this.activeTurn;
-    if (!active) return;
-    for (const runId of activeRunIds) active.runIds.add(runId);
-
-    const hadTurnEvidence = active.observedTurnEvidence || active.observedRequiresApprovalStop;
-    if (!hadTurnEvidence) return;
-    if (status === "WAITING_ON_APPROVAL") {
-      this.completeActiveTurn({
-        runtime: active.runtime,
-        stopReason: "requires_approval",
-        runIds: [...active.runIds],
-      });
-      return;
-    }
-    if (status === "WAITING_ON_INPUT" && active.abortRequested) {
-      this.completeActiveTurn({
-        runtime: active.runtime,
-        stopReason: "interrupted",
-        runIds: [...active.runIds],
-        success: false,
-        detail: "Interrupted",
-        errorCode: "interrupted",
-      });
-      return;
-    }
-    if (status === "WAITING_ON_INPUT" && active.observedTurnEvidence) {
-      this.completeActiveTurn({
-        runtime: active.runtime,
-        stopReason: null,
-        runIds: [...active.runIds],
-      });
-    }
-  }
-
-  private handleTurnTerminalDelta(
-    delta: Record<string, unknown>,
-    sdkMessage: SDKMessage | null,
-  ): void {
-    const active = this.activeTurn;
-    if (!active) return;
-    const messageType = streamDeltaMessageType(delta);
-    if (messageType === "stop_reason") {
-      const stopReason = streamDeltaStopReason(delta) ?? null;
-      if (stopReason === "requires_approval") {
-        active.observedRequiresApprovalStop = true;
-        return;
-      }
-      this.completeActiveTurn({
-        runtime: active.runtime,
-        stopReason,
-        runIds: [...active.runIds],
-      });
-      return;
-    }
-
-    if (sdkMessage?.type === "error") {
-      this.completeActiveTurn({
-        runtime: active.runtime,
-        stopReason: sdkMessage.stopReason,
-        runIds: [...active.runIds],
-        success: false,
-        detail: sdkMessage.errorDetail ?? sdkMessage.message,
-        errorCode: sdkMessage.errorCode,
-      });
-    }
-  }
-
-  private transformStreamDelta(delta: Record<string, unknown>): SDKMessage | null {
-    const messageType = typeof delta.message_type === "string" ? delta.message_type : undefined;
-    const runId = typeof delta.run_id === "string" ? delta.run_id : undefined;
-    const uuid = typeof delta.id === "string" ? delta.id : `${this.label}-${++this.messageCounter}`;
-
-    if (messageType === "assistant_message") {
-      const content = extractTextFromContent(delta.content);
-      if (!content) return null;
-      if (this.activeTurn) this.activeTurn.assistantText += content;
-      return { type: "assistant", content, uuid, runId };
-    }
-
-    if (messageType === "reasoning_message") {
-      const content = typeof delta.reasoning === "string"
-        ? delta.reasoning
-        : extractTextFromContent(delta.content);
-      if (!content) return null;
-      return { type: "reasoning", content, uuid, runId };
-    }
-
-    if (messageType === "tool_call_message" || messageType === "approval_request_message") {
-      const toolCall = firstToolCall(delta);
-      if (!toolCall) return null;
-      const fn = toolCall.function && typeof toolCall.function === "object"
-        ? (toolCall.function as Record<string, unknown>)
-        : undefined;
-      const toolCallId =
-        (typeof toolCall.tool_call_id === "string" ? toolCall.tool_call_id : undefined) ??
-        (typeof toolCall.id === "string" ? toolCall.id : undefined);
-      if (!toolCallId) {
-        const detail = `Missing tool_call_id in ${messageType} (uuid=${uuid})`;
-        return {
-          type: "error",
-          message: detail,
-          errorCode: "protocol_error",
-          stopReason: "protocol_error",
-          runId,
-          recoverable: false,
-          errorDetail: detail,
-        };
-      }
-      const toolName =
-        (typeof toolCall.name === "string" ? toolCall.name : undefined) ??
-        (typeof fn?.name === "string" ? fn.name : undefined) ??
-        "?";
-      const { input, raw } = toolInputFromArguments(toolCall.arguments ?? fn?.arguments);
-      return {
-        type: "tool_call",
-        toolCallId,
-        toolName,
-        toolInput: input,
-        rawArguments: raw,
-        uuid,
-        runId,
-      };
-    }
-
-    if (messageType === "tool_return_message") {
-      const toolReturn = firstToolReturn(delta) ?? delta;
-      const toolCallId =
-        (typeof delta.tool_call_id === "string" ? delta.tool_call_id : undefined) ??
-        (typeof toolReturn.tool_call_id === "string" ? toolReturn.tool_call_id : undefined);
-      if (!toolCallId) return null;
-      const content =
-        extractTextFromContent(delta.tool_return ?? toolReturn.tool_return ?? toolReturn.content) ?? "";
-      const status = typeof delta.status === "string" ? delta.status : toolReturn.status;
-      return {
-        type: "tool_result",
-        toolCallId,
-        content,
-        isError: status === "error",
-        uuid,
-        runId,
-      };
-    }
-
-    if (messageType === "error_message" || messageType === "loop_error") {
-      const detail =
-        (typeof delta.detail === "string" ? delta.detail : undefined) ??
-        (typeof delta.message === "string" ? delta.message : undefined) ??
-        `${this.label} turn failed`;
-      const stopReason =
-        (typeof delta.stop_reason === "string" ? delta.stop_reason : undefined) ??
-        (typeof delta.error_type === "string" ? delta.error_type : undefined) ??
-        "error";
-      const approvalConflict = isApprovalConflictSignal({
-        detail,
-        message: typeof delta.message === "string" ? delta.message : undefined,
-        stopReason,
-      });
-      return {
-        type: "error",
-        message: detail,
-        errorCode: approvalConflict ? "approval_conflict" : toSdkErrorCode(stopReason),
-        approvalConflict: approvalConflict || undefined,
-        recoverable: approvalConflict ? true : false,
-        errorDetail: detail,
-        stopReason,
-        runId,
-      };
-    }
-
-    if (messageType === "retry") {
-      return {
-        type: "retry",
-        reason: typeof delta.reason === "string" ? delta.reason : "error",
-        attempt: typeof delta.attempt === "number" ? delta.attempt : 0,
-        maxAttempts: typeof delta.max_attempts === "number" ? delta.max_attempts : 0,
-        delayMs: typeof delta.delay_ms === "number" ? delta.delay_ms : 0,
-        runId,
-      };
-    }
-
-    if (messageType === "stop_reason" || messageType === "ping") {
-      return null;
-    }
-
-    return {
-      type: "stream_event",
-      event: delta as SDKStreamEventPayload,
-      uuid,
-    };
-  }
-
-  private resultFromTurn(turn: RuntimeTurnResult, tracker?: TurnTracker): SDKResultMessage {
-    const stopReason = turn.stopReason ?? (turn.success === false ? "error" : undefined);
-    const approvalConflict = isApprovalConflictSignal({
-      detail: turn.detail,
-      stopReason,
-    });
-    const success = turn.success !== undefined
-      ? turn.success && !approvalConflict && !FAILURE_STOP_REASONS.has(stopReason ?? "")
-      : !approvalConflict && !FAILURE_STOP_REASONS.has(stopReason ?? "");
-    const errorCode = approvalConflict
-      ? "approval_conflict"
-      : (turn.errorCode ?? toSdkErrorCode(stopReason));
-
-    return {
-      type: "result",
-      success,
-      result: success ? (tracker?.assistantText || undefined) : undefined,
-      error: success ? undefined : (errorCode ?? stopReason ?? "error"),
-      errorCode: success ? undefined : (errorCode ?? "error"),
-      approvalConflict: approvalConflict || undefined,
-      recoverable: approvalConflict ? true : success ? undefined : false,
-      errorDetail: success ? undefined : turn.detail,
-      stopReason,
-      durationMs: Date.now() - (tracker?.startedAt || this.activeTurnStartedAt),
-      conversationId: turn.runtime.conversation_id,
-      runIds: turn.runIds.length > 0 ? turn.runIds : undefined,
-    };
-  }
-
-  private enqueue(message: SDKMessage): void {
-    const resolver = this.streamResolvers.shift();
-    if (resolver) {
-      resolver(message);
-      return;
-    }
-    this.streamQueue.push(message);
-  }
-
-  private nextMessage(): Promise<SDKMessage | null> {
-    const next = this.streamQueue.shift();
-    if (next) return Promise.resolve(next);
-    if (this.closed) return Promise.resolve(null);
-    return new Promise((resolve) => {
-      this.streamResolvers.push(resolve);
-    });
-  }
-
-  private resolveAll(value: SDKMessage | null): void {
-    for (const resolve of this.streamResolvers.splice(0)) {
-      resolve(value);
     }
   }
 }
