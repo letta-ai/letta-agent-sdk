@@ -196,6 +196,7 @@ export class LettaAgentClientBase {
     }
 
     validateCreateAgentOptions(options);
+    this.releaseIdleManagementConnection();
 
     if (this.backend === "remote") {
       const session = new AppServerSession(this.remoteOptions(), {
@@ -230,6 +231,7 @@ export class LettaAgentClientBase {
     this.assertSessionBackend("createSession", resolvedOptions);
     const sessionOptions = stripCloudExecutionOptions(resolvedOptions);
     validateCreateSessionOptions(sessionOptions);
+    this.releaseIdleManagementConnection();
 
     if (this.backend === "remote") {
       if (!agentId) {
@@ -273,6 +275,7 @@ export class LettaAgentClientBase {
     this.assertSessionBackend("resumeSession", options);
     const sessionOptions = stripCloudExecutionOptions(options);
     validateCreateSessionOptions(sessionOptions);
+    this.releaseIdleManagementConnection();
 
     if (this.backend === "remote") {
       if (looksLikeConversationId(id)) {
@@ -425,6 +428,16 @@ export class LettaAgentClientBase {
     }
     this.repositoriesClient ??= new RepositoriesClient(this.cloudOptions());
     return this.repositoriesClient;
+  }
+
+  /**
+   * The app-server accepts a single control client at a time, so an idle
+   * pooled management connection would starve the session we are about to
+   * open. Release it up front; it reconnects lazily on the next
+   * agents/conversations/models call.
+   */
+  private releaseIdleManagementConnection(): void {
+    this.managementTransport?.releaseIdleConnection?.();
   }
 
   private getManagementTransport(): ManagementTransport {

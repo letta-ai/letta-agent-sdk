@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { AppServerManagementTransport } from "../app-server-management.js";
 import { LettaAgentClient as PortableLettaAgentClient } from "../client-entry.js";
 import { LettaAgentClient as NodeLettaAgentClient } from "../index.js";
 import type { LettaCodeSocketOptions } from "../types.js";
+import { asAdvanced } from "./advanced-session.js";
 
 type FetchInput = Parameters<typeof fetch>[0];
 type Listener = (event: unknown) => void;
@@ -112,10 +114,12 @@ class ManagementSocket {
     readonly options?: LettaCodeSocketOptions,
   ) {
     ManagementSocket.instances.push(this);
-    queueMicrotask(() => {
-      this.readyState = 1;
-      this.emit("open", {});
-    });
+    queueMicrotask(() => this.handleConnect());
+  }
+
+  protected handleConnect(): void {
+    this.readyState = 1;
+    this.emit("open", {});
   }
 
   send(data: string): void {
@@ -139,7 +143,7 @@ class ManagementSocket {
     this.listeners.get(type)?.delete(listener);
   }
 
-  private respond(command: Record<string, unknown>): void {
+  protected respond(command: Record<string, unknown>): void {
     const responses: Record<string, Record<string, unknown>> = {
       agent_list: {
         agents: [{ id: "agent-1", name: "Memo" }],
@@ -527,5 +531,190 @@ describe("portable management namespaces", () => {
     await expect(client.agents.list()).rejects.toThrow(
       "Cloud list agents failed — Unauthorized — URL: https://api.test/v1/agents/ — Authentication failed",
     );
+  });
+});
+
+/**
+ * Fake mirroring the app-server's single-control-client rule: while one
+ * control socket is attached, later control sockets are accepted at the
+ * websocket layer and then rejected with 1008 "control channel already
+ * connected" (letta-code src/websocket/app-server.ts), which strands any
+ * request sent over them.
+ */
+class SingleControlAppServerSocket extends ManagementSocket {
+  static activeControl: SingleControlAppServerSocket | null = null;
+  static rejectedControlSockets = 0;
+
+  static reset(): void {
+    SingleControlAppServerSocket.activeControl = null;
+    SingleControlAppServerSocket.rejectedControlSockets = 0;
+    ManagementSocket.instances = [];
+  }
+
+  protected override handleConnect(): void {
+    if (this.url.includes("channel=control")) {
+      if (SingleControlAppServerSocket.activeControl) {
+        SingleControlAppServerSocket.rejectedControlSockets += 1;
+        // The real server completes the upgrade, then closes the socket.
+        super.handleConnect();
+        this.readyState = 3;
+        this.emit("close", {
+          code: 1008,
+          reason: "control channel already connected",
+        });
+        return;
+      }
+      SingleControlAppServerSocket.activeControl = this;
+    }
+    super.handleConnect();
+  }
+
+  override close(): void {
+    if (SingleControlAppServerSocket.activeControl === this) {
+      SingleControlAppServerSocket.activeControl = null;
+    }
+    super.close();
+  }
+
+  protected override respond(command: Record<string, unknown>): void {
+    const type = String(command.type);
+    if (type === "runtime_start") {
+      this.serverMessage({
+        type: "runtime_start_response",
+        request_id: command.request_id,
+        success: true,
+        runtime: { agent_id: "agent-1", conversation_id: "conv-1" },
+        agent: { id: "agent-1", model: "anthropic/claude-haiku-4-5" },
+        conversation: { id: "conv-1", agent_id: "agent-1" },
+        created: { agent: false, conversation: false },
+      });
+      return;
+    }
+    if (type === "sync") {
+      if (typeof command.request_id === "string") {
+        this.serverMessage({
+          type: "sync_response",
+          request_id: command.request_id,
+          runtime: command.runtime,
+          success: true,
+        });
+      }
+      return;
+    }
+    super.respond(command);
+  }
+
+  private serverMessage(message: Record<string, unknown>): void {
+    queueMicrotask(() => {
+      this.emit("message", { data: JSON.stringify(message) });
+    });
+  }
+}
+
+describe("app-server management connection lifecycle", () => {
+  const url = "ws://remote.test/ws";
+
+  function openSockets(): ManagementSocket[] {
+    return ManagementSocket.instances.filter(
+      (socket) => socket.readyState !== 3,
+    );
+  }
+
+  test("releases the connection after a request settles and the linger elapses", async () => {
+    ManagementSocket.instances = [];
+    const transport = new AppServerManagementTransport({
+      url,
+      WebSocket: ManagementSocket,
+      idleLingerMs: 20,
+    });
+
+    await expect(transport.listAgents({})).resolves.toEqual([
+      { id: "agent-1", name: "Memo" },
+    ]);
+    // One control + one stream socket, still open during the linger.
+    expect(ManagementSocket.instances).toHaveLength(2);
+    expect(openSockets()).toHaveLength(2);
+
+    await Bun.sleep(60);
+    expect(openSockets()).toHaveLength(0);
+  });
+
+  test("reconnects lazily after an idle release", async () => {
+    ManagementSocket.instances = [];
+    const transport = new AppServerManagementTransport({
+      url,
+      WebSocket: ManagementSocket,
+      idleLingerMs: 20,
+    });
+
+    await transport.listAgents({});
+    await Bun.sleep(60);
+    expect(openSockets()).toHaveLength(0);
+
+    await expect(transport.listConversations({})).resolves.toHaveLength(1);
+    // A fresh connection was opened for the follow-up request.
+    expect(ManagementSocket.instances).toHaveLength(4);
+    expect(openSockets()).toHaveLength(2);
+    await Bun.sleep(60);
+    expect(openSockets()).toHaveLength(0);
+  });
+
+  test("a burst of requests shares one connection", async () => {
+    ManagementSocket.instances = [];
+    const transport = new AppServerManagementTransport({
+      url,
+      WebSocket: ManagementSocket,
+      idleLingerMs: 20,
+    });
+
+    const [agents, conversations] = await Promise.all([
+      transport.listAgents({}),
+      transport.listConversations({}),
+    ]);
+    expect(agents).toHaveLength(1);
+    expect(conversations).toHaveLength(1);
+    // A sequential follow-up inside the linger reuses the connection too.
+    await expect(transport.retrieveAgent("agent-1")).resolves.toMatchObject({
+      id: "agent-1",
+    });
+    expect(ManagementSocket.instances).toHaveLength(2);
+
+    await Bun.sleep(60);
+    expect(openSockets()).toHaveLength(0);
+  });
+
+  test("a session created right after management calls gets the control channel", async () => {
+    SingleControlAppServerSocket.reset();
+    const client = new PortableLettaAgentClient({
+      backend: "remote",
+      url,
+      WebSocket: SingleControlAppServerSocket,
+    });
+
+    await client.agents.list();
+    await client.conversations.list();
+    // The pooled management connection is still lingering (default 250ms) and
+    // holds the single control slot; a second control client would be
+    // rejected 1008 by the fake, exactly like the real app-server.
+    expect(SingleControlAppServerSocket.activeControl).not.toBeNull();
+    const managementControl = SingleControlAppServerSocket.activeControl;
+
+    // resumeSession() must release the idle management connection before the
+    // session connects, without waiting out the linger.
+    const session = client.resumeSession("conv-1");
+    try {
+      const init = await asAdvanced(session).initialize();
+      expect(init.conversationId).toBe("conv-1");
+      expect(init.agentId).toBe("agent-1");
+      // The management control socket was closed before the session's control
+      // socket connected, so nothing got rejected.
+      expect(managementControl?.readyState).toBe(3);
+      expect(SingleControlAppServerSocket.rejectedControlSockets).toBe(0);
+      expect(SingleControlAppServerSocket.activeControl).not.toBe(
+        managementControl,
+      );
+    } finally {
+      session.close();
+    }
   });
 });
