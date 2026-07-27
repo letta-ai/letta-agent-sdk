@@ -45,6 +45,13 @@ export interface ManagementTransport {
     conversationId: string,
     query: ManagementQuery,
   ): Promise<ConversationMessagesResult>;
+  /**
+   * Release the pooled connection, waiting for in-flight work when necessary,
+   * so other clients of the same backend (for example sessions, which compete
+   * for the app-server's single control-client slot) can connect. Optional;
+   * transports whose backend has no such contention (Cloud REST) omit it.
+   */
+  releaseIdleConnection?(): Promise<void> | void;
 }
 
 type TransportProvider = () => ManagementTransport;

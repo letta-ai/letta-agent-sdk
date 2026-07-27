@@ -39,6 +39,9 @@ export class LettaAgentClient extends LettaAgentClientBase {
       ...(localOptions?.requestTimeoutMs !== undefined
         ? { requestTimeoutMs: localOptions.requestTimeoutMs }
         : {}),
+      ...(localOptions?.idleLingerMs !== undefined
+        ? { idleLingerMs: localOptions.idleLingerMs }
+        : {}),
     });
   }
 
@@ -47,10 +50,14 @@ export class LettaAgentClient extends LettaAgentClientBase {
   ): Promise<string> {
     if (!this.useLegacyLocalStdio()) {
       const localOptions = this.options as LettaCodeLocalClientOptions;
-      const session = createLocalAppServerSession(localOptions.appServer, {
-        kind: "create-agent",
-        options,
-      });
+      const session = createLocalAppServerSession(
+        localOptions.appServer,
+        {
+          kind: "create-agent",
+          options,
+        },
+        () => this.releaseIdleManagementConnection(),
+      );
       const initMsg = await session.initialize();
       session.close();
       return initMsg.agentId;
@@ -69,12 +76,16 @@ export class LettaAgentClient extends LettaAgentClientBase {
   ): LettaCodeSession {
     if (!this.useLegacyLocalStdio() && agentId) {
       const localOptions = this.options as LettaCodeLocalClientOptions;
-      return createLocalAppServerSession(localOptions.appServer, {
-        kind: "session",
-        agentId,
-        newConversation: true,
-        options,
-      });
+      return createLocalAppServerSession(
+        localOptions.appServer,
+        {
+          kind: "session",
+          agentId,
+          newConversation: true,
+          options,
+        },
+        () => this.releaseIdleManagementConnection(),
+      );
     }
     if (agentId) {
       return new Session({ ...sessionOptions, agentId, newConversation: true });
@@ -90,18 +101,26 @@ export class LettaAgentClient extends LettaAgentClientBase {
     if (!this.useLegacyLocalStdio()) {
       const localOptions = this.options as LettaCodeLocalClientOptions;
       if (looksLikeConversationId(id)) {
-        return createLocalAppServerSession(localOptions.appServer, {
-          kind: "session",
-          conversationId: id,
-          options,
-        });
+        return createLocalAppServerSession(
+          localOptions.appServer,
+          {
+            kind: "session",
+            conversationId: id,
+            options,
+          },
+          () => this.releaseIdleManagementConnection(),
+        );
       }
-      return createLocalAppServerSession(localOptions.appServer, {
-        kind: "session",
-        agentId: id,
-        defaultConversation: true,
-        options,
-      });
+      return createLocalAppServerSession(
+        localOptions.appServer,
+        {
+          kind: "session",
+          agentId: id,
+          defaultConversation: true,
+          options,
+        },
+        () => this.releaseIdleManagementConnection(),
+      );
     }
     if (looksLikeConversationId(id)) {
       return new Session({ ...sessionOptions, conversationId: id });

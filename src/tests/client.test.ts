@@ -514,6 +514,24 @@ describe("LettaAgentClient", () => {
     expect(client.environment).toBeUndefined();
   });
 
+  test("validates management connection linger options", () => {
+    expect(
+      () =>
+        new LettaAgentClient({
+          backend: "remote",
+          url: "ws://127.0.0.1:4500/ws",
+          idleLingerMs: -1,
+        }),
+    ).toThrow("Invalid idleLingerMs");
+    expect(
+      () =>
+        new LettaAgentClient({
+          backend: "local",
+          appServer: { idleLingerMs: 1.5 },
+        }),
+    ).toThrow("Invalid appServer.idleLingerMs");
+  });
+
   test("creates local app-server sessions without starting transport until use", () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({

@@ -3,6 +3,7 @@ import { AppServerManagementTransport } from "./app-server-management.js";
 import {
   AppServerSession,
   assertRemoteSessionOptionsSupported,
+  type AppServerSessionOptions,
 } from "./app-server-session.js";
 import { CloudManagementTransport } from "./cloud-management.js";
 import {
@@ -152,6 +153,13 @@ export class LettaAgentClientBase {
       ) {
         throw new Error("Invalid appServer.requestTimeoutMs. Expected a positive integer.");
       }
+      const idleLingerMs = localOptions.appServer?.idleLingerMs;
+      if (
+        idleLingerMs !== undefined &&
+        (!Number.isInteger(idleLingerMs) || idleLingerMs < 0)
+      ) {
+        throw new Error("Invalid appServer.idleLingerMs. Expected a non-negative integer.");
+      }
       const startupTimeoutMs = localOptions.appServer?.startupTimeoutMs;
       if (
         startupTimeoutMs !== undefined &&
@@ -170,6 +178,12 @@ export class LettaAgentClientBase {
         (!Number.isInteger(options.requestTimeoutMs) || options.requestTimeoutMs <= 0)
       ) {
         throw new Error("Invalid requestTimeoutMs. Expected a positive integer.");
+      }
+      if (
+        options.idleLingerMs !== undefined &&
+        (!Number.isInteger(options.idleLingerMs) || options.idleLingerMs < 0)
+      ) {
+        throw new Error("Invalid idleLingerMs. Expected a non-negative integer.");
       }
     }
 
@@ -198,7 +212,7 @@ export class LettaAgentClientBase {
     validateCreateAgentOptions(options);
 
     if (this.backend === "remote") {
-      const session = new AppServerSession(this.remoteOptions(), {
+      const session = new AppServerSession(this.appServerSessionOptions(), {
         kind: "create-agent",
         options,
       });
@@ -237,7 +251,7 @@ export class LettaAgentClientBase {
           "App-server createSession() requires an agent id. Call createAgent() first or pass an agent id.",
         );
       }
-      return new AppServerSession(this.remoteOptions(), {
+      return new AppServerSession(this.appServerSessionOptions(), {
         kind: "session",
         agentId,
         newConversation: true,
@@ -276,13 +290,13 @@ export class LettaAgentClientBase {
 
     if (this.backend === "remote") {
       if (looksLikeConversationId(id)) {
-        return new AppServerSession(this.remoteOptions(), {
+        return new AppServerSession(this.appServerSessionOptions(), {
           kind: "session",
           conversationId: id,
           options,
         });
       }
-      return new AppServerSession(this.remoteOptions(), {
+      return new AppServerSession(this.appServerSessionOptions(), {
         kind: "session",
         agentId: id,
         defaultConversation: true,
@@ -419,12 +433,28 @@ export class LettaAgentClientBase {
     return this.options as LettaCodeRemoteClientOptions;
   }
 
+  private appServerSessionOptions(): AppServerSessionOptions {
+    return {
+      ...this.remoteOptions(),
+      beforeConnect: () => this.releaseIdleManagementConnection(),
+    };
+  }
+
   private getRepositoriesClient(): RepositoriesClient {
     if (this.backend !== "cloud") {
       throw new Error('client.repositories is only available with backend: "cloud".');
     }
     this.repositoriesClient ??= new RepositoriesClient(this.cloudOptions());
     return this.repositoriesClient;
+  }
+
+  /**
+   * The app-server accepts a single control client at a time. Before a session
+   * connects, wait for this client's management work to settle and relinquish
+   * its pooled connection; management reconnects lazily on its next call.
+   */
+  protected async releaseIdleManagementConnection(): Promise<void> {
+    await this.managementTransport?.releaseIdleConnection?.();
   }
 
   private getManagementTransport(): ManagementTransport {
