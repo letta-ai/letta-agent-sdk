@@ -36,6 +36,10 @@ class FakeAppServerSocket {
     | "manualApprovalWait"
     | "queuedSecond"
     | "hang" = "normal";
+  static failNextRuntimeStart = false;
+  static deferReflectionSettingsResponse = false;
+  static failNextReflectionSettings = false;
+  static pendingReflectionSettingsResponse: (() => void) | null = null;
   readyState = 0;
   sent: unknown[] = [];
   private listeners = new Map<string, Set<Listener>>();
@@ -54,7 +58,7 @@ class FakeAppServerSocket {
   send(data: string): void {
     const command = JSON.parse(data) as Record<string, unknown>;
     this.sent.push(command);
-    fakeAppServerHandle(command);
+    fakeAppServerHandle(command, this);
   }
 
   close(): void {
@@ -110,6 +114,20 @@ function fakeStreamSocket(): FakeAppServerSocket {
   return socket;
 }
 
+/**
+ * The stream socket belonging to the same AppServerClient as `control`.
+ * AppServerClient constructs its control socket immediately before its
+ * stream socket, so the pair is adjacent in the instances list.
+ */
+function fakeStreamPairOf(control: FakeAppServerSocket): FakeAppServerSocket {
+  const index = FakeAppServerSocket.instances.indexOf(control);
+  const stream = FakeAppServerSocket.instances[index + 1];
+  if (!stream || !stream.url.includes("channel=stream")) {
+    throw new Error("missing paired fake stream socket");
+  }
+  return stream;
+}
+
 const FAKE_MODEL_ENTRIES = [
   {
     id: "sonnet-low",
@@ -134,10 +152,18 @@ const FAKE_MODEL_ENTRIES = [
   },
 ];
 
-function fakeAppServerHandle(command: Record<string, unknown>): void {
+function fakeAppServerHandle(
+  command: Record<string, unknown>,
+  sender: FakeAppServerSocket,
+): void {
+  // Commands always arrive on a control socket; reply to the sending
+  // client's own pair so tests can run several client instances at once.
+  const control = sender;
+  const stream = fakeStreamPairOf(sender);
+
   if (command.type === "conversation_retrieve") {
     const conversationId = command.conversation_id as string;
-    fakeControlSocket().serverMessage({
+    control.serverMessage({
       type: "conversation_retrieve_response",
       request_id: command.request_id,
       success: true,
@@ -147,7 +173,7 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
   }
 
   if (command.type === "enable_memfs") {
-    fakeControlSocket().serverMessage({
+    control.serverMessage({
       type: "enable_memfs_response",
       request_id: command.request_id,
       success: true,
@@ -157,18 +183,31 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
   }
 
   if (command.type === "set_reflection_settings") {
-    fakeControlSocket().serverMessage({
-      type: "set_reflection_settings_response",
-      request_id: command.request_id,
-      success: true,
-      scope: command.scope,
-      reflection_settings: command.settings,
-    });
+    const respond = () => {
+      const success = !FakeAppServerSocket.failNextReflectionSettings;
+      FakeAppServerSocket.failNextReflectionSettings = false;
+      control.serverMessage({
+        type: "set_reflection_settings_response",
+        request_id: command.request_id,
+        success,
+        ...(success
+          ? {
+              scope: command.scope,
+              reflection_settings: command.settings,
+            }
+          : { error: "reflection settings failed (fake)" }),
+      });
+    };
+    if (FakeAppServerSocket.deferReflectionSettingsResponse) {
+      FakeAppServerSocket.pendingReflectionSettingsResponse = respond;
+    } else {
+      respond();
+    }
     return;
   }
 
   if (command.type === "list_models") {
-    fakeControlSocket().serverMessage({
+    control.serverMessage({
       type: "list_models_response",
       request_id: command.request_id,
       success: true,
@@ -186,7 +225,7 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
     const modelHandle =
       (typeof payload?.model_handle === "string" ? payload.model_handle : undefined) ??
       byId?.handle;
-    fakeControlSocket().serverMessage({
+    control.serverMessage({
       type: "update_model_response",
       request_id: command.request_id,
       success: true,
@@ -209,7 +248,7 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
   }
 
   if (command.type === "update_toolset") {
-    fakeControlSocket().serverMessage({
+    control.serverMessage({
       type: "update_toolset_response",
       request_id: command.request_id,
       success: true,
@@ -221,7 +260,7 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
 
   if (command.type === "sync") {
     if (FakeAppServerSocket.deviceStatusOnSync && command.force_device_status === true) {
-      fakeControlSocket().serverMessage({
+      control.serverMessage({
         type: "update_device_status",
         runtime: command.runtime,
         device_status: {
@@ -255,7 +294,7 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
       });
     }
     if (typeof command.request_id === "string") {
-      fakeControlSocket().serverMessage({
+      control.serverMessage({
         type: "sync_response",
         request_id: command.request_id,
         runtime: command.runtime,
@@ -266,7 +305,7 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
   }
 
   if (command.type === "remove_queue_item" && typeof command.request_id === "string") {
-    fakeControlSocket().serverMessage({
+    control.serverMessage({
       type: "remove_queue_item_response",
       request_id: command.request_id,
       runtime: command.runtime,
@@ -277,7 +316,7 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
   }
 
   if (command.type === "abort_message" && typeof command.request_id === "string") {
-    fakeControlSocket().serverMessage({
+    control.serverMessage({
       type: "abort_message_response",
       request_id: command.request_id,
       runtime: command.runtime,
@@ -288,7 +327,7 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
   }
 
   if (command.type === "conversation_messages_list") {
-    fakeControlSocket().serverMessage({
+    control.serverMessage({
       type: "conversation_messages_list_response",
       request_id: command.request_id,
       success: true,
@@ -301,13 +340,26 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
   }
 
   if (command.type === "runtime_start") {
+    if (FakeAppServerSocket.failNextRuntimeStart) {
+      FakeAppServerSocket.failNextRuntimeStart = false;
+      control.serverMessage({
+        type: "runtime_start_response",
+        request_id: command.request_id,
+        success: false,
+        runtime: null,
+        agent: null,
+        conversation: null,
+        error: "runtime start failed (fake)",
+      });
+      return;
+    }
     const createdAgent = command.create_agent as Record<string, unknown> | undefined;
     const agentId = (command.agent_id as string | undefined) ?? "agent-created";
     const conversationId =
       command.conversation_id === "default"
         ? "default"
         : ((command.conversation_id as string | undefined) ?? "conv-created");
-    fakeControlSocket().serverMessage({
+    control.serverMessage({
       type: "runtime_start_response",
       request_id: command.request_id,
       success: true,
@@ -332,13 +384,13 @@ function fakeAppServerHandle(command: Record<string, unknown>): void {
     const runtime = command.runtime;
     const emitStream = (message: unknown) => {
       if (FakeAppServerSocket.mirrorStreamToControl) {
-        fakeControlSocket().serverMessage(message);
+        control.serverMessage(message);
       }
-      fakeStreamSocket().serverMessage(message);
+      stream.serverMessage(message);
     };
 
     if (FakeAppServerSocket.inputScenario === "queuedSecond") {
-      const inputCount = fakeControlSocket().sent.filter(
+      const inputCount = control.sent.filter(
         (sent) => (sent as { type?: string }).type === "input",
       ).length;
       const payload = command.payload as { messages?: Array<Record<string, unknown>> };
@@ -1352,6 +1404,220 @@ describe("LettaAgentClient", () => {
         conversation_id: "conv-abc",
       });
     } finally {
+      session.close();
+    }
+  });
+
+  test("concurrent listMessages and send on a fresh session share one initialize", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("conv-abc");
+    try {
+      const [page] = await Promise.all([
+        session.listMessages({ limit: 2 }),
+        session.send("hello"),
+      ]);
+      expect(page.messages).toHaveLength(2);
+
+      // Exactly one control+stream pair: the second caller must join the
+      // in-flight initialize instead of opening its own connection.
+      expect(FakeAppServerSocket.instances).toHaveLength(2);
+      const sent = fakeControlSocket().sent as Array<{ type?: string }>;
+      expect(sent.filter((cmd) => cmd.type === "conversation_retrieve")).toHaveLength(1);
+      expect(sent.filter((cmd) => cmd.type === "runtime_start")).toHaveLength(1);
+    } finally {
+      session.close();
+    }
+  });
+
+  test("concurrent initialize callers resolve from the same attempt", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("conv-abc");
+    try {
+      const [first, second] = await Promise.all([
+        asAdvanced(session).initialize(),
+        asAdvanced(session).initialize(),
+      ]);
+      expect(first).toEqual(second);
+      expect(first.conversationId).toBe("conv-abc");
+      expect(FakeAppServerSocket.instances).toHaveLength(2);
+      await expect(asAdvanced(session).initialize()).rejects.toThrow(
+        "Session already initialized",
+      );
+    } finally {
+      session.close();
+    }
+  });
+
+  test("lazy callers wait until post-initialize options finish", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.deferReflectionSettingsResponse = true;
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("agent-123", {
+      dreaming: { trigger: "step-count", stepCount: 3 },
+    });
+    try {
+      const initialize = asAdvanced(session).initialize();
+      for (let i = 0; i < 100; i++) {
+        if (FakeAppServerSocket.pendingReflectionSettingsResponse) break;
+        await Promise.resolve();
+      }
+      expect(FakeAppServerSocket.pendingReflectionSettingsResponse).not.toBeNull();
+
+      const listMessages = session.listMessages({ limit: 1 });
+      await Promise.resolve();
+      expect(
+        fakeControlSocket().sent.filter(
+          (command) =>
+            (command as { type?: string }).type ===
+            "conversation_messages_list",
+        ),
+      ).toHaveLength(0);
+
+      FakeAppServerSocket.pendingReflectionSettingsResponse?.();
+      const [, page] = await Promise.all([initialize, listMessages]);
+      expect(page.messages).toHaveLength(2);
+    } finally {
+      FakeAppServerSocket.deferReflectionSettingsResponse = false;
+      FakeAppServerSocket.pendingReflectionSettingsResponse = null;
+      session.close();
+    }
+  });
+
+  test("failed post-initialize work clears partial session metadata", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.failNextReflectionSettings = true;
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("agent-123", {
+      dreaming: { trigger: "step-count", stepCount: 3 },
+    });
+    try {
+      await expect(asAdvanced(session).initialize()).rejects.toThrow(
+        "reflection settings failed (fake)",
+      );
+      expect(session.agentId).toBeNull();
+      expect(session.sessionId).toBeNull();
+      expect(session.conversationId).toBeNull();
+
+      const init = await asAdvanced(session).initialize();
+      expect(init.agentId).toBe("agent-123");
+    } finally {
+      FakeAppServerSocket.failNextReflectionSettings = false;
+      session.close();
+    }
+  });
+
+  test("closing during initialization cannot resurrect the session", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.deferReflectionSettingsResponse = true;
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("agent-123", {
+      dreaming: { trigger: "step-count", stepCount: 3 },
+    });
+    try {
+      const initialize = asAdvanced(session).initialize();
+      for (let i = 0; i < 100; i++) {
+        if (FakeAppServerSocket.pendingReflectionSettingsResponse) break;
+        await Promise.resolve();
+      }
+      expect(FakeAppServerSocket.pendingReflectionSettingsResponse).not.toBeNull();
+
+      session.close();
+      FakeAppServerSocket.pendingReflectionSettingsResponse?.();
+      await expect(initialize).rejects.toThrow();
+      await expect(asAdvanced(session).initialize()).rejects.toThrow(
+        "Session is closed",
+      );
+      expect(session.agentId).toBeNull();
+      expect(session.sessionId).toBeNull();
+      expect(session.conversationId).toBeNull();
+    } finally {
+      FakeAppServerSocket.deferReflectionSettingsResponse = false;
+      FakeAppServerSocket.pendingReflectionSettingsResponse = null;
+      session.close();
+    }
+  });
+
+  test("request ids never collide across two concurrent client instances", async () => {
+    FakeAppServerSocket.instances = [];
+    const makeClient = () =>
+      new LettaAgentClient({
+        backend: "remote",
+        url: "ws://127.0.0.1:4500/ws",
+        WebSocket: FakeAppServerSocket,
+      });
+
+    const sessionA = makeClient().resumeSession("conv-abc");
+    const sessionB = makeClient().resumeSession("conv-abc");
+    try {
+      await Promise.all([
+        asAdvanced(sessionA).initialize(),
+        asAdvanced(sessionB).initialize(),
+      ]);
+
+      const requestIds = FakeAppServerSocket.instances
+        .flatMap((socket) => socket.sent as Array<{ request_id?: unknown }>)
+        .map((cmd) => cmd.request_id)
+        .filter((id): id is string => typeof id === "string");
+      // Both sessions send conversation_retrieve + runtime_start; per-client
+      // counters restarting at 1 would collide here (conversation_retrieve-1).
+      expect(requestIds.length).toBeGreaterThanOrEqual(4);
+      expect(new Set(requestIds).size).toBe(requestIds.length);
+    } finally {
+      sessionA.close();
+      sessionB.close();
+    }
+  });
+
+  test("a failed initialize clears the single-flight memo so a retry succeeds", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.failNextRuntimeStart = true;
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("agent-123");
+    try {
+      await expect(asAdvanced(session).initialize()).rejects.toThrow(
+        "runtime start failed (fake)",
+      );
+
+      // The failure must not close the session; a retry opens a fresh
+      // connection and completes.
+      const init = await asAdvanced(session).initialize();
+      expect(init.agentId).toBe("agent-123");
+      const page = await session.listMessages();
+      expect(page.messages).toHaveLength(2);
+    } finally {
+      FakeAppServerSocket.failNextRuntimeStart = false;
       session.close();
     }
   });

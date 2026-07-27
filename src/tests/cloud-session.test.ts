@@ -1398,6 +1398,38 @@ describe("CloudEnvironmentSession", () => {
     }
   });
 
+  test("concurrent Cloud listMessages and send share one initialize and connection", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("conv-1");
+    try {
+      const [page] = await Promise.all([
+        session.listMessages({ limit: 1 }),
+        session.send("hello"),
+      ]);
+      expect(page.messages).toEqual([{ id: "msg-from-runtime" }]);
+
+      // A single control+stream pair and a single runtime_start: the second
+      // caller joins the in-flight initialize instead of reconnecting.
+      expect(FakeCloudSocket.instances).toHaveLength(2);
+      expect(
+        FakeCloudSocket.allSent().filter((cmd) => cmd.type === "runtime_start"),
+      ).toHaveLength(1);
+    } finally {
+      session.close();
+    }
+  });
+
   test("lists explicit Cloud conversation ids through runtime protocol instead of Cloud REST", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];

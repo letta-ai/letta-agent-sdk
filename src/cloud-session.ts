@@ -17,6 +17,7 @@ import {
   RemoteEnvironmentClient,
   type RemoteEnvironmentTarget,
 } from "./remote.js";
+import { applyUniqueRequestIds } from "./request-ids.js";
 import {
   RemoteClientSessionCore,
   mapPermissionMode,
@@ -732,14 +733,14 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       apiKey,
       authMode: this.cloudOptions.webSocketAuth ?? "header",
     });
-    const client = createAppServerClient({
+    const client = applyUniqueRequestIds(createAppServerClient({
       url,
       WebSocket: createCloudStatusWebSocketConstructor({
         cloudOptions: this.cloudOptions,
         runtime: resolved.runtime,
       }),
       requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
-    });
+    }));
     this.removeControlRequestHandler = registerAppServerControlRequestHandler({
       client,
       getRuntime: () => this.runtime,

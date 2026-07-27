@@ -689,6 +689,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
 
   private readonly label: string;
   private readonly requestTimeoutMs: number | undefined;
+  private initializePromise: Promise<SDKInitMessage> | null = null;
   private streamQueue: SDKMessage[] = [];
   private streamResolvers: Array<(msg: SDKMessage | null) => void> = [];
   private removeMessageHandler: (() => void) | null = null;
@@ -709,51 +710,108 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     this.requestTimeoutMs = config.requestTimeoutMs;
   }
 
+  /**
+   * Initialize the session.
+   *
+   * Single-flight: the first caller starts initialization and every
+   * concurrent caller (including the lazily-initializing entry points such
+   * as send()/stream()/listMessages()) awaits the same promise, so a fresh
+   * session never opens more than one runtime connection. A failed attempt
+   * clears the memo so a later call can retry; it only releases the
+   * resources that failed attempt created.
+   */
   async initialize(): Promise<SDKInitMessage> {
+    if (this.closed) {
+      throw new Error("Session is closed");
+    }
+    if (this.initializePromise) {
+      return this.initializePromise;
+    }
     if (this.initialized) {
       throw new Error("Session already initialized");
     }
+
+    const attempt = this.performInitialize();
+    const memo = attempt
+      .catch((error: unknown) => {
+        // Tear down only this attempt's partial state. Never close() the
+        // session here: a failed remote attempt is retryable.
+        this.cleanupFailedInitialize();
+        throw error;
+      })
+      .finally(() => {
+        // Keep only the in-flight promise. Once it settles, preserve the
+        // existing API: a later explicit initialize() either retries a
+        // failure or throws "already initialized" after success.
+        if (this.initializePromise === memo) {
+          this.initializePromise = null;
+        }
+      });
+    this.initializePromise = memo;
+    return memo;
+  }
+
+  private async performInitialize(): Promise<SDKInitMessage> {
+    const init = await this.initializeRuntimeController();
+    this.controller = init.controller;
+    this.runtime = init.runtime;
+    this._agentId = init.runtime.agent_id;
+    this._conversationId = init.runtime.conversation_id;
+    this._sessionId = `${init.runtime.agent_id}:${init.runtime.conversation_id}`;
+    this._modelSettings = init.modelSettings ?? null;
+    this._model =
+      typeof init.model === "string"
+        ? init.model
+        : typeof this._modelSettings?.model === "string"
+          ? this._modelSettings.model
+          : "";
+    this.toolNames = init.tools;
+    this.removeMessageHandler = this.controller.onMessage(this.handleProtocolMessage);
+
+    await this.afterRuntimeInitialized();
+    await this.applyPostInitializeOptions();
     if (this.closed) {
       throw new Error("Session is closed");
     }
 
-    try {
-      const init = await this.initializeRuntimeController();
-      this.controller = init.controller;
-      this.runtime = init.runtime;
-      this._agentId = init.runtime.agent_id;
-      this._conversationId = init.runtime.conversation_id;
-      this._sessionId = `${init.runtime.agent_id}:${init.runtime.conversation_id}`;
-      this._modelSettings = init.modelSettings ?? null;
-      this._model =
-        typeof init.model === "string"
-          ? init.model
-          : typeof this._modelSettings?.model === "string"
-            ? this._modelSettings.model
-            : "";
-      this.toolNames = init.tools;
-      this.removeMessageHandler = this.controller.onMessage(this.handleProtocolMessage);
-      this.initialized = true;
+    // This is the lifecycle commit point. Lazy entry points must continue to
+    // await initializePromise until every post-initialize option is applied.
+    this.initialized = true;
 
-      await this.afterRuntimeInitialized();
-      await this.applyPostInitializeOptions();
-
-      const initMessage: SDKInitMessage = {
-        type: "init",
-        agentId: init.runtime.agent_id,
-        sessionId: this._sessionId,
-        conversationId: init.runtime.conversation_id,
-        model: this._model,
-      };
-      if (this.toolNames !== undefined) initMessage.tools = this.toolNames;
-      if (init.skillSources !== undefined) {
-        initMessage.skillSources = init.skillSources;
-      }
-      return initMessage;
-    } catch (error) {
-      this.close();
-      throw error;
+    const initMessage: SDKInitMessage = {
+      type: "init",
+      agentId: init.runtime.agent_id,
+      sessionId: this._sessionId,
+      conversationId: init.runtime.conversation_id,
+      model: this._model,
+    };
+    if (this.toolNames !== undefined) initMessage.tools = this.toolNames;
+    if (init.skillSources !== undefined) {
+      initMessage.skillSources = init.skillSources;
     }
+    return initMessage;
+  }
+
+  /**
+   * Release the partial state a failed initialize attempt created without
+   * closing the session, so a later initialize() can retry.
+   */
+  private cleanupFailedInitialize(): void {
+    this.removeMessageHandler?.();
+    this.removeMessageHandler = null;
+    this.controller?.close();
+    this.controller = null;
+    // Subclass-owned resources (spawned connections, sandboxes, handlers)
+    // are attempt-scoped too; their cleanup hooks are idempotent.
+    this.onCoreClose();
+    this.runtime = null;
+    this._agentId = null;
+    this._conversationId = null;
+    this._sessionId = null;
+    this._modelSettings = null;
+    this._model = "";
+    this.toolNames = undefined;
+    this.initialized = false;
   }
 
   async send(message: SendMessage): Promise<void> {
@@ -876,7 +934,15 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     if (!this.controller || !this.runtime) {
       throw new Error("Session is not initialized");
     }
+    return this.applyModelUpdate(update);
+  }
 
+  private async applyModelUpdate(
+    update: string | UpdateModelOptions,
+  ): Promise<UpdateModelResult> {
+    if (!this.controller || !this.runtime) {
+      throw new Error("Session is not initialized");
+    }
     const normalized = normalizeUpdateModelInput(update);
     const payload = await this.resolveUpdateModelPayload(normalized);
     const result = await this.controller.updateModel(this.runtime, payload);
@@ -1397,7 +1463,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       this.mode.options.model !== undefined ||
       this.mode.options.reasoningEffort !== undefined
     ) {
-      await this.updateModel({
+      await this.applyModelUpdate({
         ...(this.mode.options.model !== undefined ? { model: this.mode.options.model } : {}),
         ...(this.mode.options.reasoningEffort !== undefined
           ? { reasoningEffort: this.mode.options.reasoningEffort }

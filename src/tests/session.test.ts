@@ -6,11 +6,13 @@ const BUFFER_LIMIT = 100;
 
 class MockTransport {
   writes: unknown[] = [];
+  connectCount = 0;
   private queue: WireMessage[] = [];
   private resolvers: Array<(msg: WireMessage | null) => void> = [];
   private closed = false;
 
   async connect(): Promise<void> {
+    this.connectCount++;
     return;
   }
 
@@ -283,6 +285,34 @@ async function waitFor(
 }
 
 describe("Session", () => {
+  test("concurrent initialize callers share one stdio attempt", async () => {
+    const session = new Session();
+    const transport = new MockTransport();
+    attachMockTransport(session, transport);
+
+    try {
+      const first = session.initialize();
+      const second = session.initialize();
+      transport.push(createInitMessage());
+
+      const [firstInit, secondInit] = await Promise.all([first, second]);
+      expect(firstInit).toEqual(secondInit);
+      expect(transport.connectCount).toBe(1);
+      expect(
+        transport.writes.filter(
+          (message) =>
+            (message as { request?: { subtype?: string } }).request?.subtype ===
+            "initialize",
+        ),
+      ).toHaveLength(1);
+      await expect(session.initialize()).rejects.toThrow(
+        "Session already initialized",
+      );
+    } finally {
+      session.close();
+    }
+  });
+
   test("initialize returns optional init settings when provided by CLI", async () => {
     const session = new Session();
     const transport = new MockTransport();

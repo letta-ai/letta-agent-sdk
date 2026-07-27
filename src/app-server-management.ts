@@ -9,6 +9,7 @@ import type {
   ManagementQuery,
   ManagementTransport,
 } from "./management.js";
+import { applyUniqueRequestIds } from "./request-ids.js";
 import type {
   ConversationMessagesResult,
   LettaAgent,
@@ -510,7 +511,7 @@ export class AppServerManagementTransport
 
     let client: AppServerClient | null = null;
     try {
-      client = createAppServerClient({
+      client = applyUniqueRequestIds(createAppServerClient({
         url,
         ...(this.options.authToken !== undefined
           ? { authToken: this.options.authToken }
@@ -524,7 +525,7 @@ export class AppServerManagementTransport
         ...(this.options.requestTimeoutMs !== undefined
           ? { requestTimeoutMs: this.options.requestTimeoutMs }
           : {}),
-      });
+      }));
       await client.connect();
     } catch (error) {
       try {
