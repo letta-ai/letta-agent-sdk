@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { LettaAgentClient, Session } from "../index.js";
+import * as sdk from "../index.js";
+import { LettaAgentClient } from "../index.js";
 import type { SessionDeviceStatus } from "../index.js";
 import { asAdvanced } from "./advanced-session.js";
 
@@ -566,6 +567,10 @@ describe("LettaAgentClient", () => {
     expect(client.environment).toBeUndefined();
   });
 
+  test("does not export the removed stdio Session implementation", () => {
+    expect("Session" in sdk).toBe(false);
+  });
+
   test("validates management connection linger options", () => {
     expect(
       () =>
@@ -593,31 +598,28 @@ describe("LettaAgentClient", () => {
     const session = client.resumeSession("agent-123");
 
     try {
-      expect(session).not.toBeInstanceOf(Session);
       expect(FakeAppServerSocket.instances).toHaveLength(0);
     } finally {
       session.close();
     }
   });
 
-  test("explicit local stdio transport keeps legacy Session fallback", async () => {
-    const client = new LettaAgentClient({ backend: "local", transport: "stdio" });
-    const session = client.resumeSession("agent-123");
+  test("rejects the removed local transport override", () => {
+    expect(
+      () =>
+        new LettaAgentClient({
+          backend: "local",
+          transport: "stdio",
+        } as never),
+    ).toThrow("Local transport selection has been removed");
+  });
 
-    try {
-      expect(session).toBeInstanceOf(Session);
-      await expect(asAdvanced(session).updateToolset("developer")).rejects.toThrow(
-        "updateToolset() is not supported by this session",
-      );
-      await expect(session.getDeviceStatus()).rejects.toThrow(
-        "getDeviceStatus() is not supported by the legacy stdio transport",
-      );
-      expect(() => session.onDeviceStatus(() => {})).toThrow(
-        "onDeviceStatus() is not supported by the legacy stdio transport",
-      );
-    } finally {
-      session.close();
-    }
+  test("requires an explicit agent id for new sessions", () => {
+    const client = new LettaAgentClient({ backend: "local" });
+
+    expect(() => client.createSession(undefined as never)).toThrow(
+      "createSession() requires a non-empty agent id",
+    );
   });
 
   test("restricts filesystem confinement to SDK-owned local app-server processes", () => {
@@ -627,24 +629,6 @@ describe("LettaAgentClient", () => {
         filesystemConfinement: "invalid" as "memory",
       }),
     ).toThrow("Invalid filesystemConfinement 'invalid'");
-    expect(() =>
-      localClient.createSession({
-        filesystemConfinement: "memory",
-        env: { MEMORY_DIR: "/state/memory" },
-      }),
-    ).toThrow("requires an explicit agent id");
-
-    const stdioClient = new LettaAgentClient({
-      backend: "local",
-      transport: "stdio",
-    });
-    expect(() =>
-      stdioClient.resumeSession("agent-123", {
-        filesystemConfinement: "memory",
-        env: { MEMORY_DIR: "/state/memory" },
-      }),
-    ).toThrow("requires the local app-server transport");
-
     const externalAppServerClient = new LettaAgentClient({
       backend: "local",
       appServer: { url: "ws://127.0.0.1:4500/ws" },
@@ -2171,7 +2155,7 @@ describe("LettaAgentClient", () => {
     }
   });
 
-  test("websocket protocol sessions reject unsupported stdio-only options", () => {
+  test("websocket protocol sessions reject unsupported options", () => {
     const client = new LettaAgentClient({
       backend: "remote",
       url: "ws://127.0.0.1:4500/ws",
@@ -2179,8 +2163,11 @@ describe("LettaAgentClient", () => {
     });
 
     expect(() =>
-      client.resumeSession("agent-123", { dreaming: { behavior: "auto-launch" } }),
-    ).toThrow("does not yet support dreaming.behavior");
+      client.resumeSession(
+        "agent-123",
+        { dreaming: { behavior: "auto-launch" } } as never,
+      ),
+    ).toThrow("dreaming.behavior is not supported");
   });
 
 

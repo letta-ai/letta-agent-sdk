@@ -5,7 +5,8 @@
  * Defends their work against faculty questions.
  */
 
-import { createSession, resumeSession, type Session } from '../../src/index.js';
+import { resumeSession, type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession } from '../create-agent-session.js';
 import type { SeminarConfig } from './types.js';
 
 const PRESENTER_SYSTEM_PROMPT = `You are an economics researcher presenting at an academic seminar.
@@ -46,7 +47,7 @@ Update these as you learn from faculty feedback.`;
 export async function createPresenter(
   existingAgentId: string | null,
   config: SeminarConfig
-): Promise<Session> {
+): Promise<LettaCodeSession> {
   if (existingAgentId) {
     return resumeSession(existingAgentId, {
       model: config.model,
@@ -55,7 +56,7 @@ export async function createPresenter(
     });
   }
   
-  return createSession({
+  return createAgentSession({
     model: config.model,
     systemPrompt: PRESENTER_SYSTEM_PROMPT,
     memory: [
@@ -113,7 +114,7 @@ export async function createPresenter(
  * Have the presenter pick a topic and research it
  */
 export async function pickTopicAndResearch(
-  session: Session,
+  session: LettaCodeSession,
   onOutput: (text: string) => void,
   userTopic?: string
 ): Promise<{ topic: string; presentation: string }> {
@@ -191,7 +192,7 @@ Start by announcing your chosen topic, then research it, then present.`;
  * Have the presenter respond to a faculty question
  */
 export async function respondToQuestion(
-  session: Session,
+  session: LettaCodeSession,
   facultyName: string,
   facultyTitle: string,
   question: string,

@@ -108,7 +108,7 @@ async function multiTurn() {
   console.log('=== Multi-Turn Conversation ===\n');
 
   // Create new agent + new conversation
-  await using session = createSession(undefined, {
+  await using session = createSession(await createAgent(), {
     model: 'haiku',
     permissionMode: 'unrestricted',
   });
@@ -136,7 +136,8 @@ async function oneShot() {
   console.log('=== One-Shot Prompt ===\n');
 
   // One-shot creates new agent
-  const result = await prompt('What is the capital of France? One word.');
+  const agentId = await createAgent();
+  const result = await prompt('What is the capital of France? One word.', agentId);
 
   if (result.success) {
     console.log(`Answer: ${result.result}`);
@@ -213,8 +214,8 @@ async function testOptions() {
 
   // Test systemPrompt preset via createSession (only presets allowed)
   console.log('Testing systemPrompt preset...');
-  const sysPromptSession = createSession(undefined, {
-    systemPrompt: 'letta-claude',
+  const systemPromptAgentId = await createAgent({ systemPrompt: 'letta-claude' });
+  const sysPromptSession = createSession(systemPromptAgentId, {
     permissionMode: 'unrestricted',
   });
   await sysPromptSession.send('Hello, what kind of agent are you?');
@@ -227,7 +228,7 @@ async function testOptions() {
 
   // Test cwd option via createSession
   console.log('Testing cwd option...');
-  const cwdSession = createSession(undefined, {
+  const cwdSession = createSession(await createAgent(), {
     cwd: '/tmp',
     allowedTools: ['Bash'],
     permissionMode: 'unrestricted',
@@ -243,7 +244,7 @@ async function testOptions() {
 
   // Test allowedTools option with tool execution
   console.log('Testing allowedTools option...');
-  const toolsSession = createSession(undefined, {
+  const toolsSession = createSession(await createAgent(), {
     allowedTools: ['Bash'],
     permissionMode: 'unrestricted',
   });
@@ -258,7 +259,7 @@ async function testOptions() {
 
   // Test permissionMode: unrestricted
   console.log('Testing permissionMode: unrestricted...');
-  const unrestrictedSession = createSession(undefined, {
+  const unrestrictedSession = createSession(await createAgent(), {
     allowedTools: ['Bash'],
     permissionMode: 'unrestricted',
   });
@@ -327,7 +328,7 @@ async function testSessionProperties() {
   console.log('=== Testing Session Properties ===\n');
 
   // Create new agent + new conversation
-  const session = createSession(undefined, {
+  const session = createSession(await createAgent(), {
     model: 'haiku',
     permissionMode: 'unrestricted',
   });
@@ -417,7 +418,7 @@ async function testPermissionCallback() {
 
   // Test 1: Allow specific commands via callback
   console.log('Testing canUseTool callback (allow)...');
-  const allowSession = createSession(undefined, {
+  const allowSession = createSession(await createAgent(), {
     // NO allowedTools - this ensures callback is invoked
     permissionMode: 'standard',
     canUseTool: async (toolName, toolInput) => {
@@ -440,7 +441,7 @@ async function testPermissionCallback() {
 
   // Test 2: Deny specific commands via callback
   console.log('Testing canUseTool callback (deny)...');
-  const denySession = createSession(undefined, {
+  const denySession = createSession(await createAgent(), {
     permissionMode: 'standard',
     canUseTool: async (toolName, toolInput) => {
       const command = (toolInput as { command?: string }).command || '';
@@ -817,25 +818,6 @@ async function testConversations() {
     console.log(`  matches session.conversationId: ${matchesSession ? 'PASS' : 'FAIL'}`);
   }
 
-  // Test 7: createSession() without agentId uses LRU agent + new conversation (like `letta`)
-  console.log('\nTest 7: createSession() without agentId (uses LRU agent)...');
-  {
-    await using session = createSession(undefined, {
-      model: 'haiku',
-      permissionMode: 'unrestricted',
-    });
-
-    await session.send('Say "lru agent test ok"');
-    
-    for await (const msg of session.stream()) {
-      // drain
-    }
-
-    const hasAgentId = session.agentId !== null;
-    const hasConvId = session.conversationId !== null;
-    console.log(`  has agentId: ${hasAgentId ? 'PASS' : 'FAIL'} - ${session.agentId}`);
-    console.log(`  has conversationId: ${hasConvId ? 'PASS' : 'FAIL'} - ${session.conversationId}`);
-  }
 
   console.log();
 }

@@ -5,7 +5,8 @@
  * Learns effective analytical frameworks and quality standards.
  */
 
-import { createSession, resumeSession, type Session } from '../../../src/index.js';
+import { resumeSession, type LettaCodeSession } from '../../../src/index.js';
+import { createAgentSession } from '../../create-agent-session.js';
 import type { Depth } from '../types.js';
 import { DEPTH_CONFIGS } from '../types.js';
 import { ARTIFACTS, getOutputPath } from '../tools/file-store.js';
@@ -51,7 +52,7 @@ Update these when you discover effective approaches or learn from mistakes.`;
 export async function createAnalyst(
   existingAgentId?: string | null,
   depth: Depth = 'standard'
-): Promise<Session> {
+): Promise<LettaCodeSession> {
   if (existingAgentId) {
     return resumeSession(existingAgentId, {
       model: 'haiku',
@@ -60,7 +61,7 @@ export async function createAnalyst(
     });
   }
   
-  return createSession({
+  return createAgentSession({
     model: 'haiku',
     systemPrompt: ANALYST_SYSTEM_PROMPT,
     memory: [
@@ -134,7 +135,7 @@ List full references at end
  * Run analysis on research findings
  */
 export async function runAnalysis(
-  session: Session,
+  session: LettaCodeSession,
   taskId: string,
   query: string,
   depth: Depth
@@ -201,7 +202,7 @@ Confirm when complete.`;
  * Ask analyst to reflect on task performance
  */
 export async function reflectOnTask(
-  session: Session,
+  session: LettaCodeSession,
   taskId: string,
   feedback?: { rating: number; comment?: string }
 ): Promise<string> {

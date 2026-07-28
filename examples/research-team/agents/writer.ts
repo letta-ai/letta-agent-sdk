@@ -5,7 +5,8 @@
  * Learns writing style preferences and effective report structures.
  */
 
-import { createSession, resumeSession, type Session } from '../../../src/index.js';
+import { resumeSession, type LettaCodeSession } from '../../../src/index.js';
+import { createAgentSession } from '../../create-agent-session.js';
 import type { Depth } from '../types.js';
 import { DEPTH_CONFIGS } from '../types.js';
 import { ARTIFACTS, getOutputPath } from '../tools/file-store.js';
@@ -69,7 +70,7 @@ Update these based on user feedback to improve over time.`;
 export async function createWriter(
   existingAgentId?: string | null,
   depth: Depth = 'standard'
-): Promise<Session> {
+): Promise<LettaCodeSession> {
   if (existingAgentId) {
     return resumeSession(existingAgentId, {
       model: 'haiku',
@@ -78,7 +79,7 @@ export async function createWriter(
     });
   }
   
-  return createSession({
+  return createAgentSession({
     model: 'haiku',
     systemPrompt: WRITER_SYSTEM_PROMPT,
     memory: [
@@ -167,7 +168,7 @@ export async function createWriter(
  * Write the final research report
  */
 export async function writeReport(
-  session: Session,
+  session: LettaCodeSession,
   taskId: string,
   query: string,
   depth: Depth
@@ -231,7 +232,7 @@ Write the complete report to the output file, then confirm completion.`;
  * Ask writer to reflect on task and incorporate feedback
  */
 export async function reflectOnTask(
-  session: Session,
+  session: LettaCodeSession,
   taskId: string,
   feedback?: { rating: number; comment?: string }
 ): Promise<string> {

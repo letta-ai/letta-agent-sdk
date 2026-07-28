@@ -5,7 +5,8 @@
  * Learns which sources are reliable and effective search strategies.
  */
 
-import { createSession, resumeSession, type Session } from '../../../src/index.js';
+import { resumeSession, type LettaCodeSession } from '../../../src/index.js';
+import { createAgentSession } from '../../create-agent-session.js';
 import type { Depth } from '../types.js';
 import { DEPTH_CONFIGS } from '../types.js';
 import { ARTIFACTS } from '../tools/file-store.js';
@@ -60,7 +61,7 @@ Be thorough but concise. The Analyst depends on your evaluations.`;
 export async function createResearcher(
   existingAgentId?: string | null,
   depth: Depth = 'standard'
-): Promise<Session> {
+): Promise<LettaCodeSession> {
   const config = DEPTH_CONFIGS[depth];
   
   if (existingAgentId) {
@@ -71,7 +72,7 @@ export async function createResearcher(
     });
   }
   
-  return createSession({
+  return createAgentSession({
     model: 'haiku',
     systemPrompt: RESEARCHER_SYSTEM_PROMPT,
     memory: [
@@ -128,7 +129,7 @@ export async function createResearcher(
  * Run a research task
  */
 export async function runResearchTask(
-  session: Session,
+  session: LettaCodeSession,
   taskId: string,
   query: string,
   depth: Depth
@@ -201,7 +202,7 @@ Find at least ${config.sourcesCount} high-quality sources, then confirm completi
  * Ask researcher to reflect on task performance
  */
 export async function reflectOnTask(
-  session: Session,
+  session: LettaCodeSession,
   taskId: string,
   feedback?: { rating: number; comment?: string }
 ): Promise<string> {
