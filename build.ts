@@ -52,8 +52,10 @@ const portableOutput = readFileSync(
   join(__dirname, "dist", "client-entry.js"),
   "utf-8",
 );
-const forbiddenNodeImport = /(?:from\s*|import\s*\()\s*["']node:/;
-if (forbiddenNodeImport.test(portableOutput)) {
+const portableImports = new Bun.Transpiler({ loader: "js" }).scanImports(
+  portableOutput,
+);
+if (portableImports.some(({ path }) => path.startsWith("node:"))) {
   throw new Error(
     'Portable client build contains a Node builtin import. Keep Node-only modules behind the package root.',
   );

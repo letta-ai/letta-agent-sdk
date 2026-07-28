@@ -1003,7 +1003,7 @@ describe("CloudEnvironmentSession", () => {
     expect(requests).toContainEqual(expect.objectContaining({
       method: "POST",
       url: "https://api.test/v1/agents/agent-1/recompile",
-      body: {},
+      body: undefined,
     }));
     expect(requests).toContainEqual(expect.objectContaining({
       method: "DELETE",
@@ -1075,7 +1075,7 @@ describe("CloudEnvironmentSession", () => {
     });
 
     await expect(asAdvanced(session).initialize()).rejects.toThrow(
-      "Cloud recompile system prompt failed — recompile failed",
+      '500 {"error":"recompile failed"}',
     );
     expect(requests).toContainEqual(expect.objectContaining({
       method: "DELETE",
@@ -1298,7 +1298,7 @@ describe("CloudEnvironmentSession", () => {
     expect(requests).toContainEqual(expect.objectContaining({
       method: "POST",
       url: "https://api.test/v1/agents/agent-1/recompile",
-      body: {},
+      body: undefined,
     }));
     expect(requests.filter((request) =>
       request.method === "DELETE" &&

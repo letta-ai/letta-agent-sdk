@@ -1,3 +1,6 @@
+import type Letta from "@letta-ai/letta-client";
+import { createCloudClient } from "./cloud-client.js";
+
 export type RemoteEnvironmentTarget =
   | { connectionId: string }
   | { environmentId: string }
@@ -43,35 +46,6 @@ export interface ResolvedRemoteEnvironment {
   target: RemoteEnvironmentTarget;
 }
 
-type RemoteFetch = typeof fetch;
-
-function getDefaultApiKey(): string | undefined {
-  if (typeof process === "undefined") {
-    return undefined;
-  }
-  return process.env.LETTA_API_KEY;
-}
-
-function createHeaders(options: RemoteEnvironmentClientOptions): Record<string, string> {
-  const apiKey = options.apiKey ?? getDefaultApiKey();
-  return {
-    ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-    ...(options.headers ?? {}),
-  };
-}
-
-function getFetch(options: RemoteEnvironmentClientOptions): RemoteFetch {
-  const fetchImpl = options.fetch ?? globalThis.fetch;
-  if (!fetchImpl) {
-    throw new Error("Remote environments require a fetch implementation");
-  }
-  return fetchImpl.bind(globalThis) as RemoteFetch;
-}
-
-function normalizeBaseUrl(baseUrl?: string): string {
-  return (baseUrl ?? "https://api.letta.com").replace(/\/$/, "");
-}
-
 function ensureOnline(
   environment: RemoteEnvironmentConnection,
   target: RemoteEnvironmentTarget,
@@ -95,47 +69,29 @@ function ensureOnline(
   };
 }
 
-async function parseJsonResponse<T>(response: Response): Promise<T> {
-  const text = await response.text();
-  const body = text ? JSON.parse(text) : null;
-
-  if (!response.ok) {
-    const message =
-      body && typeof body === "object" && "message" in body
-        ? String((body as { message: unknown }).message)
-        : response.statusText;
-    throw new Error(`Letta API request failed (${response.status}): ${message}`);
-  }
-
-  return body as T;
-}
-
 /**
- * Small Cloud API helper for resolving explicit Letta Code environments.
+ * Resolve explicit Letta Code environments through the generated Letta client.
  */
 export class RemoteEnvironmentClient {
-  private readonly baseUrl: string;
-  private readonly fetchImpl: RemoteFetch;
-
-  constructor(private readonly options: RemoteEnvironmentClientOptions = {}) {
-    this.baseUrl = normalizeBaseUrl(options.baseUrl);
-    this.fetchImpl = getFetch(options);
-  }
+  constructor(
+    options: RemoteEnvironmentClientOptions = {},
+    private readonly client: Letta = createCloudClient({
+      backend: "cloud",
+      apiBaseUrl: options.baseUrl,
+      apiKey: options.apiKey,
+      headers: options.headers,
+      fetch: options.fetch,
+    }),
+  ) {}
 
   async listEnvironments(): Promise<RemoteEnvironmentListResult> {
-    const url = new URL(`${this.baseUrl}/v1/environments`);
-    const response = await this.fetchImpl(url, {
-      headers: createHeaders(this.options),
-    });
-    return parseJsonResponse<RemoteEnvironmentListResult>(response);
+    return await this.client.environments.list() as RemoteEnvironmentListResult;
   }
 
   async getEnvironmentByDeviceId(deviceId: string): Promise<RemoteEnvironmentConnection> {
-    const response = await this.fetchImpl(
-      `${this.baseUrl}/v1/environments/${encodeURIComponent(deviceId)}`,
-      { headers: createHeaders(this.options) },
-    );
-    return parseJsonResponse<RemoteEnvironmentConnection>(response);
+    return await this.client.environments.retrieve(
+      deviceId,
+    ) as RemoteEnvironmentConnection;
   }
 
   async resolveEnvironment(target: RemoteEnvironmentTarget): Promise<ResolvedRemoteEnvironment> {
@@ -173,5 +129,4 @@ export class RemoteEnvironmentClient {
     }
     return ensureOnline(match, target);
   }
-
 }

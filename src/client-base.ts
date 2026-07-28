@@ -1,3 +1,4 @@
+import type Letta from "@letta-ai/letta-client";
 import { RepositoriesClient } from "./repositories.js";
 import { createAgentRepositoriesClient } from "./agent-repositories.js";
 import { AppServerManagementTransport } from "./app-server-management.js";
@@ -6,6 +7,7 @@ import {
   type AppServerSessionOptions,
 } from "./app-server-session.js";
 import { CloudManagementTransport } from "./cloud-management.js";
+import { createCloudClient } from "./cloud-client.js";
 import {
   CloudEnvironmentSession,
   assertCloudSessionOptionsSupported,
@@ -107,6 +109,7 @@ export class LettaAgentClientBase {
   protected readonly options: LettaCodeClientOptions;
   private repositoriesClient: RepositoriesClient | null = null;
   private agentRepositoriesClient: AgentRepositoriesClient | null = null;
+  private cloudClient: Letta | null = null;
   private managementTransport: ManagementTransport | null = null;
 
   constructor(options: LettaCodeClientOptions = {}) {
@@ -212,7 +215,7 @@ export class LettaAgentClientBase {
       return initMsg.agentId;
     }
     if (this.backend === "cloud") {
-      return createCloudAgent(this.cloudOptions(), options);
+      return createCloudAgent(this.getCloudClient(), options);
     }
     return this.createLocalAgent(options);
   }
@@ -242,12 +245,16 @@ export class LettaAgentClientBase {
       });
     }
     if (this.backend === "cloud") {
-      return new CloudEnvironmentSession(this.cloudOptions(), {
-        kind: "session",
-        agentId,
-        newConversation: true,
-        options,
-      });
+      return new CloudEnvironmentSession(
+        this.cloudOptions(),
+        {
+          kind: "session",
+          agentId,
+          newConversation: true,
+          options,
+        },
+        this.getCloudClient(),
+      );
     }
     return this.createLocalSession(agentId, options);
   }
@@ -283,18 +290,26 @@ export class LettaAgentClientBase {
     }
     if (this.backend === "cloud") {
       if (looksLikeConversationId(id)) {
-        return new CloudEnvironmentSession(this.cloudOptions(), {
-          kind: "session",
-          conversationId: id,
-          options,
-        });
+        return new CloudEnvironmentSession(
+          this.cloudOptions(),
+          {
+            kind: "session",
+            conversationId: id,
+            options,
+          },
+          this.getCloudClient(),
+        );
       }
-      return new CloudEnvironmentSession(this.cloudOptions(), {
-        kind: "session",
-        agentId: id,
-        defaultConversation: true,
-        options,
-      });
+      return new CloudEnvironmentSession(
+        this.cloudOptions(),
+        {
+          kind: "session",
+          agentId: id,
+          defaultConversation: true,
+          options,
+        },
+        this.getCloudClient(),
+      );
     }
     return this.resumeLocalSession(id, options);
   }
@@ -433,7 +448,10 @@ export class LettaAgentClientBase {
     if (this.backend !== "cloud") {
       throw new Error('client.repositories is only available with backend: "cloud".');
     }
-    this.repositoriesClient ??= new RepositoriesClient(this.cloudOptions());
+    this.repositoriesClient ??= new RepositoriesClient(
+      this.cloudOptions(),
+      this.getCloudClient(),
+    );
     return this.repositoriesClient;
   }
 
@@ -457,6 +475,14 @@ export class LettaAgentClientBase {
     return transport;
   }
 
+  private getCloudClient(): Letta {
+    if (this.backend !== "cloud") {
+      throw new Error("Letta client requested for non-cloud backend.");
+    }
+    this.cloudClient ??= createCloudClient(this.cloudOptions());
+    return this.cloudClient;
+  }
+
   private getManagementTransport(): ManagementTransport {
     if (this.managementTransport) return this.managementTransport;
     if (this.backend === "remote") {
@@ -465,7 +491,7 @@ export class LettaAgentClientBase {
       );
     } else if (this.backend === "cloud") {
       this.managementTransport = new CloudManagementTransport(
-        this.cloudOptions(),
+        this.getCloudClient(),
       );
     } else {
       this.managementTransport = this.createLocalManagementTransport();

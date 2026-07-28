@@ -50,7 +50,7 @@ function createManagementFetch(
     if (url.pathname === "/v1/agents/agent-1" && method === "DELETE") {
       return new Response(null, { status: 204 });
     }
-    if (url.pathname === "/v1/models" && method === "GET") {
+    if (url.pathname === "/v1/models/" && method === "GET") {
       return jsonResponse([
         {
           handle: "anthropic/claude-haiku-4-5",
@@ -351,7 +351,7 @@ describe("portable management namespaces", () => {
         body: undefined,
       },
       {
-        path: "/v1/models",
+        path: "/v1/models/",
         query: {},
         method: "GET",
         body: undefined,
@@ -516,7 +516,7 @@ describe("portable management namespaces", () => {
     );
   });
 
-  test("includes Cloud action, URL, and authentication guidance in errors", async () => {
+  test("surfaces canonical Letta API errors", async () => {
     const client = new PortableLettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
@@ -529,7 +529,7 @@ describe("portable management namespaces", () => {
     });
 
     await expect(client.agents.list()).rejects.toThrow(
-      "Cloud list agents failed — Unauthorized — URL: https://api.test/v1/agents/ — Authentication failed",
+      '401 {"detail":"Unauthorized"}',
     );
   });
 });

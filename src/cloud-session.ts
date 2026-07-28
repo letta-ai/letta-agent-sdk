@@ -1,3 +1,9 @@
+import type Letta from "@letta-ai/letta-client";
+import { APIError } from "@letta-ai/letta-client/core/error";
+import type {
+  AgentCreateParams,
+  AgentState,
+} from "@letta-ai/letta-client/resources/agents/agents";
 import {
   createAppServerClient,
   type AppServerClient,
@@ -12,6 +18,11 @@ import {
 } from "./app-server-session.js";
 import { createCloudStatusTransportConstructor } from "./cloud-status-transport.js";
 import { CloudManagementTransport } from "./cloud-management.js";
+import {
+  createCloudClient,
+  getCloudApiKey,
+  normalizeCloudApiBaseUrl,
+} from "./cloud-client.js";
 import {
   RemoteEnvironmentClient,
   type RemoteEnvironmentTarget,
@@ -39,7 +50,6 @@ import {
   validateCloudSandboxOptions,
 } from "./cloud-sandbox.js";
 
-const DEFAULT_CLOUD_API_BASE_URL = "https://api.letta.com";
 const DEFAULT_TURN_TIMEOUT_MS = 120_000;
 const DEFAULT_PING_INTERVAL_MS = 30_000;
 const DEFAULT_SANDBOX_TTL_MINUTES = 5;
@@ -48,8 +58,6 @@ const DEFAULT_SANDBOX_READY_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_REPOSITORY_ATTACH_TIMEOUT_MS = 10_000;
 const DEFAULT_REPOSITORY_ATTACH_POLL_INTERVAL_MS = 250;
 const SDK_AGENT_ORIGIN = "@letta-ai/letta-agent-sdk";
-
-type FetchLike = typeof fetch;
 
 type CloudRuntimeStartResponse = ProtocolMessage & {
   type: "runtime_start_response";
@@ -127,31 +135,6 @@ export class CloudManagedSandboxExpiredError extends Error {
 
 type CloudSessionMode = Extract<RuntimeSessionMode, { kind: "session" }>;
 
-function getDefaultApiKey(): string | undefined {
-  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } })
-    .process?.env;
-  return env?.LETTA_API_KEY ?? env?.LETTA_CLOUD_API_KEY;
-}
-
-function bearerTokenFromHeaders(headers: Record<string, string> | undefined): string | undefined {
-  const authorization = headers?.Authorization ?? headers?.authorization;
-  if (!authorization) return undefined;
-  const match = /^Bearer\s+(.+)$/i.exec(authorization);
-  return match?.[1];
-}
-
-function getCloudApiKey(options: LettaCodeCloudClientOptions): string | undefined {
-  return options.apiKey ?? bearerTokenFromHeaders(options.headers) ?? getDefaultApiKey();
-}
-
-function getFetch(fetchOverride?: FetchLike): FetchLike {
-  const resolved = fetchOverride ?? globalThis.fetch;
-  if (!resolved) {
-    throw new Error("No fetch implementation available for cloud backend.");
-  }
-  return resolved.bind(globalThis) as FetchLike;
-}
-
 function getWebSocketConstructor(
   websocketOverride?: LettaCodeSocketConstructor,
 ): LettaCodeSocketConstructor {
@@ -164,26 +147,6 @@ function getWebSocketConstructor(
   return resolved;
 }
 
-function normalizeCloudApiBaseUrl(url: string | undefined): string {
-  const parsed = new URL(url ?? DEFAULT_CLOUD_API_BASE_URL);
-  parsed.pathname = parsed.pathname.replace(/\/+$/, "");
-  parsed.search = "";
-  parsed.hash = "";
-  return parsed.toString().replace(/\/$/, "");
-}
-
-function cloudHeaders(options: LettaCodeCloudClientOptions): Record<string, string> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(options.headers ?? {}),
-  };
-  const apiKey = getCloudApiKey(options);
-  if (apiKey && !headers.Authorization && !headers.authorization) {
-    headers.Authorization = `Bearer ${apiKey}`;
-  }
-  return headers;
-}
-
 function cloudWebSocketHeaders(options: LettaCodeCloudClientOptions): Record<string, string> | undefined {
   const headers = { ...(options.headers ?? {}) };
   delete headers.authorization;
@@ -193,45 +156,8 @@ function cloudWebSocketHeaders(options: LettaCodeCloudClientOptions): Record<str
   return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
-async function parseJsonResponse(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return text;
-  }
-}
-
-function responseErrorMessage(body: unknown, fallback: string): string {
-  if (body && typeof body === "object") {
-    const record = body as Record<string, unknown>;
-    const message = record.message ?? record.error ?? record.detail;
-    const reasonText = record.reason_text;
-    const pieces = [message, reasonText]
-      .filter((value): value is string => typeof value === "string" && value.length > 0);
-    if (pieces.length > 0) return pieces.join(": ");
-  }
-  return fallback;
-}
-
-function assertOkResponse(response: Response, body: unknown, action: string, url?: string): void {
-  if (!response.ok) {
-    const detail = responseErrorMessage(body, `HTTP ${response.status}`);
-    const parts = [`${action} failed`, detail];
-    if (url) parts.push(`URL: ${url}`);
-    if (response.status === 401 || response.status === 403) {
-      const env = (globalThis as { process?: { env?: Record<string, string | undefined> } })
-        .process?.env;
-      const hasKey = !!(env?.LETTA_API_KEY ?? env?.LETTA_CLOUD_API_KEY);
-      parts.push(
-        hasKey
-          ? "Authentication failed — the API key may be invalid or lack permissions for this resource."
-          : "No API key found. Set LETTA_API_KEY (or pass apiKey in client options).",
-      );
-    }
-    throw new Error(parts.join(" — "));
-  }
+function isNotFound(error: unknown): boolean {
+  return error instanceof APIError && error.status === 404;
 }
 
 function validatePositiveInteger(value: number | undefined, name: string): void {
@@ -352,31 +278,20 @@ function externalToolsByName(tools: AnyAgentTool[] | undefined): Map<string, Any
 }
 
 export async function createCloudAgent(
-  clientOptions: LettaCodeCloudClientOptions,
+  client: Letta,
   agentOptions: CreateAgentOptions,
 ): Promise<string> {
   const body = await createAgentBody(agentOptions);
-
-  // No trailing slash: production api.letta.com 404s `POST /v1/agents/` at
-  // the router (GET tolerates the slash; POST does not).
-  const response = await getFetch(clientOptions.fetch)(
-    `${normalizeCloudApiBaseUrl(clientOptions.apiBaseUrl)}/v1/agents`,
-    {
-      method: "POST",
-      headers: cloudHeaders(clientOptions),
-      body: JSON.stringify(body),
-    },
-  );
-  const responseBody = await parseJsonResponse(response);
-  assertOkResponse(response, responseBody, "Cloud create agent");
-  const agentId =
-    responseBody && typeof responseBody === "object"
-      ? (responseBody as { id?: unknown }).id
-      : undefined;
-  if (typeof agentId !== "string" || agentId.length === 0) {
+  // The generated `agents.create()` currently emits `/v1/agents/`, while the
+  // production POST route requires the slashless form. Keep the canonical
+  // client transport and generated contract without using that broken path.
+  const agent = await client.post<AgentState>("/v1/agents", {
+    body: body as AgentCreateParams,
+  });
+  if (typeof agent.id !== "string" || agent.id.length === 0) {
     throw new Error("Cloud create agent response did not include an agent id.");
   }
-  return agentId;
+  return agent.id;
 }
 
 export function assertCloudSessionOptionsSupported(
@@ -406,13 +321,14 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   constructor(
     private readonly cloudOptions: LettaCodeCloudClientOptions,
     mode: CloudSessionMode,
+    private readonly apiClient: Letta = createCloudClient(cloudOptions),
   ) {
     super(mode, {
       label: "cloud",
       requestTimeoutMs: cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
     });
     this.cloudMode = mode;
-    this.repositoryManagement = new CloudManagementTransport(cloudOptions);
+    this.repositoryManagement = new CloudManagementTransport(apiClient);
     const tools = mode.options.tools;
     this.externalTools = externalToolsByName(tools);
   }
@@ -733,36 +649,23 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   private async createConversation(agentId: string): Promise<{ id: string; agent_id?: string }> {
-    const fetchImpl = getFetch(this.cloudOptions.fetch);
-    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
-    const url = new URL(`${baseUrl}/v1/conversations/`);
-    url.searchParams.set("agent_id", agentId);
-    const response = await fetchImpl(url, {
-      method: "POST",
-      headers: cloudHeaders(this.cloudOptions),
-      body: JSON.stringify({}),
+    const conversation = await this.apiClient.conversations.create({
+      agent_id: agentId,
     });
-    const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud createSession()", url.toString());
-    if (!isCloudConversation(body)) {
+    if (!isCloudConversation(conversation)) {
       throw new Error("Cloud createSession() response did not include a conversation id.");
     }
-    return { id: body.id, agent_id: body.agent_id };
+    return { id: conversation.id, agent_id: conversation.agent_id };
   }
 
   private async retrieveConversation(conversationId: string): Promise<{ id: string; agent_id?: string }> {
-    const fetchImpl = getFetch(this.cloudOptions.fetch);
-    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
-    const response = await fetchImpl(
-      `${baseUrl}/v1/conversations/${encodeURIComponent(conversationId)}`,
-      { headers: cloudHeaders(this.cloudOptions) },
+    const conversation = await this.apiClient.conversations.retrieve(
+      conversationId,
     );
-    const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud resumeSession()", `${baseUrl}/v1/conversations/${encodeURIComponent(conversationId)}`);
-    if (!isCloudConversation(body)) {
+    if (!isCloudConversation(conversation)) {
       throw new Error(`Cloud resumeSession() could not retrieve conversation ${conversationId}.`);
     }
-    return { id: body.id, agent_id: body.agent_id };
+    return { id: conversation.id, agent_id: conversation.agent_id };
   }
 
   private async resolveConnectionForRuntime(
@@ -824,25 +727,19 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     agentId: string,
     conversationId?: string,
   ): Promise<ManagedCloudSandbox> {
-    const fetchImpl = getFetch(this.cloudOptions.fetch);
-    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
     const sandboxOptions = this.resolvedSandboxOptions();
     const githubRepositories = sandboxOptions.githubRepositories;
-    const response = await fetchImpl(
-      `${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/sandboxes`,
+    const body = await this.apiClient.post<unknown>(
+      `/v1/agents/${encodeURIComponent(agentId)}/sandboxes`,
       {
-        method: "POST",
-        headers: cloudHeaders(this.cloudOptions),
-        body: JSON.stringify({
+        body: {
           ...(conversationId ? { conversationId } : {}),
           ...(githubRepositories && githubRepositories.length > 0
             ? { githubRepositories }
             : {}),
-        }),
+        },
       },
     );
-    const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud create managed sandbox", `${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/sandboxes`);
     if (!isCloudAgentSandbox(body)) {
       throw new Error("Cloud create managed sandbox response did not include sandbox connection details.");
     }
@@ -900,22 +797,17 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   private async refreshManagedSandboxOnce(sandbox: ManagedCloudSandbox): Promise<void> {
-    const fetchImpl = getFetch(this.cloudOptions.fetch);
-    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
-
     if (sandbox.conversationId) {
       // Conversation-scoped sandboxes refresh by id — no "latest active"
       // indirection, so ownership changes are structurally impossible.
-      const response = await fetchImpl(
-        `${baseUrl}/v1/sandboxes/${encodeURIComponent(sandbox.sandboxId)}/refresh`,
-        {
-          method: "POST",
-          headers: cloudHeaders(this.cloudOptions),
-          body: JSON.stringify({ ttlMinutes: sandbox.ttlMinutes }),
-        },
-      );
-      if (response.status === 404) {
-        await parseJsonResponse(response);
+      let body: unknown;
+      try {
+        body = await this.apiClient.post(
+          `/v1/sandboxes/${encodeURIComponent(sandbox.sandboxId)}/refresh`,
+          { body: { ttlMinutes: sandbox.ttlMinutes } },
+        );
+      } catch (error) {
+        if (!isNotFound(error)) throw error;
         // The current control and stream WebSockets are bound to this
         // sandbox's ephemeral connection id. Recreating only the sandbox would
         // leave both sockets targeting the dead connection, so surface a
@@ -926,24 +818,18 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
           sandbox.conversationId,
         );
       }
-      const body = await parseJsonResponse(response);
-      assertOkResponse(response, body, "Cloud refresh managed sandbox");
       if (!isCloudAgentSandboxRefresh(body) || !body.success) {
         throw new Error("Cloud refresh managed sandbox response did not confirm refresh.");
       }
       return;
     }
 
-    const response = await fetchImpl(
-      `${baseUrl}/v1/agents/${encodeURIComponent(sandbox.agentId)}/sandboxes/refresh`,
+    const body = await this.apiClient.post<unknown>(
+      `/v1/agents/${encodeURIComponent(sandbox.agentId)}/sandboxes/refresh`,
       {
-        method: "POST",
-        headers: cloudHeaders(this.cloudOptions),
-        body: JSON.stringify({ ttlMinutes: sandbox.ttlMinutes }),
+        body: { ttlMinutes: sandbox.ttlMinutes },
       },
     );
-    const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud refresh managed sandbox", `${baseUrl}/v1/agents/${encodeURIComponent(sandbox.agentId)}/sandboxes/refresh`);
     if (!isCloudAgentSandboxRefresh(body) || !body.success) {
       throw new Error("Cloud refresh managed sandbox response did not confirm refresh.");
     }
@@ -955,23 +841,17 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   private async terminateManagedSandbox(sandbox: ManagedCloudSandbox): Promise<void> {
-    const fetchImpl = getFetch(this.cloudOptions.fetch);
-    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
-
     if (sandbox.conversationId) {
       // Terminate exactly this sandbox — the agent-scoped DELETE targets the
       // agent's "latest active" sandbox, which may not be ours.
-      const response = await fetchImpl(
-        `${baseUrl}/v1/sandboxes/${encodeURIComponent(sandbox.sandboxId)}/terminate`,
-        {
-          method: "POST",
-          headers: cloudHeaders(this.cloudOptions),
-          body: JSON.stringify({}),
-        },
-      );
-      const body = await parseJsonResponse(response);
-      if (response.status === 404) return;
-      assertOkResponse(response, body, "Cloud terminate managed sandbox");
+      try {
+        await this.apiClient.post(
+          `/v1/sandboxes/${encodeURIComponent(sandbox.sandboxId)}/terminate`,
+          { body: {} },
+        );
+      } catch (error) {
+        if (!isNotFound(error)) throw error;
+      }
       return;
     }
 
@@ -979,16 +859,13 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     // "latest active" sandbox the DELETE will target is still ours.
     await this.refreshManagedSandbox(sandbox);
 
-    const response = await fetchImpl(
-      `${baseUrl}/v1/agents/${encodeURIComponent(sandbox.agentId)}/sandboxes`,
-      {
-        method: "DELETE",
-        headers: cloudHeaders(this.cloudOptions),
-      },
-    );
-    const body = await parseJsonResponse(response);
-    if (response.status === 404) return;
-    assertOkResponse(response, body, "Cloud terminate managed sandbox", `${baseUrl}/v1/agents/${encodeURIComponent(sandbox.agentId)}/sandboxes`);
+    try {
+      await this.apiClient.delete(
+        `/v1/agents/${encodeURIComponent(sandbox.agentId)}/sandboxes`,
+      );
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
   }
 
   private async waitForManagedSandboxConnection(
@@ -1064,12 +941,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   private remoteEnvironmentClient(): RemoteEnvironmentClient {
-    return new RemoteEnvironmentClient({
-      baseUrl: this.cloudOptions.apiBaseUrl,
-      apiKey: getCloudApiKey(this.cloudOptions),
-      headers: this.cloudOptions.headers,
-      fetch: this.cloudOptions.fetch,
-    });
+    return new RemoteEnvironmentClient({}, this.apiClient);
   }
 
   private effectiveEnvironment(): LettaCodeEnvironment | undefined {
