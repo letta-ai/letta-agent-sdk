@@ -70,4 +70,29 @@ describe("createAgentBody", () => {
       })).system,
     ).toBe("You are a focused research assistant.");
   });
+
+  test("resolves managed prompt presets for Cloud and app-server creation", async () => {
+    expect(
+      (await createAgentBody({ systemPrompt: "default" })).system,
+    ).toBe(buildSystemPrompt("default", "memfs"));
+    expect(
+      (
+        await createAgentBody({
+          memfs: false,
+          systemPrompt: "letta-codex",
+        })
+      ).system,
+    ).toBe(buildSystemPrompt("letta", "standard"));
+  });
+
+  test("appends caller instructions to a managed prompt without replacing it", async () => {
+    const append = "Do not send progress updates in the embedded widget.";
+    const body = await createAgentBody({
+      systemPrompt: { type: "preset", preset: "default", append },
+    });
+
+    expect(body.system).toBe(
+      `${buildSystemPrompt("default", "memfs")}\n\n${append}`,
+    );
+  });
 });

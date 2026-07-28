@@ -99,6 +99,28 @@ describe("validation", () => {
     }
   });
 
+  test("accepts current and legacy system prompt preset names", () => {
+    for (const preset of [
+      "default",
+      "letta",
+      "source-claude",
+      "source-codex",
+      "source-gemini",
+      "letta-claude",
+      "letta-codex",
+      "letta-gemini",
+      "claude",
+      "codex",
+      "gemini",
+    ] as const) {
+      expect(() =>
+        validateCreateAgentOptions({
+          systemPrompt: { type: "preset", preset, append: "Extra guidance." },
+        }),
+      ).not.toThrow();
+    }
+  });
+
   test("rejects invalid agent skill source", () => {
     expect(() =>
       validateCreateAgentOptions({

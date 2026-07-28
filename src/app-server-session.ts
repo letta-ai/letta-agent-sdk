@@ -51,6 +51,8 @@ import type {
   RecoverPendingApprovalsOptions,
   RecoverPendingApprovalsResult,
   SendMessage,
+  SystemPromptPreset,
+  SystemPromptConfig,
   UpdateModelResult,
 } from "./types.js";
 
@@ -99,16 +101,41 @@ export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
 
 export type AppServerSessionMode = RuntimeSessionMode;
 
-function isPresetSystemPrompt(value: string): boolean {
-  return [
-    "default",
-    "letta-claude",
-    "letta-codex",
-    "letta-gemini",
-    "claude",
-    "codex",
-    "gemini",
-  ].includes(value);
+const SYSTEM_PROMPT_PRESET_IDS = {
+  default: "default",
+  letta: "letta",
+  "source-claude": "source-claude",
+  "source-codex": "source-codex",
+  "source-gemini": "source-gemini",
+  "letta-claude": "letta",
+  "letta-codex": "letta",
+  "letta-gemini": "letta",
+  claude: "source-claude",
+  codex: "source-codex",
+  gemini: "source-gemini",
+} as const satisfies Record<SystemPromptPreset, string>;
+
+function isPresetSystemPrompt(value: string): value is SystemPromptPreset {
+  return Object.hasOwn(SYSTEM_PROMPT_PRESET_IDS, value);
+}
+
+function resolveSystemPrompt(
+  config: SystemPromptConfig,
+  memoryMode: "memfs" | "standard",
+): string {
+  if (typeof config === "string") {
+    return isPresetSystemPrompt(config)
+      ? buildSystemPrompt(SYSTEM_PROMPT_PRESET_IDS[config], memoryMode)
+      : config;
+  }
+
+  const base = buildSystemPrompt(
+    SYSTEM_PROMPT_PRESET_IDS[config.preset],
+    memoryMode,
+  );
+  return config.append === undefined || config.append.length === 0
+    ? base
+    : `${base}\n\n${config.append}`;
 }
 
 function assertRemoteCreateAgentOptionsSupported(options: CreateAgentOptions): void {
@@ -187,14 +214,10 @@ export async function createAgentBody(
       body.system = buildSystemPrompt("default", "standard");
     }
   } else {
-    if (typeof options.systemPrompt === "string") {
-      if (isPresetSystemPrompt(options.systemPrompt)) {
-        throw new Error("createAgent() does not yet support system prompt presets for this backend.");
-      }
-      body.system = options.systemPrompt;
-    } else {
-      throw new Error("createAgent() does not yet support system prompt preset objects for this backend.");
-    }
+    body.system = resolveSystemPrompt(
+      options.systemPrompt,
+      options.memfs === false ? "standard" : "memfs",
+    );
   }
 
   const hasMemoryConfiguration =
