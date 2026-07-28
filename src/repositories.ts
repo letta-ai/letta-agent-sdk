@@ -1,3 +1,5 @@
+import type Letta from "@letta-ai/letta-client";
+import { createCloudClient } from "./cloud-client.js";
 import type {
   CreateRepositoryFileParams,
   CreateRepositoryParams,
@@ -16,81 +18,6 @@ import type {
   RepositoryVersion,
   UpdateRepositoryFileParams,
 } from "./types.js";
-
-const DEFAULT_CLOUD_API_BASE_URL = "https://api.letta.com";
-
-type FetchLike = typeof fetch;
-
-function getDefaultApiKey(): string | undefined {
-  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } })
-    .process?.env;
-  return env?.LETTA_API_KEY ?? env?.LETTA_CLOUD_API_KEY;
-}
-
-function bearerTokenFromHeaders(headers: Record<string, string> | undefined): string | undefined {
-  const authorization = headers?.Authorization ?? headers?.authorization;
-  if (!authorization) return undefined;
-  const match = /^Bearer\s+(.+)$/i.exec(authorization);
-  return match?.[1];
-}
-
-function getCloudApiKey(options: LettaCodeCloudClientOptions): string | undefined {
-  return options.apiKey ?? bearerTokenFromHeaders(options.headers) ?? getDefaultApiKey();
-}
-
-function getFetch(fetchOverride?: FetchLike): FetchLike {
-  const resolved = fetchOverride ?? globalThis.fetch;
-  if (!resolved) throw new Error("No fetch implementation available for cloud backend.");
-  return resolved.bind(globalThis) as FetchLike;
-}
-
-function normalizeCloudApiBaseUrl(url: string | undefined): string {
-  const parsed = new URL(url ?? DEFAULT_CLOUD_API_BASE_URL);
-  parsed.pathname = parsed.pathname.replace(/\/+$/, "");
-  parsed.search = "";
-  parsed.hash = "";
-  return parsed.toString().replace(/\/$/, "");
-}
-
-function cloudHeaders(options: LettaCodeCloudClientOptions): Record<string, string> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(options.headers ?? {}),
-  };
-  const apiKey = getCloudApiKey(options);
-  if (apiKey && !headers.Authorization && !headers.authorization) {
-    headers.Authorization = `Bearer ${apiKey}`;
-  }
-  return headers;
-}
-
-async function parseJsonResponse(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return text;
-  }
-}
-
-function responseErrorMessage(body: unknown, fallback: string): string {
-  if (body && typeof body === "object") {
-    const record = body as Record<string, unknown>;
-    const message = record.message ?? record.error ?? record.detail;
-    const reasonText = record.reason_text;
-    const pieces = [message, reasonText]
-      .filter((value): value is string => typeof value === "string" && value.length > 0);
-    if (pieces.length > 0) return pieces.join(": ");
-  }
-  return fallback;
-}
-
-function assertOkResponse(response: Response, body: unknown, action: string): void {
-  if (!response.ok) {
-    throw new Error(responseErrorMessage(body, `${action} failed with HTTP ${response.status}`));
-  }
-}
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
@@ -131,17 +58,20 @@ function addOptionalSearchParam(url: URL, key: string, value: string | number | 
 }
 
 export class RepositoriesClient {
-  constructor(private readonly options: LettaCodeCloudClientOptions) {}
+  constructor(
+    options: LettaCodeCloudClientOptions,
+    private readonly client: Letta = createCloudClient(options),
+  ) {}
 
   async create(params: CreateRepositoryParams): Promise<Repository> {
-    return toRepository(await this.request("/v1/repositories", "POST", { name: params.name }, "Cloud create repository"));
+    return toRepository(await this.request("/v1/repositories", "POST", { name: params.name }));
   }
 
   async list(params: ListRepositoriesParams = {}): Promise<ListRepositoriesResult> {
     const url = this.url("/v1/repositories");
     addOptionalSearchParam(url, "limit", params.limit);
     addOptionalSearchParam(url, "offset", params.offset);
-    const body = await this.requestUrl(url, "GET", undefined, "Cloud list repositories");
+    const body = await this.requestUrl(url, "GET", undefined);
     if (!body || typeof body !== "object") {
       throw new Error("Cloud list repositories response did not include repositories.");
     }
@@ -156,7 +86,7 @@ export class RepositoriesClient {
   }
 
   async get(repositoryId: string): Promise<Repository> {
-    return toRepository(await this.request(`/v1/repositories/${encodeURIComponent(repositoryId)}`, "GET", undefined, "Cloud get repository"));
+    return toRepository(await this.request(`/v1/repositories/${encodeURIComponent(repositoryId)}`, "GET", undefined));
   }
 
   /**
@@ -169,7 +99,6 @@ export class RepositoriesClient {
       `/v1/repositories/${encodeURIComponent(repositoryId)}`,
       "DELETE",
       undefined,
-      "Cloud delete repository",
     );
   }
 
@@ -182,7 +111,7 @@ export class RepositoriesClient {
       addOptionalSearchParam(url, "path_prefix", params.pathPrefix);
       addOptionalSearchParam(url, "depth", params.depth);
       addOptionalSearchParam(url, "ref", params.ref);
-      const body = await this.requestUrl(url, "GET", undefined, "Cloud list repository files");
+      const body = await this.requestUrl(url, "GET", undefined);
       if (!body || typeof body !== "object") {
         throw new Error("Cloud list repository files response did not include files.");
       }
@@ -210,14 +139,13 @@ export class RepositoriesClient {
       `/v1/repositories/${encodeURIComponent(repositoryId)}/files`,
       "POST",
       { path: params.path, content: params.content },
-      "Cloud create repository file",
     )),
 
     read: async (repositoryId: string, params: { path: string; ref?: string }): Promise<RepositoryFile> => {
       const url = this.url(`/v1/repositories/${encodeURIComponent(repositoryId)}/files/content`);
       url.searchParams.set("path", params.path);
       addOptionalSearchParam(url, "ref", params.ref);
-      const body = await this.requestUrl(url, "GET", undefined, "Cloud read repository file");
+      const body = await this.requestUrl(url, "GET", undefined);
       if (!body || typeof body !== "object") {
         throw new Error("Cloud read repository file response did not include file content.");
       }
@@ -249,7 +177,6 @@ export class RepositoriesClient {
           }
           : {}),
       },
-      "Cloud update repository file",
     )),
 
     delete: async (
@@ -260,7 +187,6 @@ export class RepositoriesClient {
         `/v1/repositories/${encodeURIComponent(repositoryId)}/files/content`,
         "DELETE",
         { path: params.path },
-        "Cloud delete repository file",
       );
       if (!body || typeof body !== "object") {
         throw new Error("Cloud delete repository file response did not include delete details.");
@@ -278,7 +204,7 @@ export class RepositoriesClient {
       const url = this.url(`/v1/repositories/${encodeURIComponent(repositoryId)}/versions`);
       addOptionalSearchParam(url, "path", params.path);
       addOptionalSearchParam(url, "limit", params.limit);
-      const body = await this.requestUrl(url, "GET", undefined, "Cloud list repository versions");
+      const body = await this.requestUrl(url, "GET", undefined);
       if (Array.isArray(body)) return body as RepositoryVersion[];
       if (body && typeof body === "object") {
         const record = body as Record<string, unknown>;
@@ -295,7 +221,7 @@ export class RepositoriesClient {
     ): Promise<RepositoryFile> => {
       const url = this.url(`/v1/repositories/${encodeURIComponent(repositoryId)}/versions/${encodeURIComponent(sha)}`);
       url.searchParams.set("path", params.path);
-      const body = await this.requestUrl(url, "GET", undefined, "Cloud get repository version");
+      const body = await this.requestUrl(url, "GET", undefined);
       if (!body || typeof body !== "object") {
         throw new Error("Cloud get repository version response did not include file content.");
       }
@@ -310,31 +236,32 @@ export class RepositoriesClient {
   };
 
   private url(path: string): URL {
-    return new URL(`${normalizeCloudApiBaseUrl(this.options.apiBaseUrl)}${path}`);
+    return new URL(`${this.client.baseURL}${path}`);
   }
 
   private async request(
     path: string,
     method: string,
     body: unknown,
-    action: string,
   ): Promise<unknown> {
-    return this.requestUrl(this.url(path), method, body, action);
+    return this.requestUrl(this.url(path), method, body);
   }
 
   private async requestUrl(
     url: URL,
     method: string,
     body: unknown,
-    action: string,
   ): Promise<unknown> {
-    const response = await getFetch(this.options.fetch)(url, {
-      method,
-      headers: cloudHeaders(this.options),
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    });
-    const parsed = await parseJsonResponse(response);
-    assertOkResponse(response, parsed, action);
-    return parsed;
+    const options = body !== undefined ? { body } : undefined;
+    switch (method) {
+      case "GET":
+        return this.client.get(url.toString(), options);
+      case "POST":
+        return this.client.post(url.toString(), options);
+      case "DELETE":
+        return this.client.delete(url.toString(), options);
+      default:
+        throw new Error(`Unsupported repository request method: ${method}`);
+    }
   }
 }

@@ -155,7 +155,7 @@ describe("client.agents.repositories", () => {
       {
         path: "/v1/agents/agent-1/recompile",
         method: "POST",
-        body: {},
+        body: undefined,
       },
     ]);
   });
@@ -262,13 +262,15 @@ describe("client.agents.repositories", () => {
     await expect(
       client.agents.repositories.attach("agent-1", "repo-1"),
     ).rejects.toThrow(
-      "Cloud recompile system prompt failed — Prompt compilation failed: Repository projection unavailable",
+      '500 {"detail":"Prompt compilation failed","reason_text":"Repository projection unavailable"}',
     );
-    expect(requests.map(({ method }) => method)).toEqual([
+    expect(requests.slice(0, 2).map(({ method }) => method)).toEqual([
       "POST",
       "GET",
-      "POST",
     ]);
+    expect(requests.slice(2).every(({ url, method }) =>
+      method === "POST" && url.pathname.endsWith("/recompile")
+    )).toBe(true);
   });
 
   test("does not poll or recompile when attachment fails", async () => {

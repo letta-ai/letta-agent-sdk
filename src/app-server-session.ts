@@ -4,12 +4,20 @@ import {
   type AppServerExternalToolCallHandler,
   type AppServerSocketConstructor,
 } from "@letta-ai/letta-code/app-server-client";
+import type {
+  ConversationMessagesListResponseMessage,
+  ConversationRetrieveResponseMessage,
+  ListModelsResponseMessage,
+  RuntimeStartResponseMessage,
+  UpdateModelResponseMessage,
+} from "@letta-ai/letta-code/app-server-protocol";
 import {
   buildCreateAgentRequestForPersonality,
   buildSystemPrompt,
   GIT_MEMORY_ENABLED_TAG,
   LETTA_CODE_ORIGIN_TAG,
 } from "@letta-ai/letta-code/agent-presets";
+import { normalizeAppServerModels } from "./app-server-models.js";
 import {
   buildCanUseToolContext,
   isHeadlessAutoAllowTool,
@@ -46,55 +54,14 @@ import type {
   UpdateModelResult,
 } from "./types.js";
 
-type RuntimeStartResponse = ProtocolMessage & {
-  type: "runtime_start_response";
-  success: boolean;
-  runtime: RuntimeScope | null;
-  agent: (Record<string, unknown> & {
-    id?: string;
-    model?: string | null;
-    model_settings?: Record<string, unknown> | null;
-  }) | null;
-  conversation: (Record<string, unknown> & { id?: string; agent_id?: string }) | null;
-  error?: string;
-};
-
-type ConversationRetrieveResponse = ProtocolMessage & {
-  type: "conversation_retrieve_response";
-  success: boolean;
-  conversation: (Record<string, unknown> & { id?: string; agent_id?: string }) | null;
-  error?: string;
-};
-
-type ConversationMessagesListResponse = ProtocolMessage & {
-  type: "conversation_messages_list_response";
-  success: boolean;
-  messages: unknown[];
-  next_before?: string | null;
+type ConversationMessagesListResponse = ConversationMessagesListResponseMessage &
+  ProtocolMessage & {
   nextBefore?: string | null;
-  has_more?: boolean;
   hasMore?: boolean;
-  error?: string;
 };
 
-type ListModelsResponse = ProtocolMessage & {
-  type: "list_models_response";
-  success: boolean;
-  entries?: unknown;
-  available_handles?: unknown;
-  byok_provider_aliases?: unknown;
-  error?: string;
-};
-
-type UpdateModelResponse = ProtocolMessage & {
-  type: "update_model_response";
-  success: boolean;
-  applied_to?: unknown;
-  model_id?: unknown;
-  model_handle?: unknown;
-  model_settings?: unknown;
-  error?: string;
-};
+type ListModelsResponse = ListModelsResponseMessage & ProtocolMessage;
+type UpdateModelResponse = UpdateModelResponseMessage & ProtocolMessage;
 
 type UpdateModelPayload = {
   model_id?: string;
@@ -104,9 +71,9 @@ type UpdateModelPayload = {
 type RuntimeStartCommand = Parameters<AppServerClient["runtimeStart"]>[0];
 
 export function agentToolNames(
-  agent: Record<string, unknown> | null | undefined,
+  agent: object | null | undefined,
 ): string[] | undefined {
-  const tools = agent?.tools;
+  const tools = agent && "tools" in agent ? agent.tools : undefined;
   if (!Array.isArray(tools)) return undefined;
   return tools.flatMap((tool) => {
     if (typeof tool === "string" && tool.length > 0) return [tool];
@@ -414,82 +381,29 @@ export function toAppServerApprovalDecision(
   };
 }
 
-function stringRecord(value: unknown): Record<string, string> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const record: Record<string, string> = {};
-  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof entry === "string") record[key] = entry;
-  }
-  return record;
-}
-
 function objectRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   return { ...(value as Record<string, unknown>) };
 }
 
-function normalizeListModelsResponse(response: ListModelsResponse): ListModelsResult {
-  if (!response.success) {
-    throw new Error(response.error ?? "listModels failed");
-  }
-
-  const entries = Array.isArray(response.entries)
-    ? response.entries.flatMap((entry) => {
-        if (!entry || typeof entry !== "object") return [];
-        const record = entry as Record<string, unknown>;
-        if (
-          typeof record.id !== "string" ||
-          typeof record.handle !== "string" ||
-          typeof record.label !== "string" ||
-          typeof record.description !== "string"
-        ) {
-          return [];
-        }
-        const updateArgs = objectRecord(record.updateArgs);
-        return [
-          {
-            id: record.id,
-            handle: record.handle,
-            label: record.label,
-            description: record.description,
-            ...(typeof record.isDefault === "boolean" ? { isDefault: record.isDefault } : {}),
-            ...(typeof record.isFeatured === "boolean" ? { isFeatured: record.isFeatured } : {}),
-            ...(typeof record.free === "boolean" ? { free: record.free } : {}),
-            ...(updateArgs ? { updateArgs } : {}),
-          },
-        ];
-      })
-    : [];
-
-  const result: ListModelsResult = { entries };
-  if (response.available_handles === null) {
-    result.availableHandles = null;
-  } else if (Array.isArray(response.available_handles)) {
-    result.availableHandles = response.available_handles.filter(
-      (handle): handle is string => typeof handle === "string",
-    );
-  }
-  const aliases = stringRecord(response.byok_provider_aliases);
-  if (aliases) result.byokProviderAliases = aliases;
-  return result;
-}
-
-function normalizeUpdateModelResponse(response: UpdateModelResponse): UpdateModelResult {
+function normalizeUpdateModelResponse(
+  response: UpdateModelResponseMessage,
+): UpdateModelResult {
   if (!response.success) {
     throw new Error(response.error ?? "Failed to update model");
   }
-  const result: UpdateModelResult = {};
-  if (response.applied_to === "agent" || response.applied_to === "conversation") {
-    result.appliedTo = response.applied_to;
-  }
-  if (typeof response.model_id === "string") result.modelId = response.model_id;
-  if (typeof response.model_handle === "string") result.modelHandle = response.model_handle;
-  if (response.model_settings === null) {
-    result.modelSettings = null;
-  } else if (response.model_settings && typeof response.model_settings === "object") {
-    result.modelSettings = { ...(response.model_settings as Record<string, unknown>) };
-  }
-  return result;
+  return {
+    ...(response.applied_to !== undefined
+      ? { appliedTo: response.applied_to }
+      : {}),
+    ...(response.model_id !== undefined ? { modelId: response.model_id } : {}),
+    ...(response.model_handle !== undefined
+      ? { modelHandle: response.model_handle }
+      : {}),
+    ...(response.model_settings !== undefined
+      ? { modelSettings: response.model_settings }
+      : {}),
+  };
 }
 
 function runtimeScopeFromMessage(message: ProtocolMessage): RuntimeScope | null {
@@ -603,43 +517,52 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
     await this.client.abort({ runtime } as Parameters<AppServerClient["abort"]>[0]);
   }
 
-  request(
+  request<TResponse extends ProtocolMessage = ProtocolMessage>(
     type: string,
     body: Record<string, unknown>,
     options: { timeoutMs?: number; predicate?: (message: ProtocolMessage) => boolean } = {},
-  ): Promise<ProtocolMessage> {
-    const request = this.client.request.bind(this.client) as unknown as (
-      commandType: string,
-      commandBody: Record<string, unknown>,
-      requestOptions?: {
-        timeoutMs?: number;
-        predicate?: (message: ProtocolMessage) => boolean;
+  ): Promise<TResponse> {
+    return this.client.requestRaw<TResponse>(
+      {
+        type,
+        request_id: this.client.nextRequestId(type),
+        ...body,
       },
-    ) => Promise<ProtocolMessage>;
-    return request(type, body, options);
+      {
+        ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+        predicate: (message): message is TResponse => {
+          if (!message || typeof message !== "object" || Array.isArray(message)) {
+            return false;
+          }
+          const candidate = message as ProtocolMessage;
+          return typeof candidate.type === "string" &&
+            (options.predicate?.(candidate) ?? true);
+        },
+      },
+    );
   }
 
   async listModels(): Promise<ListModelsResult> {
-    const response = (await this.request(
+    const response = await this.request<ListModelsResponse>(
       "list_models",
       {},
       { predicate: (message) => message.type === "list_models_response" },
-    )) as ListModelsResponse;
-    return normalizeListModelsResponse(response);
+    );
+    return normalizeAppServerModels(response);
   }
 
   async updateModel(
     runtime: RuntimeScope,
     payload: UpdateModelPayload,
   ): Promise<UpdateModelResult> {
-    const response = (await this.request(
+    const response = await this.request<UpdateModelResponse>(
       "update_model",
       {
         runtime,
         payload,
       },
       { predicate: (message) => message.type === "update_model_response" },
-    )) as UpdateModelResponse;
+    );
     return normalizeUpdateModelResponse(response);
   }
 
@@ -677,14 +600,14 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
     if (options.order !== undefined) query.order = options.order;
     if (options.limit !== undefined) query.limit = options.limit;
 
-    const response = (await this.request(
+    const response = await this.request<ConversationMessagesListResponse>(
       "conversation_messages_list",
       {
         conversation_id: conversationId,
         ...(Object.keys(query).length > 0 ? { query } : {}),
       },
       { predicate: (message) => message.type === "conversation_messages_list_response" },
-    )) as ConversationMessagesListResponse;
+    );
 
     if (!response.success) {
       throw new Error(response.error ?? "listMessages failed");
@@ -784,7 +707,7 @@ export class AppServerSession extends RemoteClientSessionCore {
         ),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
-        modelSettings: response.agent?.model_settings ?? null,
+        modelSettings: objectRecord(response.agent?.model_settings) ?? null,
         ...(tools !== undefined ? { tools } : {}),
         ...(skillSources !== undefined ? { skillSources: [...skillSources] } : {}),
       };
@@ -822,10 +745,11 @@ export class AppServerSession extends RemoteClientSessionCore {
     return connection.url;
   }
 
-  private async startRuntime(client: AppServerClient): Promise<RuntimeStartResponse> {
+  private async startRuntime(
+    client: AppServerClient,
+  ): Promise<RuntimeStartResponseMessage> {
     const command = await this.buildRuntimeStartCommand(client);
-    const response = (await client.runtimeStart(command)) as unknown as RuntimeStartResponse;
-    return response;
+    return client.runtimeStart(command);
   }
 
   private async buildRuntimeStartCommand(client: AppServerClient): Promise<RuntimeStartCommand> {
@@ -897,16 +821,17 @@ export class AppServerSession extends RemoteClientSessionCore {
     client: AppServerClient,
     conversationId: string,
   ): Promise<string> {
-    const request = client.request.bind(client) as unknown as (
-      commandType: string,
-      commandBody: Record<string, unknown>,
-      options?: { predicate?: (message: ProtocolMessage) => boolean },
-    ) => Promise<ProtocolMessage>;
-    const response = (await request(
-      "conversation_retrieve",
-      { conversation_id: conversationId },
-      { predicate: (message) => message.type === "conversation_retrieve_response" },
-    )) as ConversationRetrieveResponse;
+    const response = await client.request<ConversationRetrieveResponseMessage>(
+      {
+        type: "conversation_retrieve",
+        request_id: client.nextRequestId("conversation_retrieve"),
+        conversation_id: conversationId,
+      },
+      {
+        predicate: (message): message is ConversationRetrieveResponseMessage =>
+          message.type === "conversation_retrieve_response",
+      },
+    );
     if (!response.success || !response.conversation?.agent_id) {
       throw new Error(response.error ?? `Failed to retrieve conversation ${conversationId}`);
     }

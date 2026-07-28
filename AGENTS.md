@@ -33,6 +33,41 @@ the selected transport adapter.
 Those methods operate at different layers and should not be combined merely
 because they share a name.
 
+## Cloud API ownership
+
+- `@letta-ai/letta-code` owns the agent harness, app-server protocol, runtime
+  lifecycle, and tool execution boundary.
+- `@letta-ai/letta-client` owns Letta API HTTP contracts, authentication,
+  headers, retries, pagination, and API errors. Declare it as a direct
+  dependency when importing it; do not rely on Letta Code's transitive copy.
+- Before adding a Cloud REST call, inspect the installed generated client. Use
+  the generated resource method when it covers the endpoint.
+- When an endpoint is not generated yet, use the shared Letta client's typed
+  `get`/`post`/`patch`/`delete` method and validate the ungenerated response at
+  that boundary. Do not add raw `fetch`, URL/auth/header helpers, response
+  parsers, retry loops, or parallel HTTP error types.
+- `LettaAgentClientBase` owns one lazy Cloud client and injects it into
+  management, repository, environment, and session code. New Cloud REST
+  surfaces should reuse that instance. WebSocket transport remains separate.
+- Keep the public management types portable across Cloud and app-server
+  backends. Generated Cloud types belong at the Cloud transport seam; do not
+  narrow the shared facade to shapes that the app-server protocol cannot
+  promise.
+- Reuse generated Letta entity, request, and response types whenever the SDK
+  contract has the same semantics. Camel-case SDK facades may rename fields,
+  but their value types should derive from the generated params. Do not mirror
+  generated entities as partial `Record<string, unknown>` shapes or rewrite
+  app-server envelopes already exported by `app-server-protocol`.
+- Verify generated route paths against the live API before introducing or
+  preserving a generic-request exception. Server routing evolves: a mismatch
+  proven in an older PR may no longer exist. Prefer the generated resource as
+  soon as its live route works, and delete the workaround rather than
+  fossilizing it in new architecture.
+
+After changing this boundary, run `bun run check`, `bun test`, and
+`bun run build`. If path behavior changed, run the narrow live route test too;
+do not infer POST/DELETE slash behavior from a successful GET.
+
 ## Change discipline
 
 - Keep transport parsing out of the session facade.

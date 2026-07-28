@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { Message } from "@letta-ai/letta-client/resources/agents/messages";
 import {
   CloudManagedSandboxExpiredError,
   LettaAgentClient,
@@ -15,6 +16,13 @@ type RecordedRequest = {
   method: string;
   headers: Record<string, string>;
   body?: unknown;
+};
+
+const RUNTIME_MESSAGE_FIXTURE: Message = {
+  id: "msg-from-runtime",
+  content: "hello",
+  date: "2026-07-28T00:00:00Z",
+  message_type: "user_message",
 };
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
@@ -74,8 +82,7 @@ function createCloudFetchMock(
       body: bodyOf(init),
     });
 
-    // Mirrors production routing: `POST /v1/agents/` (trailing slash) 404s.
-    if (parsed.pathname === "/v1/agents" && method === "POST") {
+    if (parsed.pathname === "/v1/agents/" && method === "POST") {
       return Promise.resolve(jsonResponse({ id: "agent-created" }));
     }
 
@@ -378,7 +385,7 @@ class FakeCloudSocket {
         request_id: command.request_id,
         runtime: command.runtime,
         success: true,
-        messages: [{ id: "msg-from-runtime" }],
+        messages: [RUNTIME_MESSAGE_FIXTURE],
       });
       return;
     }
@@ -1003,7 +1010,7 @@ describe("CloudEnvironmentSession", () => {
     expect(requests).toContainEqual(expect.objectContaining({
       method: "POST",
       url: "https://api.test/v1/agents/agent-1/recompile",
-      body: {},
+      body: undefined,
     }));
     expect(requests).toContainEqual(expect.objectContaining({
       method: "DELETE",
@@ -1075,7 +1082,7 @@ describe("CloudEnvironmentSession", () => {
     });
 
     await expect(asAdvanced(session).initialize()).rejects.toThrow(
-      "Cloud recompile system prompt failed — recompile failed",
+      '500 {"error":"recompile failed"}',
     );
     expect(requests).toContainEqual(expect.objectContaining({
       method: "DELETE",
@@ -1298,7 +1305,7 @@ describe("CloudEnvironmentSession", () => {
     expect(requests).toContainEqual(expect.objectContaining({
       method: "POST",
       url: "https://api.test/v1/agents/agent-1/recompile",
-      body: {},
+      body: undefined,
     }));
     expect(requests.filter((request) =>
       request.method === "DELETE" &&
@@ -1729,7 +1736,7 @@ describe("CloudEnvironmentSession", () => {
     const session = client.resumeSession("agent-1");
     try {
       const page = await session.listMessages({ limit: 1 });
-      expect(page.messages).toEqual([{ id: "msg-from-runtime" }]);
+      expect(page.messages).toEqual([RUNTIME_MESSAGE_FIXTURE]);
       expect(page.hasMore).toBeUndefined();
       expect(page.nextBefore).toBeUndefined();
       expect(requests.some((request) =>
@@ -1761,7 +1768,7 @@ describe("CloudEnvironmentSession", () => {
     const session = client.resumeSession("conv-1");
     try {
       const page = await session.listMessages({ limit: 2, order: "desc" });
-      expect(page.messages).toEqual([{ id: "msg-from-runtime" }]);
+      expect(page.messages).toEqual([RUNTIME_MESSAGE_FIXTURE]);
       expect(
         requests.some((request) =>
           new URL(request.url).pathname === "/v1/conversations/conv-1/messages"
@@ -1798,7 +1805,7 @@ describe("CloudEnvironmentSession", () => {
         session.listMessages({ limit: 1 }),
         session.send("hello"),
       ]);
-      expect(page.messages).toEqual([{ id: "msg-from-runtime" }]);
+      expect(page.messages).toEqual([RUNTIME_MESSAGE_FIXTURE]);
 
       // A single control+stream pair and a single runtime_start: the second
       // caller joins the in-flight initialize instead of reconnecting.
@@ -1827,7 +1834,7 @@ describe("CloudEnvironmentSession", () => {
     const session = client.resumeSession("agent-1");
     try {
       const page = await session.listMessages({ conversationId: "conv-explicit", limit: 1 });
-      expect(page.messages).toEqual([{ id: "msg-from-runtime" }]);
+      expect(page.messages).toEqual([RUNTIME_MESSAGE_FIXTURE]);
       expect(
         requests.some((request) =>
           new URL(request.url).pathname === "/v1/conversations/conv-explicit/messages"
@@ -1864,7 +1871,7 @@ describe("CloudEnvironmentSession", () => {
       expect(state).toMatchObject({
         agentId: "agent-from-conv",
         conversationId: "conv-1",
-        messages: [{ id: "msg-from-runtime" }],
+        messages: [RUNTIME_MESSAGE_FIXTURE],
       });
       expect(state.hasMore).toBeUndefined();
       expect(state.nextBefore).toBeUndefined();
@@ -1939,8 +1946,7 @@ describe("CloudEnvironmentSession", () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
-      // No trailing slash — production 404s `POST /v1/agents/`.
-      url: "https://api.test/v1/agents",
+      url: "https://api.test/v1/agents/",
       method: "POST",
       headers: {
         authorization: "Bearer sk-test",

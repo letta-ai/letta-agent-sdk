@@ -63,9 +63,9 @@ describe("RemoteEnvironmentClient", () => {
     });
 
     expect(requests).toHaveLength(1);
-    expect(requests[0]!.init?.headers).toMatchObject({
-      Authorization: "Bearer sk-test",
-    });
+    expect(new Headers(requests[0]!.init?.headers).get("authorization")).toBe(
+      "Bearer sk-test",
+    );
   });
 
   test("rejects ambiguous connection names instead of guessing", async () => {

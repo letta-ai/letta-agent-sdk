@@ -6,7 +6,11 @@
  */
 
 import type { PersonalityId } from "@letta-ai/letta-code/agent-presets";
+import type { ListModelsResponseModelEntry } from "@letta-ai/letta-code/app-server-protocol";
+import type { Message as LettaMessage } from "@letta-ai/letta-client/resources/agents/messages";
+import type { CreateBlock } from "@letta-ai/letta-client/resources/blocks/blocks";
 import type { LettaCodeCloudSandboxOptions } from "./cloud-sandbox.js";
+export type { CreateBlock } from "@letta-ai/letta-client/resources/blocks/blocks";
 export type {
   GitHubRepositoryRef,
   LettaCodeCloudSandboxOptions,
@@ -14,26 +18,6 @@ export type {
 
 /** Letta Code personality preset used to seed a new agent. */
 export type LettaCodePersonalityId = PersonalityId;
-
-/** Custom memory block definition accepted when creating agents. */
-export interface CreateBlock {
-  label: string;
-  value: string;
-  base_template_id?: string | null;
-  deployment_id?: string | null;
-  description?: string | null;
-  entity_id?: string | null;
-  hidden?: boolean | null;
-  is_template?: boolean;
-  limit?: number;
-  metadata?: Record<string, unknown> | null;
-  preserve_on_migration?: boolean | null;
-  project_id?: string | null;
-  read_only?: boolean;
-  tags?: string[] | null;
-  template_id?: string | null;
-  template_name?: string | null;
-}
 
 export interface LettaCodeSocketLike {
   readyState: number;
@@ -564,16 +548,7 @@ export type ReasoningEffort =
   | "high"
   | "xhigh";
 
-export type LettaCodeModelEntry = Record<string, unknown> & {
-  id: string;
-  handle: string;
-  label: string;
-  description: string;
-  isDefault?: boolean;
-  isFeatured?: boolean;
-  free?: boolean;
-  updateArgs?: Record<string, unknown>;
-};
+export type LettaCodeModelEntry = ListModelsResponseModelEntry;
 
 export interface ListModelsResult {
   entries: LettaCodeModelEntry[];
@@ -1223,7 +1198,7 @@ export interface ListMessagesOptions {
  * authoritative pagination answer.
  */
 export interface ListMessagesResult {
-  messages: unknown[];
+  messages: LettaMessage[];
   /** ID of the oldest message in this page; use as `before` for the next page when present. */
   nextBefore?: string | null;
   /** Whether more pages exist in the requested direction, when known. */
@@ -1263,7 +1238,7 @@ export interface BootstrapStateResult {
   /** Whether memfs (git-backed memory) is enabled, when known. */
   memfsEnabled?: boolean;
   /** Initial history page (same shape as listMessages.messages). */
-  messages: unknown[];
+  messages: LettaMessage[];
   /** Cursor to fetch older messages. Null when the backend knows there are no more pages. */
   nextBefore?: string | null;
   /** Whether more history pages exist, when known. */
