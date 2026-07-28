@@ -538,7 +538,8 @@ export type CanUseToolCallback = (
 export type PermissionMode =
   | "standard"
   | "acceptEdits"
-  | "unrestricted";
+  | "unrestricted"
+  | "strict";
 
 export type ReasoningEffort =
   | "none"
