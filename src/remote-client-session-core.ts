@@ -92,6 +92,8 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     this.turns = new RemoteTurnCoordinator({
       label: config.label,
       requestTimeoutMs: config.requestTimeoutMs,
+      autoHandlesToolApprovals:
+        mode.kind === "session" && typeof mode.options.canUseTool === "function",
       onDeviceStatus: (status) => this.emitDeviceStatus(status),
     });
   }

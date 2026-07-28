@@ -35,6 +35,7 @@ class FakeAppServerSocket {
   static inputScenario:
     | "normal"
     | "autoApprovalContinuation"
+    | "delayedApprovalRequest"
     | "manualApprovalWait"
     | "queuedSecond"
     | "hang" = "normal";
@@ -500,6 +501,102 @@ function fakeAppServerHandle(
           stop_reason: "end_turn",
           run_id: "run-final",
         },
+      });
+      return;
+    }
+
+    if (FakeAppServerSocket.inputScenario === "delayedApprovalRequest") {
+      const payload = command.payload as { kind?: string };
+      if (payload.kind === "approval_response") {
+        emitStream({
+          type: "update_loop_status",
+          runtime,
+          loop_status: {
+            status: "EXECUTING_CLIENT_SIDE_TOOL",
+            active_run_ids: ["run-approval"],
+          },
+        });
+        emitStream({
+          type: "stream_delta",
+          runtime,
+          delta: {
+            id: "tool-result-1",
+            message_type: "tool_return_message",
+            tool_call_id: "call-1",
+            tool_return: "ok",
+            status: "success",
+            run_id: "run-approval",
+          },
+        });
+        emitStream({
+          type: "stream_delta",
+          runtime,
+          delta: {
+            id: "msg-after-tool",
+            message_type: "assistant_message",
+            content: "done after delayed approval",
+            run_id: "run-final",
+          },
+        });
+        emitStream({
+          type: "stream_delta",
+          runtime,
+          delta: {
+            message_type: "stop_reason",
+            stop_reason: "end_turn",
+            run_id: "run-final",
+          },
+        });
+        return;
+      }
+
+      emitStream({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          id: "tool-call-1",
+          message_type: "approval_request_message",
+          tool_calls: [
+            {
+              tool_call_id: "call-1",
+              name: "Read",
+              arguments: '{"file_path":"/workspace/readme.md"}',
+            },
+          ],
+          run_id: "run-approval",
+        },
+      });
+      emitStream({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          message_type: "stop_reason",
+          stop_reason: "requires_approval",
+          run_id: "run-approval",
+        },
+      });
+      emitStream({
+        type: "update_loop_status",
+        runtime,
+        loop_status: {
+          status: "WAITING_ON_APPROVAL",
+          active_run_ids: ["run-approval"],
+        },
+      });
+      const request = {
+        type: "control_request",
+        request_id: "approval-delayed-1",
+        runtime,
+        request: {
+          subtype: "can_use_tool",
+          tool_name: "Read",
+          tool_call_id: "call-1",
+          input: { file_path: "/workspace/readme.md" },
+        },
+      };
+      queueMicrotask(() => {
+        control.serverMessage(request);
+        control.serverMessage(request);
       });
       return;
     }
@@ -1023,6 +1120,49 @@ describe("LettaAgentClient", () => {
         }),
       );
       expect(result.stopReason).not.toBe("requires_approval");
+    } finally {
+      FakeAppServerSocket.inputScenario = "normal";
+      session.close();
+    }
+  });
+
+  test("websocket protocol sessions wait for delayed auto-handled approval requests", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.inputScenario = "delayedApprovalRequest";
+    const decisions: Array<{ toolName: string; input: Record<string, unknown> }> = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123", {
+      canUseTool: (toolName, input) => {
+        decisions.push({ toolName, input });
+        return { behavior: "allow" };
+      },
+    });
+    try {
+      await asAdvanced(session).initialize();
+      const result = await asAdvanced(session).runTurn("read a file");
+
+      expect(result).toMatchObject({
+        type: "result",
+        success: true,
+        stopReason: "end_turn",
+        result: "done after delayed approval",
+      });
+      expect(decisions).toEqual([
+        {
+          toolName: "Read",
+          input: { file_path: "/workspace/readme.md" },
+        },
+      ]);
+      const approvalResponses = fakeControlSocket().sent.filter((command) => {
+        const payload = (command as { payload?: { kind?: string } }).payload;
+        return payload?.kind === "approval_response";
+      });
+      expect(approvalResponses).toHaveLength(1);
     } finally {
       FakeAppServerSocket.inputScenario = "normal";
       session.close();

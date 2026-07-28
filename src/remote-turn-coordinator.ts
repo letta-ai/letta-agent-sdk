@@ -35,6 +35,7 @@ import {
 type RemoteTurnCoordinatorConfig = {
   label: string;
   requestTimeoutMs?: number;
+  autoHandlesToolApprovals?: boolean;
   onDeviceStatus(status: SessionDeviceStatus): void;
 };
 
@@ -48,6 +49,7 @@ type RemoteTurnCoordinatorConfig = {
 export class RemoteTurnCoordinator {
   private readonly label: string;
   private readonly requestTimeoutMs: number | undefined;
+  private readonly autoHandlesToolApprovals: boolean;
   private readonly onDeviceStatus: (status: SessionDeviceStatus) => void;
   private streamQueue: SDKMessage[] = [];
   private streamResolvers: Array<(message: SDKMessage | null) => void> = [];
@@ -62,6 +64,7 @@ export class RemoteTurnCoordinator {
   constructor(config: RemoteTurnCoordinatorConfig) {
     this.label = config.label;
     this.requestTimeoutMs = config.requestTimeoutMs;
+    this.autoHandlesToolApprovals = config.autoHandlesToolApprovals === true;
     this.onDeviceStatus = config.onDeviceStatus;
   }
 
@@ -239,6 +242,9 @@ export class RemoteTurnCoordinator {
       active.observedTurnEvidence || active.observedRequiresApprovalStop;
     if (!hadTurnEvidence) return;
     if (status === "WAITING_ON_APPROVAL") {
+      // Loop status and approval requests arrive on different sockets. Keep a
+      // callback-backed turn open until its control request continues the turn.
+      if (this.autoHandlesToolApprovals) return;
       this.completeActiveTurn({
         runtime: active.runtime,
         stopReason: "requires_approval",

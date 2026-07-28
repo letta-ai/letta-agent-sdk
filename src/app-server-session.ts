@@ -411,56 +411,110 @@ function runtimeScopeFromMessage(message: ProtocolMessage): RuntimeScope | null 
   return null;
 }
 
-export function registerAppServerControlRequestHandler(config: {
-  client: AppServerClient;
-  getRuntime: () => RuntimeScope | null;
-  getOptions: () => AppServerApprovalOptions;
-}): () => void {
-  return config.client.onMessage((rawMessage, channel) => {
-    const message = rawMessage as unknown as ProtocolMessage;
-    if (channel !== "control" || message.type !== "control_request") return;
-    void respondToAppServerControlRequest(config, message).catch(() => {
-      // Permission callback failures are converted into deny responses by resolveAppServerToolApproval().
-    });
-  });
-}
+type ParsedToolApprovalRequest = {
+  key: string;
+  runtime: RuntimeScope;
+  requestId: string;
+  toolName: string;
+  toolInput: Record<string, unknown>;
+  context: CanUseToolContext;
+};
 
-async function respondToAppServerControlRequest(
-  config: {
-    client: AppServerClient;
-    getRuntime: () => RuntimeScope | null;
-    getOptions: () => AppServerApprovalOptions;
-  },
+type CachedToolApproval = {
+  decision: Promise<CanUseToolResponse>;
+  sent: boolean;
+  request: ParsedToolApprovalRequest;
+};
+
+const MAX_CACHED_TOOL_APPROVALS = 256;
+
+function parseToolApprovalRequest(
   message: ProtocolMessage,
-): Promise<void> {
-  const runtime = runtimeScopeFromMessage(message) ?? config.getRuntime();
-  if (!runtime) return;
-
-  const requestId = typeof message.request_id === "string" ? message.request_id : undefined;
+  fallbackRuntime: RuntimeScope | null,
+): ParsedToolApprovalRequest | null {
+  const runtime = runtimeScopeFromMessage(message) ?? fallbackRuntime;
+  const requestId = typeof message.request_id === "string" ? message.request_id : null;
   const request = message.request;
-  if (!requestId || !request || typeof request !== "object") return;
-  const requestRecord = request as Record<string, unknown>;
-  if (requestRecord.subtype !== "can_use_tool") return;
+  if (!runtime || !requestId || !request || typeof request !== "object") return null;
 
+  const requestRecord = request as Record<string, unknown>;
+  if (requestRecord.subtype !== "can_use_tool") return null;
   const toolName = typeof requestRecord.tool_name === "string" ? requestRecord.tool_name : "unknown";
   const toolInput =
     requestRecord.input && typeof requestRecord.input === "object" && !Array.isArray(requestRecord.input)
       ? (requestRecord.input as Record<string, unknown>)
       : {};
-  const decision = await resolveAppServerToolApproval(
-    config.getOptions(),
+  return {
+    key: JSON.stringify([runtime.agent_id, runtime.conversation_id, requestId]),
+    runtime,
+    requestId,
     toolName,
     toolInput,
-    buildCanUseToolContext(requestRecord, requestId),
-  );
-  config.client.input({
-    runtime,
+    context: buildCanUseToolContext(requestRecord, requestId),
+  };
+}
+
+function sendToolApprovalResponse(
+  client: AppServerClient,
+  request: ParsedToolApprovalRequest,
+  decision: CanUseToolResponse,
+): void {
+  client.input({
+    runtime: request.runtime,
     payload: {
       kind: "approval_response",
-      request_id: requestId,
+      request_id: request.requestId,
       decision: toAppServerApprovalDecision(decision),
     },
   } as Parameters<AppServerClient["input"]>[0]);
+}
+
+export function registerAppServerControlRequestHandler(config: {
+  client: AppServerClient;
+  getRuntime: () => RuntimeScope | null;
+  getOptions: () => AppServerApprovalOptions;
+}): () => void {
+  // Recovery and cross-socket delivery can replay the same request. Resolve the
+  // host callback once, while retaining its decision for a later replay.
+  const approvals = new Map<string, CachedToolApproval>();
+  return config.client.onMessage((rawMessage, channel) => {
+    const message = rawMessage as unknown as ProtocolMessage;
+    if (channel !== "control" || message.type !== "control_request") return;
+    const request = parseToolApprovalRequest(message, config.getRuntime());
+    if (!request) return;
+
+    const cached = approvals.get(request.key);
+    if (cached) {
+      if (cached.sent) {
+        void cached.decision
+          .then((decision) => sendToolApprovalResponse(config.client, cached.request, decision))
+          .catch(() => undefined);
+      }
+      return;
+    }
+
+    if (approvals.size >= MAX_CACHED_TOOL_APPROVALS) {
+      const oldest = approvals.keys().next().value;
+      if (oldest !== undefined) approvals.delete(oldest);
+    }
+    const entry: CachedToolApproval = {
+      decision: resolveAppServerToolApproval(
+        config.getOptions(),
+        request.toolName,
+        request.toolInput,
+        request.context,
+      ),
+      sent: false,
+      request,
+    };
+    approvals.set(request.key, entry);
+    void entry.decision
+      .then((decision) => {
+        entry.sent = true;
+        sendToolApprovalResponse(config.client, request, decision);
+      })
+      .catch(() => approvals.delete(request.key));
+  });
 }
 
 export class AppServerRuntimeController implements RemoteClientRuntimeController {
