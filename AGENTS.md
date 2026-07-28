@@ -20,9 +20,6 @@ that Bun placed in one file; trace it back to `src/` before changing it.
   controller used by the portable session core.
 - `cloud-session.ts` resolves Cloud runtimes and managed sandboxes, then uses
   the same runtime controller and portable session core.
-- `session.ts` is the separate legacy stdio implementation used only when
-  `transport: "stdio"` is selected and by the historical agent-less
-  `createSession()` helper.
 - `types.ts` defines the stable public SDK surface. Internal protocol types
   belong beside their implementation rather than in the public type barrel.
 

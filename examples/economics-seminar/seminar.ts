@@ -9,7 +9,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { Session } from '../../src/index.js';
+import type { LettaCodeSession } from '../../src/index.js';
 import type { 
   SeminarConfig, 
   SeminarState, 
@@ -176,7 +176,7 @@ export async function runSeminar(config: SeminarConfig = DEFAULT_CONFIG, userTop
   
   // Initialize faculty
   console.log('👥 Initializing faculty panel...');
-  const facultySessions: Map<FacultyRole, Session> = new Map();
+  const facultySessions: Map<FacultyRole, LettaCodeSession> = new Map();
   
   for (const faculty of selectedFaculty) {
     const session = await createFacultyMember(

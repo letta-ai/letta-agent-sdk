@@ -2,14 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { validateCreateAgentOptions, validateCreateSessionOptions } from "../validation.js";
 
 describe("validation", () => {
-  test("accepts valid session skill/reminder/dreaming options", () => {
+  test("accepts valid session skill and dreaming options", () => {
     expect(() =>
       validateCreateSessionOptions({
         skillSources: ["project", "global"],
-        systemInfoReminder: false,
         dreaming: {
           trigger: "step-count",
-          behavior: "reminder",
           stepCount: 6,
         },
         maxApprovalRecoveryAttempts: 2,
@@ -53,7 +51,7 @@ describe("validation", () => {
           // biome-ignore lint/suspicious/noExplicitAny: runtime validation test
           behavior: "manual" as any,
         },
-      }),
+      } as never),
     ).toThrow("Invalid dreaming.behavior");
 
     expect(() =>
@@ -85,6 +83,20 @@ describe("validation", () => {
         memfsStartup: "skip",
       } as Parameters<typeof validateCreateSessionOptions>[0] & { memfsStartup: string }),
     ).toThrow("memfsStartup is not supported");
+  });
+
+  test("rejects options that only the removed stdio session supported", () => {
+    for (const options of [
+      { systemPrompt: "letta-claude" },
+      { disallowedTools: ["Bash"] },
+      { systemInfoReminder: false },
+      { includePartialMessages: true },
+      { dreaming: { behavior: "auto-launch" } },
+    ]) {
+      expect(() => validateCreateSessionOptions(options as never)).toThrow(
+        "is not supported",
+      );
+    }
   });
 
   test("rejects invalid agent skill source", () => {

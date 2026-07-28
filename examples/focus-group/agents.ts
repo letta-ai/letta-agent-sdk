@@ -7,7 +7,8 @@
  * 3. Analyst - provides focus group analysis
  */
 
-import { createSession, resumeSession, type Session } from '../../src/index.js';
+import { resumeSession, type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession } from '../create-agent-session.js';
 import { VoterPersona, CONFIG } from './types.js';
 
 // ============================================================================
@@ -32,8 +33,8 @@ When asking follow-ups:
 - Ask about trade-offs they'd accept
 - Keep questions focused and open-ended`;
 
-export async function createCandidateAgent(): Promise<Session> {
-  return createSession({
+export async function createCandidateAgent(): Promise<LettaCodeSession> {
+  return createAgentSession({
     model: CONFIG.model,
     systemPrompt: CANDIDATE_PROMPT,
     memory: [
@@ -52,7 +53,7 @@ export async function createCandidateAgent(): Promise<Session> {
   });
 }
 
-export async function resumeCandidateAgent(agentId: string): Promise<Session> {
+export async function resumeCandidateAgent(agentId: string): Promise<LettaCodeSession> {
   return resumeSession(agentId, {
     model: CONFIG.model,
     permissionMode: 'unrestricted',
@@ -90,8 +91,8 @@ RESPONSE STYLE:
 - Reference your personal situation when relevant`;
 }
 
-export async function createVoterAgent(persona: VoterPersona): Promise<Session> {
-  return createSession({
+export async function createVoterAgent(persona: VoterPersona): Promise<LettaCodeSession> {
+  return createAgentSession({
     model: CONFIG.model,
     systemPrompt: buildVoterPrompt(persona),
     memory: [
@@ -117,7 +118,7 @@ Background: ${persona.background}`,
   });
 }
 
-export async function resumeVoterAgent(agentId: string): Promise<Session> {
+export async function resumeVoterAgent(agentId: string): Promise<LettaCodeSession> {
   return resumeSession(agentId, {
     model: CONFIG.model,
     permissionMode: 'unrestricted',
@@ -143,8 +144,8 @@ Analysis style:
 - Keep analysis concise but substantive (4-6 sentences)
 - End with 1-2 tactical recommendations`;
 
-export async function createAnalystAgent(): Promise<Session> {
-  return createSession({
+export async function createAnalystAgent(): Promise<LettaCodeSession> {
+  return createAgentSession({
     model: CONFIG.model,
     systemPrompt: ANALYST_PROMPT,
     memory: [
@@ -163,7 +164,7 @@ export async function createAnalystAgent(): Promise<Session> {
   });
 }
 
-export async function resumeAnalystAgent(agentId: string): Promise<Session> {
+export async function resumeAnalystAgent(agentId: string): Promise<LettaCodeSession> {
   return resumeSession(agentId, {
     model: CONFIG.model,
     permissionMode: 'unrestricted',

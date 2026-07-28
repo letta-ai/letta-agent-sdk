@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { WireMessage } from "../protocol.js";
 import type { ProtocolMessage, RuntimeScope } from "../remote-session-protocol.js";
 import { RemoteTurnCoordinator } from "../remote-turn-coordinator.js";
-import { Session } from "../session.js";
-import type { SDKMessage } from "../types.js";
 
 describe("cooked stream message identity", () => {
   test("preserves distinct OTIDs and replay cursors on remote text slices sharing an id", async () => {
@@ -57,49 +54,40 @@ describe("cooked stream message identity", () => {
     coordinator.close();
   });
 
-  test("preserves OTIDs and replay cursors on legacy stdio text messages", async () => {
-    const wireMessages = [
-      textWireMessage("assistant_message", "assistant-uuid", {
-        content: "answer",
-        otid: "assistant-otid",
-        seq_id: 71,
-      }),
-      textWireMessage("reasoning_message", "reasoning-uuid", {
-        reasoning: "thought",
-        otid: "reasoning-otid",
-        seq_id: 72,
-      }),
-    ];
-    const session = new Session({ agentId: "agent-1" });
-    const transport = {
-      async *messages() {
-        yield* wireMessages;
-      },
-      async write() {},
+  test("preserves raw arguments on app-server tool call deltas", async () => {
+    const runtime: RuntimeScope = {
+      agent_id: "agent-1",
+      conversation_id: "conv-1",
     };
-    (session as unknown as { transport: typeof transport }).transport = transport;
-
-    await (
-      session as unknown as { runBackgroundPump(): Promise<void> }
-    ).runBackgroundPump();
-
-    const queued = (
-      session as unknown as { streamQueue: Array<{ message: SDKMessage }> }
-    ).streamQueue.map((entry) => entry.message);
-    expect(queued[0]).toMatchObject({
-      type: "assistant",
-      uuid: "assistant-uuid",
-      otid: "assistant-otid",
-      seqId: 71,
-      runId: "run-stdio",
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
     });
-    expect(queued[1]).toMatchObject({
-      type: "reasoning",
-      uuid: "reasoning-uuid",
-      otid: "reasoning-otid",
-      seqId: 72,
-      runId: "run-stdio",
+    coordinator.trackSentTurn(runtime);
+
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        id: "message-tool",
+        run_id: "run-1",
+        message_type: "tool_call_message",
+        tool_call: {
+          tool_call_id: "tool-1",
+          name: "Bash",
+          arguments: '{"command":"echo hi"}',
+        },
+      }),
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "tool_call",
+      toolCallId: "tool-1",
+      toolName: "Bash",
+      toolInput: { command: "echo hi" },
+      rawArguments: '{"command":"echo hi"}',
+      runId: "run-1",
     });
+    coordinator.close();
   });
 });
 
@@ -108,18 +96,4 @@ function streamDelta(
   delta: Record<string, unknown>,
 ): ProtocolMessage {
   return { type: "stream_delta", runtime, delta };
-}
-
-function textWireMessage(
-  messageType: "assistant_message" | "reasoning_message",
-  uuid: string,
-  fields: Record<string, unknown>,
-): WireMessage {
-  return {
-    type: "message",
-    message_type: messageType,
-    uuid,
-    run_id: "run-stdio",
-    ...fields,
-  } as WireMessage;
 }

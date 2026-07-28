@@ -5,7 +5,8 @@
  * and tracks team performance over time.
  */
 
-import { createSession, resumeSession, type Session } from '../../../src/index.js';
+import { resumeSession, type LettaCodeSession } from '../../../src/index.js';
+import { createAgentSession } from '../../create-agent-session.js';
 import type { Depth, ResearchTask, UserFeedback } from '../types.js';
 import { DEPTH_CONFIGS, generateTaskId, formatDuration } from '../types.js';
 import { loadTeamState, saveTeamState, ARTIFACTS, readOutput, getOutputPath, outputExists } from '../tools/file-store.js';
@@ -50,7 +51,7 @@ Use these to improve coordination over time.`;
  */
 export async function createCoordinator(
   existingAgentId?: string | null
-): Promise<Session> {
+): Promise<LettaCodeSession> {
   if (existingAgentId) {
     return resumeSession(existingAgentId, {
       model: 'haiku',
@@ -59,7 +60,7 @@ export async function createCoordinator(
     });
   }
   
-  return createSession({
+  return createAgentSession({
     model: 'haiku',
     systemPrompt: COORDINATOR_SYSTEM_PROMPT,
     memory: [

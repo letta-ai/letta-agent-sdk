@@ -15,7 +15,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Session } from '../../src/index.js';
+import type { LettaCodeSession } from '../../src/index.js';
 import {
   FocusGroupState,
   VoterPersona,
@@ -73,7 +73,7 @@ export async function saveState(state: FocusGroupState): Promise<void> {
 /**
  * Send a message to an agent and collect the full response
  */
-async function chat(session: Session, message: string): Promise<string> {
+async function chat(session: LettaCodeSession, message: string): Promise<string> {
   await session.send(message);
   
   let response = '';
@@ -89,7 +89,7 @@ async function chat(session: Session, message: string): Promise<string> {
  * Send a message and stream the response to console
  */
 async function chatWithOutput(
-  session: Session, 
+  session: LettaCodeSession,
   message: string,
   color: string,
   label: string
@@ -115,9 +115,9 @@ async function chatWithOutput(
 
 export class FocusGroup {
   private state: FocusGroupState;
-  private candidate: Session | null = null;
-  private voters: Map<string, Session> = new Map();
-  private analyst: Session | null = null;
+  private candidate: LettaCodeSession | null = null;
+  private voters: Map<string, LettaCodeSession> = new Map();
+  private analyst: LettaCodeSession | null = null;
   private personas: VoterPersona[];
 
   constructor(state: FocusGroupState, personas: VoterPersona[] = SAMPLE_PERSONAS) {

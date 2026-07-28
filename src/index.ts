@@ -11,9 +11,6 @@
  * const agentId = await client.createAgent();
  * const clientSession = client.resumeSession(agentId);
  *
- * // Start session with default agent + new conversation (like `letta`)
- * const session = createSession();
- *
  * // Create a new agent explicitly
  * const agentId = await createAgent();
  *
@@ -26,13 +23,11 @@
  * // Create new conversation on specific agent
  * const session = createSession(agentId);
  *
- * // One-shot prompt (uses default agent)
- * const result = await prompt('Hello');
- * const result = await prompt('Hello', agentId);  // specific agent
+ * // One-shot prompt in a new conversation
+ * const result = await prompt('Hello', agentId);
  * ```
  */
 
-import { Session } from "./session.js";
 import { LettaAgentClient } from "./client.js";
 import type {
   CreateSessionOptions,
@@ -98,6 +93,7 @@ export type {
   SessionDiffPreview,
   SkillSource,
   DreamingOptions,
+  SessionDreamingOptions,
   DreamingTrigger,
   DreamingBehavior,
   EffectiveDreamingSettings,
@@ -164,7 +160,6 @@ export type {
   ConversationMessagesResult,
 } from "./management-types.js";
 
-export { Session } from "./session.js";
 export { RepositoriesClient } from "./repositories.js";
 export { LettaAgentClient } from "./client.js";
 export { CloudManagedSandboxExpiredError } from "./cloud-session.js";
@@ -210,29 +205,20 @@ export async function createAgent(options: CreateAgentOptions = {}): Promise<str
 /**
  * Create a new conversation (session).
  *
- * - Without agentId: uses default/LRU agent with new conversation (like `letta`)
- * - With agentId: creates new conversation on specified agent
+ * Creates a new conversation on the specified agent.
  *
  * @example
  * ```typescript
- * // New conversation on default agent (like `letta`)
- * await using session = createSession();
- *
  * // New conversation on specific agent
  * await using session = createSession(agentId);
  * ```
  */
 export function createSession(
-  agentId?: string,
+  agentId: string,
   options: CreateSessionOptions = {},
 ): LettaCodeSession {
   validateCreateSessionOptions(options);
-  if (agentId) {
-    return new LettaAgentClient().createSession(agentId, options);
-  }
-  // The app-server runtime_start protocol requires an explicit agent id. Keep
-  // the historical default/LRU-agent helper on the legacy stdio transport.
-  return new LettaAgentClient({ backend: "local", transport: "stdio" }).createSession(options);
+  return new LettaAgentClient().createSession(agentId, options);
 }
 
 /**
@@ -264,13 +250,11 @@ export function resumeSession(
 /**
  * One-shot prompt convenience function.
  *
- * - Without agentId: uses default agent (like `letta -p`), new conversation
- * - With agentId: uses specific agent, new conversation
+ * Uses the specified agent in a new conversation.
  * - Uses a short-lived session and returns the final turn result.
  *
  * @example
  * ```typescript
- * const result = await prompt('What is 2+2?');  // default agent
  * const result = await prompt('What is the capital of France?', agentId);  // specific agent
  * ```
  */
@@ -283,13 +267,11 @@ type InitializableSession = LettaCodeSession & {
 };
 
 export async function prompt(
-  message: string,
-  agentId?: string
+  message: SendMessage,
+  agentId: string,
+  options: CreateSessionOptions = {},
 ): Promise<SDKResultMessage> {
-  // Use default agent behavior (like letta -p) when no agentId specified
-  const session = agentId
-    ? createSession(agentId)
-    : createSession();
+  const session = createSession(agentId, options);
 
   try {
     return await (session as TurnSession).runTurn(message);

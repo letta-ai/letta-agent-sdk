@@ -66,7 +66,27 @@ function validateApprovalRecoveryOptions(options: CreateSessionOptions): void {
 }
 
 function validateRemovedSessionOptions(options: CreateSessionOptions): void {
-  if ((options as { memfsStartup?: unknown }).memfsStartup !== undefined) {
+  const removedOptions = options as CreateSessionOptions & Record<string, unknown>;
+  if (removedOptions.systemPrompt !== undefined) {
+    throw new Error("systemPrompt is not supported when opening an existing agent session.");
+  }
+  if (removedOptions.disallowedTools !== undefined) {
+    throw new Error("disallowedTools is not supported when opening an existing agent session.");
+  }
+  if (removedOptions.systemInfoReminder !== undefined) {
+    throw new Error("systemInfoReminder is not supported when opening an existing agent session.");
+  }
+  if (removedOptions.includePartialMessages !== undefined) {
+    throw new Error("includePartialMessages is not supported by app-server sessions.");
+  }
+  if (
+    options.dreaming &&
+    "behavior" in options.dreaming &&
+    options.dreaming.behavior !== undefined
+  ) {
+    throw new Error("dreaming.behavior is not supported when opening an existing agent session.");
+  }
+  if (removedOptions.memfsStartup !== undefined) {
     throw new Error(
       "memfsStartup is not supported by the SDK.",
     );
@@ -157,11 +177,6 @@ function validateReasoningEffort(value: unknown): void {
  * Validate CreateSessionOptions (used by createSession and resumeSession).
  */
 export function validateCreateSessionOptions(options: CreateSessionOptions): void {
-  // Validate systemPrompt preset if provided
-  if (options.systemPrompt !== undefined) {
-    validateSystemPromptPreset(options.systemPrompt);
-  }
-
   validateSkillSources(options.skillSources);
   validateReasoningEffort(options.reasoningEffort);
   validateDreamingOptions(options.dreaming);

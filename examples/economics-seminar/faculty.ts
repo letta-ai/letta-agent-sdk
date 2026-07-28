@@ -5,7 +5,8 @@
  * Each has a distinct perspective and style.
  */
 
-import { createSession, resumeSession, type Session } from '../../src/index.js';
+import { resumeSession, type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession } from '../create-agent-session.js';
 import type { FacultyMember, SeminarConfig } from './types.js';
 
 /**
@@ -55,7 +56,7 @@ export async function createFacultyMember(
   faculty: FacultyMember,
   existingAgentId: string | null,
   config: SeminarConfig
-): Promise<Session> {
+): Promise<LettaCodeSession> {
   if (existingAgentId) {
     return resumeSession(existingAgentId, {
       model: config.model,
@@ -64,7 +65,7 @@ export async function createFacultyMember(
     });
   }
   
-  return createSession({
+  return createAgentSession({
     model: config.model,
     systemPrompt: getFacultySystemPrompt(faculty),
     memory: [
@@ -126,7 +127,7 @@ export async function createFacultyMember(
  * Have a faculty member ask a question about the presentation
  */
 export async function askQuestion(
-  session: Session,
+  session: LettaCodeSession,
   faculty: FacultyMember,
   presentationSummary: string,
   previousExchanges: string,
@@ -190,7 +191,7 @@ Be aggressive. Be dismissive. Show intellectual contempt if warranted. You've se
  * Have faculty member reflect on the seminar (for learning)
  */
 export async function reflectOnSeminar(
-  session: Session,
+  session: LettaCodeSession,
   faculty: FacultyMember,
   transcript: string,
   onOutput: (text: string) => void

@@ -20,7 +20,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { createSession, resumeSession, type Session } from '../../src/index.js';
+import { resumeSession, type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession } from '../create-agent-session.js';
 import Letta from '@letta-ai/letta-client';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -32,7 +33,7 @@ interface AppState {
   agentId: string | null;
 }
 
-let session: Session | null = null;
+let session: LettaCodeSession | null = null;
 let state: AppState = { agentId: null };
 
 // Letta client for memory operations
@@ -54,7 +55,7 @@ async function saveState(): Promise<void> {
 }
 
 // Get or create session
-async function getSession(): Promise<Session> {
+async function getSession(): Promise<LettaCodeSession> {
   if (session) return session;
 
   if (state.agentId) {
@@ -65,7 +66,7 @@ async function getSession(): Promise<Session> {
     });
   } else {
     console.log('Creating new agent...');
-    session = await createSession({
+    session = await createAgentSession({
       model: 'haiku',
       systemPrompt: `You are a helpful assistant accessible through a web interface.
 
