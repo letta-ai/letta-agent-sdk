@@ -320,6 +320,7 @@ class FakeCloudSocket {
             is_processing: false,
             current_permission_mode: "acceptEdits",
             current_working_directory: "/workspace/project",
+            memory_directory: "/memory/cloud-agent",
             pending_control_requests: [
               {
                 request_id: "approval-1",
@@ -1573,6 +1574,7 @@ describe("CloudEnvironmentSession", () => {
         isProcessing: false,
         permissionMode: "acceptEdits",
         workingDirectory: "/workspace/project",
+        memoryDirectory: "/memory/cloud-agent",
         pendingControlRequests: [
           {
             requestId: "approval-1",
@@ -1596,6 +1598,7 @@ describe("CloudEnvironmentSession", () => {
       expect(status.raw).toMatchObject({
         current_permission_mode: "acceptEdits",
         current_working_directory: "/workspace/project",
+        memory_directory: "/memory/cloud-agent",
       });
       expect(statusSyncs()).toHaveLength(2);
 
@@ -1603,6 +1606,7 @@ describe("CloudEnvironmentSession", () => {
       expect(await session.getDeviceStatus()).toMatchObject({
         permissionMode: "acceptEdits",
         workingDirectory: "/workspace/project",
+        memoryDirectory: "/memory/cloud-agent",
       });
       expect(statusSyncs()).toHaveLength(3);
 
@@ -1626,6 +1630,7 @@ describe("CloudEnvironmentSession", () => {
         isProcessing: true,
         permissionMode: "unrestricted",
         workingDirectory: "/workspace/elsewhere",
+        memoryDirectory: null,
         pendingControlRequests: [],
       });
 

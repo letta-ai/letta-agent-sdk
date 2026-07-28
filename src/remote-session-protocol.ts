@@ -664,6 +664,10 @@ export function toSessionDeviceStatus(
     isProcessing: status.is_processing,
     permissionMode,
     workingDirectory: status.current_working_directory,
+    memoryDirectory:
+      typeof status.memory_directory === "string"
+        ? status.memory_directory
+        : null,
     pendingControlRequests: pendingControlRequests(status),
     raw: { ...status },
   };

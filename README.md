@@ -80,7 +80,8 @@ approvals when a mobile or web client returns to the foreground:
 ```ts
 const status = await session.getDeviceStatus();
 // status.permissionMode, status.workingDirectory, status.isOnline,
-// status.isProcessing, status.pendingControlRequests, status.raw
+// status.isProcessing, status.memoryDirectory,
+// status.pendingControlRequests, status.raw
 
 const unsubscribe = session.onDeviceStatus((status) => {
   // Called for every device-status update pushed by the runtime.
