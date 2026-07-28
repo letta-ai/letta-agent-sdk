@@ -30,6 +30,10 @@ export function createLocalAppServerSession(
                   ? (mode.options as LettaCodeClientSessionOptions)
                       .filesystemConfinement
                   : undefined,
+              agentId:
+                mode.kind === "session" && "agentId" in mode
+                  ? mode.agentId
+                  : undefined,
             }),
         }),
     ...(appServer.WebSocket !== undefined
