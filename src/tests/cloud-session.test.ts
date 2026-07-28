@@ -74,8 +74,7 @@ function createCloudFetchMock(
       body: bodyOf(init),
     });
 
-    // Mirrors production routing: `POST /v1/agents/` (trailing slash) 404s.
-    if (parsed.pathname === "/v1/agents" && method === "POST") {
+    if (parsed.pathname === "/v1/agents/" && method === "POST") {
       return Promise.resolve(jsonResponse({ id: "agent-created" }));
     }
 
@@ -1939,8 +1938,7 @@ describe("CloudEnvironmentSession", () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
-      // No trailing slash — production 404s `POST /v1/agents/`.
-      url: "https://api.test/v1/agents",
+      url: "https://api.test/v1/agents/",
       method: "POST",
       headers: {
         authorization: "Bearer sk-test",

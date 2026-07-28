@@ -346,11 +346,10 @@ describeLive("live integration: letta-agent-sdk", () => {
   );
 
   test(
-    "cloud createAgent uses a route production accepts",
+    "cloud createAgent uses the generated route accepted by production",
     async () => {
-      // Guards the REST create path against server routing drift: production
-      // 404s `POST /v1/agents/` (trailing slash) while accepting
-      // `POST /v1/agents` — a mocked fetch cannot catch this class of bug.
+      // Guards the generated agents.create() path against server routing drift.
+      // A mocked fetch cannot catch this class of integration failure.
       const client = new LettaAgentClient({
         backend: "cloud",
         apiKey: API_KEY!,

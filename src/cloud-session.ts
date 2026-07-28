@@ -1,9 +1,6 @@
 import type Letta from "@letta-ai/letta-client";
 import { APIError } from "@letta-ai/letta-client/core/error";
-import type {
-  AgentCreateParams,
-  AgentState,
-} from "@letta-ai/letta-client/resources/agents/agents";
+import type { AgentCreateParams } from "@letta-ai/letta-client/resources/agents/agents";
 import {
   createAppServerClient,
   type AppServerClient,
@@ -282,12 +279,7 @@ export async function createCloudAgent(
   agentOptions: CreateAgentOptions,
 ): Promise<string> {
   const body = await createAgentBody(agentOptions);
-  // The generated `agents.create()` currently emits `/v1/agents/`, while the
-  // production POST route requires the slashless form. Keep the canonical
-  // client transport and generated contract without using that broken path.
-  const agent = await client.post<AgentState>("/v1/agents", {
-    body: body as AgentCreateParams,
-  });
+  const agent = await client.agents.create(body as AgentCreateParams);
   if (typeof agent.id !== "string" || agent.id.length === 0) {
     throw new Error("Cloud create agent response did not include an agent id.");
   }
