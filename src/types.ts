@@ -759,18 +759,11 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
    */
   env?: Record<string, string>;
   /**
-   * Constrain an SDK-owned local harness to memory-worker filesystem access.
-   * The harness may write its own memory and harness state, but not the project,
-   * temporary directories, the rest of the home directory, or other agents'
-   * memory. Agent-ID sessions derive the backend's standard memory directory;
-   * set `MEMORY_DIR` or `LETTA_MEMORY_DIR` in `env` to override it (including
-   * when resuming by conversation ID). Fails closed when no memory root can be
-   * resolved or the host has no supported kernel sandbox.
-   *
-   * Only supported by the default local app-server transport when the SDK owns
-   * the process. It applies to `createSession()` / `resumeSession()` harnesses,
-   * not agent creation or management calls. Remote URLs, Cloud execution, and
-   * the legacy stdio transport cannot enforce this option.
+   * Constrain an SDK-owned local session harness to memory-worker filesystem
+   * access. Agent-ID sessions derive the standard root; set `MEMORY_DIR` or
+   * `LETTA_MEMORY_DIR` for overrides and conversation-ID resumes. Fails closed
+   * without a root or supported kernel sandbox. Excludes agent creation,
+   * management calls, remote/Cloud runtimes, and legacy stdio.
    */
   filesystemConfinement?: "memory";
 }
