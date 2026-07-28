@@ -450,6 +450,20 @@ export function streamDeltaRunId(delta: Record<string, unknown>): string | undef
   return typeof delta.run_id === "string" ? delta.run_id : undefined;
 }
 
+export function streamDeltaOtid(
+  delta: Record<string, unknown>,
+): string | null | undefined {
+  return typeof delta.otid === "string" || delta.otid === null
+    ? delta.otid
+    : undefined;
+}
+
+export function streamDeltaSeqId(
+  delta: Record<string, unknown>,
+): number | undefined {
+  return typeof delta.seq_id === "number" ? delta.seq_id : undefined;
+}
+
 export function streamDeltaStopReason(delta: Record<string, unknown>): string | null | undefined {
   return typeof delta.stop_reason === "string" ? delta.stop_reason : undefined;
 }

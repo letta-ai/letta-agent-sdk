@@ -44,6 +44,12 @@ for await (const message of session.stream()) {
 }
 ```
 
+Assistant and reasoning messages are incremental text fragments. Reconcile
+fragments by `type` and `otid` when `otid` is available; `uuid` is a legacy
+transport identifier and is not a portable lineage key. After reconnecting,
+use `(runId, seqId)` to suppress replayed fragments. Sequence IDs are scoped to
+their run and must not be compared across runs.
+
 An agent is the persistent entity with memory. A conversation is a thread on that agent. A session is the active connection used to send messages, stream events, execute tools, and handle approvals.
 
 - `createSession(agentId)` starts a new conversation.
@@ -111,6 +117,23 @@ const client = new LettaAgentClient({ backend: "local" });
 
 await using session = client.createSession(agentId, {
   cwd: process.cwd(),
+});
+```
+
+### Managed Cloud sandbox repositories
+
+Cloud sessions can clone up to 10 GitHub repositories into the managed
+sandbox. Public repositories clone directly; private repositories require
+access through the organization's GitHub integration.
+
+```ts
+await using session = client.createSession(agentId, {
+  sandbox: {
+    githubRepositories: [
+      { owner: "letta-ai", repo: "letta-docs-md" },
+      { owner: "letta-ai", repo: "letta-code" },
+    ],
+  },
 });
 ```
 

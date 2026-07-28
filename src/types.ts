@@ -27,6 +27,11 @@ export type {
 // Import types for use in this file
 import type { CreateBlock, CanUseToolResponse } from "./protocol.js";
 import type { PersonalityId } from "@letta-ai/letta-code/agent-presets";
+import type { LettaCodeCloudSandboxOptions } from "./cloud-sandbox.js";
+export type {
+  GitHubRepositoryRef,
+  LettaCodeCloudSandboxOptions,
+} from "./cloud-sandbox.js";
 
 /** Letta Code personality preset used to seed a new agent. */
 export type LettaCodePersonalityId = PersonalityId;
@@ -342,27 +347,6 @@ export interface LettaCodeRemoteClientOptions {
   requestTimeoutMs?: number;
   /** Whether agents created through this app-server are added to Letta Code's global pinned-agent list. */
   pinGlobalAgent?: boolean;
-}
-
-export interface LettaCodeCloudSandboxOptions {
-  /**
-   * TTL to request when refreshing an SDK-managed sandbox. Defaults to 5
-   * minutes, matching the Cloud API default. Valid range: 1-60.
-   */
-  ttlMinutes?: number;
-  /** Timeout waiting for a newly created sandbox environment to come online. */
-  readyTimeoutMs?: number;
-  /** Poll interval while waiting for a newly created sandbox environment. */
-  readyPollIntervalMs?: number;
-  /** Interval for proactive TTL refreshes while the session is open. */
-  refreshIntervalMs?: number;
-  /**
-   * Best-effort terminate the SDK-managed sandbox on session close. Defaults to
-   * false so other sessions for the same conversation and reconnecting clients
-   * can continue using it. Set true to restore eager cleanup when this session
-   * exclusively owns the sandbox.
-   */
-  terminateOnClose?: boolean;
 }
 
 export interface LettaCodeCloudClientOptions {
@@ -770,6 +754,14 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
    * memory copy. Ignored on remote and cloud transports.
    */
   env?: Record<string, string>;
+  /**
+   * Constrain an SDK-owned local session harness to memory-worker filesystem
+   * access. Agent-ID sessions derive the standard root; set `MEMORY_DIR` or
+   * `LETTA_MEMORY_DIR` for overrides and conversation-ID resumes. Fails closed
+   * without a root or supported kernel sandbox. Excludes agent creation,
+   * management calls, remote/Cloud runtimes, and legacy stdio.
+   */
+  filesystemConfinement?: "memory";
 }
 
 export interface LettaCodeSession extends AsyncDisposable {
@@ -1056,7 +1048,12 @@ export interface SDKInitMessage {
 export interface SDKAssistantMessage {
   type: "assistant";
   content: string;
+  /** Legacy transport identifier. Prefer `otid` for message lineage. */
   uuid: string;
+  /** Stable lineage key for this typed message slice, when provided. */
+  otid?: string | null;
+  /** Per-run replay cursor. Compare only within the same `runId`. */
+  seqId?: number;
   /** Run ID from the Letta API for this event (used for stale-run detection). */
   runId?: string;
 }
@@ -1086,7 +1083,12 @@ export interface SDKToolResultMessage {
 export interface SDKReasoningMessage {
   type: "reasoning";
   content: string;
+  /** Legacy transport identifier. Prefer `otid` for message lineage. */
   uuid: string;
+  /** Stable lineage key for this typed message slice, when provided. */
+  otid?: string | null;
+  /** Per-run replay cursor. Compare only within the same `runId`. */
+  seqId?: number;
   /** Run ID from the Letta API for this event (used for stale-run detection). */
   runId?: string;
 }
@@ -1138,6 +1140,8 @@ export interface SDKStreamEventMessagePayload {
   message_type: string;
   id?: string;
   otid?: string | null;
+  seq_id?: number;
+  run_id?: string;
   content?: unknown;
   reasoning?: string;
   name?: string;

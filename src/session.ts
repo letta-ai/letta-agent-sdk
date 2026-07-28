@@ -1419,6 +1419,8 @@ export class Session implements AsyncDisposable {
       const msg = wireMsg as WireMessage & {
         message_type: string;
         uuid: string;
+        otid?: string | null;
+        seq_id?: number;
         run_id?: string;
         // assistant_message fields
         content?: string;
@@ -1441,6 +1443,8 @@ export class Session implements AsyncDisposable {
           type: "assistant",
           content: msg.content,
           uuid: msg.uuid,
+          ...(msg.otid !== undefined ? { otid: msg.otid } : {}),
+          ...(msg.seq_id !== undefined ? { seqId: msg.seq_id } : {}),
           runId,
         };
       }
@@ -1517,6 +1521,8 @@ export class Session implements AsyncDisposable {
           type: "reasoning",
           content: msg.reasoning,
           uuid: msg.uuid,
+          ...(msg.otid !== undefined ? { otid: msg.otid } : {}),
+          ...(msg.seq_id !== undefined ? { seqId: msg.seq_id } : {}),
           runId,
         };
       }

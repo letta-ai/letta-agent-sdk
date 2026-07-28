@@ -611,6 +611,60 @@ describe("LettaAgentClient", () => {
     }
   });
 
+  test("restricts filesystem confinement to SDK-owned local app-server processes", () => {
+    const localClient = new LettaAgentClient({ backend: "local" });
+    expect(() =>
+      localClient.resumeSession("agent-123", {
+        filesystemConfinement: "invalid" as "memory",
+      }),
+    ).toThrow("Invalid filesystemConfinement 'invalid'");
+    expect(() =>
+      localClient.createSession({
+        filesystemConfinement: "memory",
+        env: { MEMORY_DIR: "/state/memory" },
+      }),
+    ).toThrow("requires an explicit agent id");
+
+    const stdioClient = new LettaAgentClient({
+      backend: "local",
+      transport: "stdio",
+    });
+    expect(() =>
+      stdioClient.resumeSession("agent-123", {
+        filesystemConfinement: "memory",
+        env: { MEMORY_DIR: "/state/memory" },
+      }),
+    ).toThrow("requires the local app-server transport");
+
+    const externalAppServerClient = new LettaAgentClient({
+      backend: "local",
+      appServer: { url: "ws://127.0.0.1:4500/ws" },
+    });
+    expect(() =>
+      externalAppServerClient.resumeSession("agent-123", {
+        filesystemConfinement: "memory",
+        env: { MEMORY_DIR: "/state/memory" },
+      }),
+    ).toThrow("requires an SDK-owned local app-server process");
+
+    const remoteClient = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+    });
+    expect(() =>
+      remoteClient.resumeSession("agent-123", {
+        filesystemConfinement: "memory",
+      }),
+    ).toThrow("requires an SDK-owned local app-server process");
+
+    const cloudClient = new LettaAgentClient({ backend: "cloud" });
+    expect(() =>
+      cloudClient.resumeSession("agent-123", {
+        filesystemConfinement: "memory",
+      }),
+    ).toThrow('only supported with backend: "local"');
+  });
+
   test("rejects environment overrides on local sessions", () => {
     const client = new LettaAgentClient({ backend: "local" });
 
