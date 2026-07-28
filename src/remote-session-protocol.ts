@@ -182,7 +182,8 @@ export function normalizePermissionMode(
   if (
     mode === "standard" ||
     mode === "acceptEdits" ||
-    mode === "unrestricted"
+    mode === "unrestricted" ||
+    mode === "strict"
   ) {
     return mode;
   }
