@@ -985,7 +985,7 @@ export interface SDKInitMessage {
 export interface SDKAssistantMessage {
   type: "assistant";
   content: string;
-  /** Legacy transport identifier. Prefer `otid` for message lineage. */
+  /** Top-level message ID when provided by the stream; otherwise an SDK-generated identifier. */
   uuid: string;
   /** Stable lineage key for this typed message slice, when provided. */
   otid?: string | null;
@@ -1020,7 +1020,7 @@ export interface SDKToolResultMessage {
 export interface SDKReasoningMessage {
   type: "reasoning";
   content: string;
-  /** Legacy transport identifier. Prefer `otid` for message lineage. */
+  /** Top-level message ID when provided by the stream; otherwise an SDK-generated identifier. */
   uuid: string;
   /** Stable lineage key for this typed message slice, when provided. */
   otid?: string | null;
