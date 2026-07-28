@@ -12,7 +12,6 @@ import type {
 export function createLocalAppServerSession(
   options: LettaCodeLocalAppServerOptions | undefined,
   mode: AppServerSessionMode,
-  beforeConnect?: () => Promise<void>,
 ): AppServerSession {
   const appServer = options ?? {};
   const sessionOptions: AppServerSessionOptions = {
@@ -45,7 +44,6 @@ export function createLocalAppServerSession(
     ...(appServer.pinGlobalAgent !== undefined
       ? { pinGlobalAgent: appServer.pinGlobalAgent }
       : {}),
-    ...(beforeConnect ? { beforeConnect } : {}),
   };
   return new AppServerSession(sessionOptions, mode);
 }

@@ -1,9 +1,6 @@
 import {
   createAppServerClient,
   type AppServerClient,
-  type AppServerSocketConstructor,
-  type AppServerSocketLike,
-  type AppServerSocketOptions,
 } from "@letta-ai/letta-code/app-server-client";
 import {
   AppServerRuntimeController,
@@ -13,6 +10,7 @@ import {
   externalToolGroups,
   registerAppServerControlRequestHandler,
 } from "./app-server-session.js";
+import { createCloudStatusTransportConstructor } from "./cloud-status-transport.js";
 import {
   RemoteEnvironmentClient,
   type RemoteEnvironmentTarget,
@@ -33,7 +31,6 @@ import type {
   LettaCodeCloudClientOptions,
   LettaCodeEnvironment,
   LettaCodeSocketConstructor,
-  LettaCodeSocketLike,
   RepositoryResource,
 } from "./types.js";
 import {
@@ -52,24 +49,6 @@ const DEFAULT_REPOSITORY_ATTACH_POLL_INTERVAL_MS = 250;
 const SDK_AGENT_ORIGIN = "@letta-ai/letta-agent-sdk";
 
 type FetchLike = typeof fetch;
-
-type CloudStatusMessage = ProtocolMessage & {
-  type: string;
-  seq?: unknown;
-  event_seq?: unknown;
-  idempotency_key?: unknown;
-  runId?: unknown;
-  run_id?: unknown;
-  stopReason?: unknown;
-  stop_reason?: unknown;
-  conversation_id?: unknown;
-  conversationId?: unknown;
-  agent_id?: unknown;
-  agentId?: unknown;
-  request?: unknown;
-  loop_status?: unknown;
-  delta?: unknown;
-};
 
 type CloudRuntimeStartResponse = ProtocolMessage & {
   type: "runtime_start_response";
@@ -328,231 +307,6 @@ function buildCloudStatusWebSocketUrl(params: {
   return base.toString();
 }
 
-function addSocketListener(
-  socket: LettaCodeSocketLike,
-  type: string,
-  listener: (event: unknown) => void,
-): () => void {
-  if (socket.addEventListener) {
-    socket.addEventListener(type, listener);
-    return () => socket.removeEventListener?.(type, listener);
-  }
-  if (socket.on) {
-    socket.on(type, listener);
-    return () => socket.off?.(type, listener);
-  }
-  throw new Error("WebSocket implementation does not support event listeners.");
-}
-
-function messageEventData(event: unknown): string | null {
-  if (typeof event === "string") return event;
-  if (event && typeof event === "object") {
-    const data = (event as { data?: unknown }).data;
-    if (typeof data === "string") return data;
-    if (data instanceof ArrayBuffer) {
-      return new TextDecoder().decode(data);
-    }
-    if (data instanceof Uint8Array) {
-      return new TextDecoder().decode(data);
-    }
-  }
-  return null;
-}
-
-type CloudStatusSocketControl = AppServerSocketLike & {
-  sendCloudCommand(command: Record<string, unknown>): void;
-};
-
-type CloudStatusSocketState = {
-  runtime: RuntimeScope;
-  seenIdempotencyKeys: Set<string>;
-  seenIdempotencyOrder: string[];
-  lastEventSeq: number | null;
-  controlSocket: CloudStatusSocketControl | null;
-};
-
-function createCloudStatusWebSocketConstructor(params: {
-  cloudOptions: LettaCodeCloudClientOptions;
-  runtime: RuntimeScope;
-}): AppServerSocketConstructor {
-  const WebSocketCtor = getWebSocketConstructor(params.cloudOptions.WebSocket);
-  const authMode = params.cloudOptions.webSocketAuth ?? "header";
-  const cloudHeaders = authMode === "header" ? cloudWebSocketHeaders(params.cloudOptions) : undefined;
-  const pingIntervalMs = params.cloudOptions.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS;
-  const state: CloudStatusSocketState = {
-    runtime: params.runtime,
-    seenIdempotencyKeys: new Set<string>(),
-    seenIdempotencyOrder: [],
-    lastEventSeq: null,
-    controlSocket: null,
-  };
-
-  class CloudStatusSocketAdapter implements AppServerSocketLike {
-    private readonly socket: LettaCodeSocketLike;
-    private readonly channel: string | null;
-    private readonly listenerRemovers = new Map<string, Map<(event: unknown) => void, () => void>>();
-    private pingTimer: ReturnType<typeof setInterval> | null = null;
-    private removeCloseListener: (() => void) | null = null;
-
-    constructor(url: string, options?: AppServerSocketOptions) {
-      this.channel = new URL(url).searchParams.get("channel");
-      const mergedHeaders = authMode === "header"
-        ? {
-            ...(options?.headers ?? {}),
-            ...(cloudHeaders ?? {}),
-          }
-        : undefined;
-      const socketOptions = mergedHeaders && Object.keys(mergedHeaders).length > 0
-        ? { headers: mergedHeaders }
-        : undefined;
-      this.socket = new WebSocketCtor(url, socketOptions);
-      if (this.channel === "control") {
-        state.controlSocket = this;
-      }
-      this.removeCloseListener = addSocketListener(this.socket, "close", () => {
-        this.stopPing();
-        if (state.controlSocket === this) state.controlSocket = null;
-      });
-      this.startPing(pingIntervalMs);
-    }
-
-    get readyState(): number {
-      return this.socket.readyState;
-    }
-
-    send(data: string): void {
-      this.socket.send(data);
-    }
-
-    close(): void {
-      this.stopPing();
-      this.removeCloseListener?.();
-      this.removeCloseListener = null;
-      if (state.controlSocket === this) state.controlSocket = null;
-      this.socket.close();
-    }
-
-    addEventListener(type: string, listener: (event: unknown) => void): void {
-      const wrapped = type === "message"
-        ? (event: unknown) => {
-            if (this.handleIncomingMessage(event)) {
-              listener(event);
-            }
-          }
-        : listener;
-      const remove = addSocketListener(this.socket, type, wrapped);
-      let typeRemovers = this.listenerRemovers.get(type);
-      if (!typeRemovers) {
-        typeRemovers = new Map();
-        this.listenerRemovers.set(type, typeRemovers);
-      }
-      typeRemovers.set(listener, remove);
-    }
-
-    removeEventListener(type: string, listener: (event: unknown) => void): void {
-      const typeRemovers = this.listenerRemovers.get(type);
-      const remove = typeRemovers?.get(listener);
-      if (!remove) return;
-      remove();
-      typeRemovers?.delete(listener);
-      if (typeRemovers?.size === 0) {
-        this.listenerRemovers.delete(type);
-      }
-    }
-
-    private handleIncomingMessage(event: unknown): boolean {
-      const data = messageEventData(event);
-      if (!data) return true;
-
-      let message: CloudStatusMessage;
-      try {
-        message = JSON.parse(data) as CloudStatusMessage;
-      } catch {
-        return true;
-      }
-
-      this.ackIfSequenced(message);
-
-      // The status gateway can mirror device stream frames to the control
-      // subscriber. Drop them at the Cloud transport boundary instead of making
-      // shared app-server session code understand Cloud fanout quirks. Do this
-      // before idempotency/event tracking so the canonical stream-channel frame
-      // is still delivered and sequenced.
-      if (this.channel === "control" && message.type === "stream_delta") {
-        return false;
-      }
-
-      if (this.isDuplicate(message)) return false;
-      this.trackEventSeq(message);
-      return true;
-    }
-
-    private ackIfSequenced(message: CloudStatusMessage): void {
-      if (typeof message.seq !== "number") return;
-      this.sendCloudCommand({ type: "ack", seq: message.seq });
-    }
-
-    private isDuplicate(message: CloudStatusMessage): boolean {
-      const idempotencyKey =
-        typeof message.idempotency_key === "string" ? message.idempotency_key : undefined;
-      if (!idempotencyKey) return false;
-      if (state.seenIdempotencyKeys.has(idempotencyKey)) return true;
-      state.seenIdempotencyKeys.add(idempotencyKey);
-      state.seenIdempotencyOrder.push(idempotencyKey);
-      while (state.seenIdempotencyOrder.length > 1_000) {
-        const oldest = state.seenIdempotencyOrder.shift();
-        if (oldest) state.seenIdempotencyKeys.delete(oldest);
-      }
-      return false;
-    }
-
-    private trackEventSeq(message: CloudStatusMessage): void {
-      if (typeof message.event_seq !== "number") return;
-      if (state.lastEventSeq !== null && message.event_seq > state.lastEventSeq + 1) {
-        this.sendSync(true);
-      }
-      if (state.lastEventSeq === null || message.event_seq > state.lastEventSeq) {
-        state.lastEventSeq = message.event_seq;
-      }
-    }
-
-    private sendSync(recoverApprovals: boolean): void {
-      const target = state.controlSocket?.readyState === 1 ? state.controlSocket : this;
-      target.sendCloudCommand({
-        type: "sync",
-        runtime: state.runtime,
-        recover_approvals: recoverApprovals,
-        force_device_status: true,
-      });
-    }
-
-    sendCloudCommand(command: Record<string, unknown>): void {
-      if (this.readyState !== 1) return;
-      try {
-        this.socket.send(JSON.stringify(command));
-      } catch {
-        // Best-effort Cloud status reliability command.
-      }
-    }
-
-    private startPing(intervalMs: number): void {
-      if (this.pingTimer) return;
-      this.pingTimer = setInterval(() => {
-        this.sendCloudCommand({ type: "ping" });
-      }, intervalMs);
-      (this.pingTimer as { unref?: () => void }).unref?.();
-    }
-
-    private stopPing(): void {
-      if (!this.pingTimer) return;
-      clearInterval(this.pingTimer);
-      this.pingTimer = null;
-    }
-  }
-
-  return CloudStatusSocketAdapter as AppServerSocketConstructor;
-}
-
 function isCloudConversation(value: unknown): value is CloudConversation & { id: string } {
   return Boolean(value && typeof value === "object" && typeof (value as CloudConversation).id === "string");
 }
@@ -681,8 +435,14 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     });
     const client = applyUniqueRequestIds(createAppServerClient({
       url,
-      WebSocket: createCloudStatusWebSocketConstructor({
-        cloudOptions: this.cloudOptions,
+      WebSocket: createCloudStatusTransportConstructor({
+        url,
+        WebSocket: getWebSocketConstructor(this.cloudOptions.WebSocket),
+        ...((this.cloudOptions.webSocketAuth ?? "header") === "header"
+          ? { headers: cloudWebSocketHeaders(this.cloudOptions) }
+          : {}),
+        pingIntervalMs:
+          this.cloudOptions.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS,
         runtime: resolved.runtime,
       }),
       requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,

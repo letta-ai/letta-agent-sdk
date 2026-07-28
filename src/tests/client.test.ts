@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { resolveAppServerChannelUrl } from "@letta-ai/letta-code/app-server-client";
 import * as sdk from "../index.js";
 import { LettaAgentClient } from "../index.js";
 import type { SessionDeviceStatus } from "../index.js";
@@ -100,33 +101,41 @@ class FakeAppServerSocket {
 }
 
 function fakeControlSocket(): FakeAppServerSocket {
-  const socket = FakeAppServerSocket.instances.find((instance) =>
-    instance.url.includes("channel=control"),
-  );
+  const socket =
+    FakeAppServerSocket.instances.find((instance) =>
+      instance.url.includes("channel=control"),
+    ) ??
+    FakeAppServerSocket.instances.find(
+      (instance) => !instance.url.includes("channel=stream"),
+    );
   if (!socket) throw new Error("missing fake control socket");
   return socket;
 }
 
 function fakeStreamSocket(): FakeAppServerSocket {
-  const socket = FakeAppServerSocket.instances.find((instance) =>
-    instance.url.includes("channel=stream"),
-  );
+  const socket =
+    FakeAppServerSocket.instances.find((instance) =>
+      instance.url.includes("channel=stream"),
+    ) ?? fakeControlSocket();
   if (!socket) throw new Error("missing fake stream socket");
   return socket;
 }
 
 /**
- * The stream socket belonging to the same AppServerClient as `control`.
- * AppServerClient constructs its control socket immediately before its
- * stream socket, so the pair is adjacent in the instances list.
+ * The outbound stream for this client. New app-server clients use the control
+ * socket bidirectionally; older installed packages use the adjacent stream.
  */
 function fakeStreamPairOf(control: FakeAppServerSocket): FakeAppServerSocket {
   const index = FakeAppServerSocket.instances.indexOf(control);
   const stream = FakeAppServerSocket.instances[index + 1];
-  if (!stream || !stream.url.includes("channel=stream")) {
-    throw new Error("missing paired fake stream socket");
-  }
-  return stream;
+  return stream?.url.includes("channel=stream") ? stream : control;
+}
+
+function expectedAppServerSocketCount(): number {
+  return new Set([
+    resolveAppServerChannelUrl("ws://127.0.0.1:4500/ws", "control"),
+    resolveAppServerChannelUrl("ws://127.0.0.1:4500/ws", "stream"),
+  ]).size;
 }
 
 const FAKE_MODEL_ENTRIES = [
@@ -569,24 +578,6 @@ describe("LettaAgentClient", () => {
 
   test("does not export the removed stdio Session implementation", () => {
     expect("Session" in sdk).toBe(false);
-  });
-
-  test("validates management connection linger options", () => {
-    expect(
-      () =>
-        new LettaAgentClient({
-          backend: "remote",
-          url: "ws://127.0.0.1:4500/ws",
-          idleLingerMs: -1,
-        }),
-    ).toThrow("Invalid idleLingerMs");
-    expect(
-      () =>
-        new LettaAgentClient({
-          backend: "local",
-          appServer: { idleLingerMs: 1.5 },
-        }),
-    ).toThrow("Invalid appServer.idleLingerMs");
   });
 
   test("creates local app-server sessions without starting transport until use", () => {
@@ -1462,9 +1453,11 @@ describe("LettaAgentClient", () => {
       ]);
       expect(page.messages).toHaveLength(2);
 
-      // Exactly one control+stream pair: the second caller must join the
-      // in-flight initialize instead of opening its own connection.
-      expect(FakeAppServerSocket.instances).toHaveLength(2);
+      // Exactly one app-server client: the second caller joins the in-flight
+      // initialize instead of opening another connection.
+      expect(FakeAppServerSocket.instances).toHaveLength(
+        expectedAppServerSocketCount(),
+      );
       const sent = fakeControlSocket().sent as Array<{ type?: string }>;
       expect(sent.filter((cmd) => cmd.type === "conversation_retrieve")).toHaveLength(1);
       expect(sent.filter((cmd) => cmd.type === "runtime_start")).toHaveLength(1);
@@ -1489,7 +1482,9 @@ describe("LettaAgentClient", () => {
       ]);
       expect(first).toEqual(second);
       expect(first.conversationId).toBe("conv-abc");
-      expect(FakeAppServerSocket.instances).toHaveLength(2);
+      expect(FakeAppServerSocket.instances).toHaveLength(
+        expectedAppServerSocketCount(),
+      );
       await expect(asAdvanced(session).initialize()).rejects.toThrow(
         "Session already initialized",
       );

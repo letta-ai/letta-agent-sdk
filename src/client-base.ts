@@ -151,13 +151,6 @@ export class LettaAgentClientBase {
       ) {
         throw new Error("Invalid appServer.requestTimeoutMs. Expected a positive integer.");
       }
-      const idleLingerMs = localOptions.appServer?.idleLingerMs;
-      if (
-        idleLingerMs !== undefined &&
-        (!Number.isInteger(idleLingerMs) || idleLingerMs < 0)
-      ) {
-        throw new Error("Invalid appServer.idleLingerMs. Expected a non-negative integer.");
-      }
       const startupTimeoutMs = localOptions.appServer?.startupTimeoutMs;
       if (
         startupTimeoutMs !== undefined &&
@@ -176,12 +169,6 @@ export class LettaAgentClientBase {
         (!Number.isInteger(options.requestTimeoutMs) || options.requestTimeoutMs <= 0)
       ) {
         throw new Error("Invalid requestTimeoutMs. Expected a positive integer.");
-      }
-      if (
-        options.idleLingerMs !== undefined &&
-        (!Number.isInteger(options.idleLingerMs) || options.idleLingerMs < 0)
-      ) {
-        throw new Error("Invalid idleLingerMs. Expected a non-negative integer.");
       }
     }
 
@@ -433,10 +420,7 @@ export class LettaAgentClientBase {
   }
 
   private appServerSessionOptions(): AppServerSessionOptions {
-    return {
-      ...this.remoteOptions(),
-      beforeConnect: () => this.releaseIdleManagementConnection(),
-    };
+    return this.remoteOptions();
   }
 
   private getRepositoriesClient(): RepositoriesClient {
@@ -445,15 +429,6 @@ export class LettaAgentClientBase {
     }
     this.repositoriesClient ??= new RepositoriesClient(this.cloudOptions());
     return this.repositoriesClient;
-  }
-
-  /**
-   * The app-server accepts a single control client at a time. Before a session
-   * connects, wait for this client's management work to settle and relinquish
-   * its pooled connection; management reconnects lazily on its next call.
-   */
-  protected async releaseIdleManagementConnection(): Promise<void> {
-    await this.managementTransport?.releaseIdleConnection?.();
   }
 
   private getManagementTransport(): ManagementTransport {

@@ -534,15 +534,9 @@ describe("portable management namespaces", () => {
   });
 });
 
-/**
- * Fake mirroring the app-server's single-control-client rule: while one
- * control socket is attached, later control sockets are accepted at the
- * websocket layer and then rejected with 1008 "control channel already
- * connected" (letta-code src/websocket/app-server.ts), which strands any
- * request sent over them.
- */
-class SingleControlAppServerSocket extends ManagementSocket {
-  static activeControl: SingleControlAppServerSocket | null = null;
+/** Fake app-server that accepts independent simultaneous client connections. */
+class MultiClientAppServerSocket extends ManagementSocket {
+  static activeControl: MultiClientAppServerSocket | null = null;
   static rejectedControlSockets = 0;
   static controlCloseDelayMs = 0;
   static agentListResponseDelayMs = 0;
@@ -550,28 +544,17 @@ class SingleControlAppServerSocket extends ManagementSocket {
   private closeScheduled = false;
 
   static reset(): void {
-    SingleControlAppServerSocket.activeControl = null;
-    SingleControlAppServerSocket.rejectedControlSockets = 0;
-    SingleControlAppServerSocket.controlCloseDelayMs = 0;
-    SingleControlAppServerSocket.agentListResponseDelayMs = 0;
-    SingleControlAppServerSocket.agentListRequests = 0;
+    MultiClientAppServerSocket.activeControl = null;
+    MultiClientAppServerSocket.rejectedControlSockets = 0;
+    MultiClientAppServerSocket.controlCloseDelayMs = 0;
+    MultiClientAppServerSocket.agentListResponseDelayMs = 0;
+    MultiClientAppServerSocket.agentListRequests = 0;
     ManagementSocket.instances = [];
   }
 
   protected override handleConnect(): void {
-    if (this.url.includes("channel=control")) {
-      if (SingleControlAppServerSocket.activeControl) {
-        SingleControlAppServerSocket.rejectedControlSockets += 1;
-        // The real server completes the upgrade, then closes the socket.
-        super.handleConnect();
-        this.readyState = 3;
-        this.emit("close", {
-          code: 1008,
-          reason: "control channel already connected",
-        });
-        return;
-      }
-      SingleControlAppServerSocket.activeControl = this;
+    if (!this.url.includes("channel=stream")) {
+      MultiClientAppServerSocket.activeControl ??= this;
     }
     super.handleConnect();
   }
@@ -581,18 +564,18 @@ class SingleControlAppServerSocket extends ManagementSocket {
     this.closeScheduled = true;
     this.readyState = 2;
     const finishClose = () => {
-      if (SingleControlAppServerSocket.activeControl === this) {
-        SingleControlAppServerSocket.activeControl = null;
+      if (MultiClientAppServerSocket.activeControl === this) {
+        MultiClientAppServerSocket.activeControl = null;
       }
       super.close();
     };
     if (
       this.url.includes("channel=control") &&
-      SingleControlAppServerSocket.controlCloseDelayMs > 0
+      MultiClientAppServerSocket.controlCloseDelayMs > 0
     ) {
       setTimeout(
         finishClose,
-        SingleControlAppServerSocket.controlCloseDelayMs,
+        MultiClientAppServerSocket.controlCloseDelayMs,
       );
       return;
     }
@@ -602,11 +585,11 @@ class SingleControlAppServerSocket extends ManagementSocket {
   protected override respond(command: Record<string, unknown>): void {
     const type = String(command.type);
     if (type === "agent_list") {
-      SingleControlAppServerSocket.agentListRequests += 1;
-      if (SingleControlAppServerSocket.agentListResponseDelayMs > 0) {
+      MultiClientAppServerSocket.agentListRequests += 1;
+      if (MultiClientAppServerSocket.agentListResponseDelayMs > 0) {
         setTimeout(
           () => super.respond(command),
-          SingleControlAppServerSocket.agentListResponseDelayMs,
+          MultiClientAppServerSocket.agentListResponseDelayMs,
         );
         return;
       }
@@ -653,43 +636,39 @@ describe("app-server management connection lifecycle", () => {
     );
   }
 
-  test("releases the connection after a request settles and the linger elapses", async () => {
+  test("keeps the management connection pooled while idle", async () => {
     ManagementSocket.instances = [];
     const transport = new AppServerManagementTransport({
       url,
       WebSocket: ManagementSocket,
-      idleLingerMs: 20,
     });
 
     await expect(transport.listAgents({})).resolves.toEqual([
       { id: "agent-1", name: "Memo" },
     ]);
-    // One control + one stream socket, still open during the linger.
-    expect(ManagementSocket.instances).toHaveLength(2);
-    expect(openSockets()).toHaveLength(2);
+    const socketCount = ManagementSocket.instances.length;
+    expect(socketCount).toBeGreaterThan(0);
+    expect(openSockets()).toHaveLength(socketCount);
 
     await Bun.sleep(60);
-    expect(openSockets()).toHaveLength(0);
+    expect(openSockets()).toHaveLength(socketCount);
   });
 
-  test("reconnects lazily after an idle release", async () => {
+  test("reuses the same pooled connection after an idle period", async () => {
     ManagementSocket.instances = [];
     const transport = new AppServerManagementTransport({
       url,
       WebSocket: ManagementSocket,
-      idleLingerMs: 20,
     });
 
     await transport.listAgents({});
+    const socketCount = ManagementSocket.instances.length;
     await Bun.sleep(60);
-    expect(openSockets()).toHaveLength(0);
+    expect(openSockets()).toHaveLength(socketCount);
 
     await expect(transport.listConversations({})).resolves.toHaveLength(1);
-    // A fresh connection was opened for the follow-up request.
-    expect(ManagementSocket.instances).toHaveLength(4);
-    expect(openSockets()).toHaveLength(2);
-    await Bun.sleep(60);
-    expect(openSockets()).toHaveLength(0);
+    expect(ManagementSocket.instances).toHaveLength(socketCount);
+    expect(openSockets()).toHaveLength(socketCount);
   });
 
   test("a burst of requests shares one connection", async () => {
@@ -697,54 +676,47 @@ describe("app-server management connection lifecycle", () => {
     const transport = new AppServerManagementTransport({
       url,
       WebSocket: ManagementSocket,
-      idleLingerMs: 20,
     });
 
     const [agents, conversations] = await Promise.all([
       transport.listAgents({}),
       transport.listConversations({}),
     ]);
+    const socketCount = ManagementSocket.instances.length;
     expect(agents).toHaveLength(1);
     expect(conversations).toHaveLength(1);
-    // A sequential follow-up inside the linger reuses the connection too.
+    // A sequential follow-up reuses the connection too.
     await expect(transport.retrieveAgent("agent-1")).resolves.toMatchObject({
       id: "agent-1",
     });
-    expect(ManagementSocket.instances).toHaveLength(2);
+    expect(ManagementSocket.instances).toHaveLength(socketCount);
 
     await Bun.sleep(60);
-    expect(openSockets()).toHaveLength(0);
+    expect(openSockets()).toHaveLength(socketCount);
   });
 
-  test("a session created right after management calls gets the control channel", async () => {
-    SingleControlAppServerSocket.reset();
-    SingleControlAppServerSocket.controlCloseDelayMs = 10;
+  test("management and session connections coexist without handoff", async () => {
+    MultiClientAppServerSocket.reset();
+    MultiClientAppServerSocket.controlCloseDelayMs = 10;
     const client = new PortableLettaAgentClient({
       backend: "remote",
       url,
-      WebSocket: SingleControlAppServerSocket,
+      WebSocket: MultiClientAppServerSocket,
     });
 
     await client.agents.list();
     await client.conversations.list();
-    // The pooled management connection is still lingering (default 250ms) and
-    // holds the single control slot; a second control client would be
-    // rejected 1008 by the fake, exactly like the real app-server.
-    expect(SingleControlAppServerSocket.activeControl).not.toBeNull();
-    const managementControl = SingleControlAppServerSocket.activeControl;
+    expect(MultiClientAppServerSocket.activeControl).not.toBeNull();
+    const managementControl = MultiClientAppServerSocket.activeControl;
 
-    // resumeSession() must release the idle management connection before the
-    // session connects, without waiting out the linger.
     const session = client.resumeSession("conv-1");
     try {
       const init = await asAdvanced(session).initialize();
       expect(init.conversationId).toBe("conv-1");
       expect(init.agentId).toBe("agent-1");
-      // The management control socket was closed before the session's control
-      // socket connected, so nothing got rejected.
-      expect(managementControl?.readyState).toBe(3);
-      expect(SingleControlAppServerSocket.rejectedControlSockets).toBe(0);
-      expect(SingleControlAppServerSocket.activeControl).not.toBe(
+      expect(managementControl?.readyState).toBe(1);
+      expect(MultiClientAppServerSocket.rejectedControlSockets).toBe(0);
+      expect(MultiClientAppServerSocket.activeControl).toBe(
         managementControl,
       );
     } finally {
@@ -752,18 +724,18 @@ describe("app-server management connection lifecycle", () => {
     }
   });
 
-  test("a session waits for an in-flight management request before taking the control channel", async () => {
-    SingleControlAppServerSocket.reset();
-    SingleControlAppServerSocket.agentListResponseDelayMs = 20;
-    SingleControlAppServerSocket.controlCloseDelayMs = 10;
+  test("a session initializes alongside an in-flight management request", async () => {
+    MultiClientAppServerSocket.reset();
+    MultiClientAppServerSocket.agentListResponseDelayMs = 20;
+    MultiClientAppServerSocket.controlCloseDelayMs = 10;
     const client = new PortableLettaAgentClient({
       backend: "remote",
       url,
-      WebSocket: SingleControlAppServerSocket,
+      WebSocket: MultiClientAppServerSocket,
     });
 
     const agentsPromise = client.agents.list();
-    while (SingleControlAppServerSocket.agentListRequests === 0) {
+    while (MultiClientAppServerSocket.agentListRequests === 0) {
       await Bun.sleep(1);
     }
 
@@ -775,36 +747,36 @@ describe("app-server management connection lifecycle", () => {
       ]);
       expect(agents).toHaveLength(1);
       expect(init.conversationId).toBe("conv-1");
-      expect(SingleControlAppServerSocket.rejectedControlSockets).toBe(0);
+      expect(MultiClientAppServerSocket.rejectedControlSockets).toBe(0);
     } finally {
       session.close();
     }
   });
 
-  test("a session releases a lingering management connection owned by another client", async () => {
-    SingleControlAppServerSocket.reset();
-    SingleControlAppServerSocket.controlCloseDelayMs = 10;
+  test("a session coexists with management owned by another client", async () => {
+    MultiClientAppServerSocket.reset();
+    MultiClientAppServerSocket.controlCloseDelayMs = 10;
     const listClient = new PortableLettaAgentClient({
       backend: "remote",
       url,
-      WebSocket: SingleControlAppServerSocket,
+      WebSocket: MultiClientAppServerSocket,
     });
     const chatClient = new PortableLettaAgentClient({
       backend: "remote",
       url,
-      WebSocket: SingleControlAppServerSocket,
+      WebSocket: MultiClientAppServerSocket,
     });
 
     await listClient.agents.list();
-    const managementControl = SingleControlAppServerSocket.activeControl;
+    const managementControl = MultiClientAppServerSocket.activeControl;
     expect(managementControl).not.toBeNull();
 
     const session = chatClient.resumeSession("conv-1");
     try {
       const init = await asAdvanced(session).initialize();
       expect(init.conversationId).toBe("conv-1");
-      expect(managementControl?.readyState).toBe(3);
-      expect(SingleControlAppServerSocket.rejectedControlSockets).toBe(0);
+      expect(managementControl?.readyState).toBe(1);
+      expect(MultiClientAppServerSocket.rejectedControlSockets).toBe(0);
     } finally {
       session.close();
     }

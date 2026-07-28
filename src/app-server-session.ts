@@ -10,7 +10,6 @@ import {
   GIT_MEMORY_ENABLED_TAG,
   LETTA_CODE_ORIGIN_TAG,
 } from "@letta-ai/letta-code/agent-presets";
-import { releaseAppServerManagementConnections } from "./app-server-management.js";
 import {
   buildCanUseToolContext,
   isHeadlessAutoAllowTool,
@@ -127,11 +126,6 @@ export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
   connect?: (
     sessionEnv?: Record<string, string>,
   ) => Promise<{ url: string; close(): void }>;
-  /**
-   * Internal handoff hook used to release a management connection owned by
-   * the same SDK client before this session opens its control socket.
-   */
-  beforeConnect?: () => Promise<void>;
   /** Whether SDK create-agent payloads should add the origin tag automatically. */
   includeSdkOriginTag?: boolean;
 };
@@ -747,9 +741,7 @@ export class AppServerSession extends RemoteClientSessionCore {
   }
 
   protected override async initializeRuntimeController(): Promise<RuntimeSessionInit> {
-    await this.remoteOptions.beforeConnect?.();
     const url = await this.resolveAppServerUrl();
-    await releaseAppServerManagementConnections(url);
     const client = applyUniqueRequestIds(createAppServerClient({
       url,
       ...(this.remoteOptions.authToken !== undefined

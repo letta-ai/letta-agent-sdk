@@ -10,6 +10,12 @@ Build applications with stateful agents powered by the [Letta agent harness](htt
 npm install @letta-ai/letta-agent-sdk
 ```
 
+The `0.4.x` SDK line requires the matching single-socket
+`@letta-ai/letta-code` app-server release. Release `letta-code` first, then
+replace the SDK's package dependency with that published version before
+publishing `0.4.0`; the development branch intentionally does not name an
+unpublished package version.
+
 Local execution requires Node.js 22.19 or newer.
 
 ## Quick start

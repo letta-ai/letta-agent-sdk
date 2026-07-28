@@ -321,8 +321,6 @@ export interface LettaCodeLocalAppServerOptions {
   WebSocket?: LettaCodeSocketConstructor;
   /** Timeout for websocket protocol request/turn correlation. */
   requestTimeoutMs?: number;
-  /** Milliseconds an idle management connection may be reused before release. Defaults to 250. */
-  idleLingerMs?: number;
   /** Whether agents created through this app-server are added to Letta Code's global pinned-agent list. */
   pinGlobalAgent?: boolean;
   /** Local app-server listen URL when the SDK spawns it. Defaults to ws://127.0.0.1:0. */
@@ -347,8 +345,6 @@ export interface LettaCodeRemoteClientOptions {
   WebSocket?: LettaCodeSocketConstructor;
   /** Timeout for websocket protocol request/turn correlation. */
   requestTimeoutMs?: number;
-  /** Milliseconds an idle management connection may be reused before release. Defaults to 250. */
-  idleLingerMs?: number;
   /** Whether agents created through this app-server are added to Letta Code's global pinned-agent list. */
   pinGlobalAgent?: boolean;
 }
