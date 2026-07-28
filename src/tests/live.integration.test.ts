@@ -293,19 +293,18 @@ function hasRenderableContent(messages: SDKMessage[]): boolean {
 
 function pickAnyMessageId(page: ListMessagesResult): string | null {
   for (const item of page.messages) {
-    if (item && typeof item === "object") {
-      const obj = item as Record<string, unknown>;
-      if (typeof obj.id === "string") return obj.id;
-    }
+    if (typeof item.id === "string") return item.id;
   }
   return null;
 }
 
 function assertRawMessageShape(page: ListMessagesResult): void {
   for (const item of page.messages) {
-    expect(item && typeof item === "object").toBe(true);
-    const obj = item as Record<string, unknown>;
-    const discriminator = obj.message_type ?? obj.type;
+    const discriminator = "message_type" in item
+      ? item.message_type
+      : "type" in item
+        ? item.type
+        : undefined;
     expect(typeof discriminator === "string").toBe(true);
   }
 }

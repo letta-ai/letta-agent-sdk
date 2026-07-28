@@ -11,7 +11,15 @@
  * Real end-to-end tests with a live CLI are in the manual smoke suite.
  */
 import { describe, expect, test } from "bun:test";
+import type { Message } from "@letta-ai/letta-client/resources/agents/messages";
 import type { ListMessagesOptions, ListMessagesResult } from "../types.js";
+
+const USER_MESSAGE_FIXTURE: Message = {
+  id: "msg-1",
+  content: "hello",
+  date: "2026-07-28T00:00:00Z",
+  message_type: "user_message",
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Type shapes
@@ -47,7 +55,7 @@ describe("ListMessagesOptions type", () => {
 describe("ListMessagesResult type", () => {
   test("well-formed success result with messages", () => {
     const result: ListMessagesResult = {
-      messages: [{ id: "msg-1", message_type: "user_message" }],
+      messages: [USER_MESSAGE_FIXTURE],
       nextBefore: "msg-1",
       hasMore: false,
     };
@@ -68,7 +76,10 @@ describe("ListMessagesResult type", () => {
 
   test("partial page — hasMore is true", () => {
     const result: ListMessagesResult = {
-      messages: new Array(50).fill({ id: "x" }),
+      messages: Array.from({ length: 50 }, (_, index) => ({
+        ...USER_MESSAGE_FIXTURE,
+        id: `msg-${index + 1}`,
+      })),
       nextBefore: "msg-50",
       hasMore: true,
     };

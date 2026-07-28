@@ -1,100 +1,93 @@
+import type {
+  AgentListParams,
+  AgentState,
+  AgentUpdateParams,
+} from "@letta-ai/letta-client/resources/agents/agents";
+import type { Message } from "@letta-ai/letta-client/resources/agents/messages";
+import type {
+  Conversation,
+  ConversationCreateParams,
+  ConversationListParams,
+  ConversationUpdateParams,
+} from "@letta-ai/letta-client/resources/conversations/conversations";
+import type { MessageListParams } from "@letta-ai/letta-client/resources/conversations/messages";
 import type { ListMessagesResult, ListModelsResult } from "./types.js";
 
 /** Agent state returned by either the Cloud API or Letta Code app-server. */
-export type LettaAgent = Record<string, unknown> & {
-  id: string;
-  name: string;
-  description?: string | null;
-  model?: string | null;
-  model_settings?: Record<string, unknown> | null;
-  tags?: string[];
-  created_at?: string | null;
-  updated_at?: string | null;
-};
+export type LettaAgent = AgentState;
 
 /** Conversation state returned by either the Cloud API or Letta Code app-server. */
-export type LettaConversation = Record<string, unknown> & {
-  id: string;
-  agent_id: string;
-  summary?: string | null;
-  description?: string | null;
-  model?: string | null;
-  model_settings?: Record<string, unknown> | null;
-  archived?: boolean;
-  created_at?: string | null;
-  updated_at?: string | null;
-  last_message_at?: string | null;
-};
+export type LettaConversation = Conversation;
 
 /** Raw Letta API message returned from conversation history. */
-export type LettaConversationMessage = Record<string, unknown>;
+export type LettaConversationMessage = Message;
+
+type Present<T> = Exclude<T, null | undefined>;
 
 export interface ListAgentsOptions {
-  before?: string;
-  after?: string;
-  limit?: number;
+  before?: Present<AgentListParams["before"]>;
+  after?: Present<AgentListParams["after"]>;
+  limit?: Present<AgentListParams["limit"]>;
   order?: "asc" | "desc";
   orderBy?: "createdAt" | "lastRunCompletion";
   /** Search agent names. */
-  query?: string;
+  query?: Present<AgentListParams["query_text"]>;
   /** Match one exact agent name. */
-  name?: string;
-  tags?: string[];
-  matchAllTags?: boolean;
+  name?: Present<AgentListParams["name"]>;
+  tags?: Present<AgentListParams["tags"]>;
+  matchAllTags?: Present<AgentListParams["match_all_tags"]>;
   /** Relationships to hydrate in each returned agent. */
-  include?: string[];
+  include?: Present<AgentListParams["include"]>;
 }
 
 export interface UpdateAgentOptions {
-  name?: string | null;
-  description?: string | null;
-  model?: string | null;
-  modelSettings?: Record<string, unknown> | null;
-  system?: string | null;
-  tags?: string[] | null;
-  hidden?: boolean | null;
-  contextWindowLimit?: number | null;
+  name?: AgentUpdateParams["name"];
+  description?: AgentUpdateParams["description"];
+  model?: AgentUpdateParams["model"];
+  modelSettings?: AgentUpdateParams["model_settings"];
+  system?: AgentUpdateParams["system"];
+  tags?: AgentUpdateParams["tags"];
+  hidden?: AgentUpdateParams["hidden"];
+  contextWindowLimit?: AgentUpdateParams["context_window_limit"];
 }
 
 export interface ListConversationsOptions {
-  agentId?: string;
-  after?: string;
-  limit?: number;
-  order?: "asc" | "desc";
+  agentId?: Present<ConversationListParams["agent_id"]>;
+  after?: Present<ConversationListParams["after"]>;
+  limit?: Present<ConversationListParams["limit"]>;
+  order?: Present<ConversationListParams["order"]>;
   orderBy?: "createdAt" | "lastRunCompletion" | "lastMessageAt";
-  archiveStatus?: "unarchived" | "archived" | "all";
-  summarySearch?: string;
+  archiveStatus?: Present<ConversationListParams["archive_status"]>;
+  summarySearch?: Present<ConversationListParams["summary_search"]>;
 }
 
 export interface CreateConversationOptions {
-  agentId: string;
-  summary?: string | null;
-  description?: string | null;
-  model?: string | null;
-  modelSettings?: Record<string, unknown> | null;
-  contextWindowLimit?: number | null;
-  hidden?: boolean;
+  agentId: ConversationCreateParams["agent_id"];
+  summary?: ConversationCreateParams["summary"];
+  description?: ConversationCreateParams["description"];
+  model?: ConversationCreateParams["model"];
+  modelSettings?: ConversationCreateParams["model_settings"];
+  contextWindowLimit?: ConversationCreateParams["context_window_limit"];
+  hidden?: ConversationCreateParams["hidden"];
 }
 
 export interface UpdateConversationOptions {
-  summary?: string | null;
-  description?: string | null;
-  model?: string | null;
-  modelSettings?: Record<string, unknown> | null;
-  contextWindowLimit?: number | null;
-  archived?: boolean | null;
+  summary?: ConversationUpdateParams["summary"];
+  description?: ConversationUpdateParams["description"];
+  model?: ConversationUpdateParams["model"];
+  modelSettings?: ConversationUpdateParams["model_settings"];
+  contextWindowLimit?: ConversationUpdateParams["context_window_limit"];
+  archived?: ConversationUpdateParams["archived"];
 }
 
 export interface ConversationMessagesOptions {
-  before?: string;
-  after?: string;
+  before?: Present<MessageListParams["before"]>;
+  after?: Present<MessageListParams["after"]>;
   order?: "asc" | "desc";
-  limit?: number;
+  limit?: Present<MessageListParams["limit"]>;
 }
 
-export type ConversationMessagesResult = ListMessagesResult & {
-  messages: LettaConversationMessage[];
-};
+export type ConversationMessagesResult = ListMessagesResult;
 
 export type AgentRepositoryPermissions = "read" | "read_write";
 export type AgentRepositoryRecompileTarget = "default" | false;

@@ -1,58 +1,42 @@
 import {
   createAppServerClient,
   type AppServerClient,
-  type AppServerRequestCommandWithId,
+  type AppServerRawResponse,
   type AppServerSocketConstructor,
 } from "@letta-ai/letta-code/app-server-client";
 import type {
-  ManagementQuery,
-  ManagementTransport,
-} from "./management.js";
+  AgentDeleteResponseMessage,
+  AgentListResponseMessage,
+  AgentRetrieveResponseMessage,
+  AgentUpdateResponseMessage,
+  ConversationCreateResponseMessage,
+  ConversationListResponseMessage,
+  ConversationMessagesListResponseMessage,
+  ConversationRetrieveResponseMessage,
+  ConversationUpdateResponseMessage,
+  ListModelsResponseMessage,
+} from "@letta-ai/letta-code/app-server-protocol";
+import type {
+  AgentListParams,
+  AgentUpdateParams,
+} from "@letta-ai/letta-client/resources/agents/agents";
+import type {
+  ConversationCreateParams,
+  ConversationListParams,
+  ConversationUpdateParams,
+} from "@letta-ai/letta-client/resources/conversations/conversations";
+import type { MessageListParams } from "@letta-ai/letta-client/resources/conversations/messages";
+import { normalizeAppServerModels } from "./app-server-models.js";
+import type { ManagementTransport } from "./management.js";
 import { applyUniqueRequestIds } from "./request-ids.js";
 import type {
   ConversationMessagesResult,
   LettaAgent,
   LettaConversation,
 } from "./management-types.js";
-import type {
-  LettaCodeModelEntry,
-  LettaCodeRemoteClientOptions,
-  ListModelsResult,
-} from "./types.js";
+import type { LettaCodeRemoteClientOptions, ListModelsResult } from "./types.js";
 
 type OwnedConnection = { url: string; close(): void };
-
-type ManagementResponse = {
-  type: string;
-  success: boolean;
-  error?: string;
-};
-
-type AgentListResponse = ManagementResponse & {
-  agents: LettaAgent[];
-};
-
-type AgentResponse = ManagementResponse & {
-  agent: LettaAgent | null;
-};
-
-type ConversationListResponse = ManagementResponse & {
-  conversations: LettaConversation[];
-};
-
-type ConversationResponse = ManagementResponse & {
-  conversation: LettaConversation | null;
-};
-
-type ConversationMessagesResponse = ManagementResponse & {
-  messages: Record<string, unknown>[];
-};
-
-type ListModelsResponse = ManagementResponse & {
-  entries?: unknown;
-  available_handles?: unknown;
-  byok_provider_aliases?: unknown;
-};
 
 export type AppServerManagementOptions =
   Partial<LettaCodeRemoteClientOptions> & {
@@ -77,39 +61,6 @@ function ensureResponse<T>(
   return value;
 }
 
-function modelEntries(value: unknown): LettaCodeModelEntry[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
-    const record = entry as Record<string, unknown>;
-    if (
-      typeof record.id !== "string" ||
-      typeof record.handle !== "string" ||
-      typeof record.label !== "string" ||
-      typeof record.description !== "string"
-    ) {
-      return [];
-    }
-    return [{
-      ...record,
-      id: record.id,
-      handle: record.handle,
-      label: record.label,
-      description: record.description,
-    }];
-  });
-}
-
-function stringRecord(value: unknown): Record<string, string> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  const entries = Object.entries(value as Record<string, unknown>).filter(
-    (entry): entry is [string, string] => typeof entry[1] === "string",
-  );
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-}
-
 /**
  * Management transport that speaks the app-server control protocol.
  *
@@ -125,8 +76,8 @@ export class AppServerManagementTransport
 
   constructor(private readonly options: AppServerManagementOptions) {}
 
-  async listAgents(query: ManagementQuery): Promise<LettaAgent[]> {
-    const response = await this.request<AgentListResponse>(
+  async listAgents(query: AgentListParams): Promise<LettaAgent[]> {
+    const response = await this.request<AgentListResponseMessage>(
       "agent_list",
       { query },
       "agent_list_response",
@@ -138,7 +89,7 @@ export class AppServerManagementTransport
   }
 
   async retrieveAgent(agentId: string): Promise<LettaAgent> {
-    const response = await this.request<AgentResponse>(
+    const response = await this.request<AgentRetrieveResponseMessage>(
       "agent_retrieve",
       { agent_id: agentId },
       "agent_retrieve_response",
@@ -152,9 +103,9 @@ export class AppServerManagementTransport
 
   async updateAgent(
     agentId: string,
-    body: Record<string, unknown>,
+    body: AgentUpdateParams,
   ): Promise<LettaAgent> {
-    const response = await this.request<AgentResponse>(
+    const response = await this.request<AgentUpdateResponseMessage>(
       "agent_update",
       { agent_id: agentId, body },
       "agent_update_response",
@@ -167,7 +118,7 @@ export class AppServerManagementTransport
   }
 
   async deleteAgent(agentId: string): Promise<void> {
-    const response = await this.request<ManagementResponse>(
+    const response = await this.request<AgentDeleteResponseMessage>(
       "agent_delete",
       { agent_id: agentId },
       "agent_delete_response",
@@ -180,33 +131,18 @@ export class AppServerManagementTransport
   async listModels(): Promise<ListModelsResult> {
     // A bare list_models command (no runtime scope) is answered on the
     // control channel, so no session or conversation is required.
-    const response = await this.request<ListModelsResponse>(
+    const response = await this.request<ListModelsResponseMessage>(
       "list_models",
       {},
       "list_models_response",
     );
-    if (!response.success) {
-      throw new Error(response.error ?? "Failed to list models.");
-    }
-    const result: ListModelsResult = {
-      entries: modelEntries(response.entries),
-    };
-    if (response.available_handles === null) {
-      result.availableHandles = null;
-    } else if (Array.isArray(response.available_handles)) {
-      result.availableHandles = response.available_handles.filter(
-        (handle): handle is string => typeof handle === "string",
-      );
-    }
-    const aliases = stringRecord(response.byok_provider_aliases);
-    if (aliases) result.byokProviderAliases = aliases;
-    return result;
+    return normalizeAppServerModels(response);
   }
 
   async listConversations(
-    query: ManagementQuery,
+    query: ConversationListParams,
   ): Promise<LettaConversation[]> {
-    const response = await this.request<ConversationListResponse>(
+    const response = await this.request<ConversationListResponseMessage>(
       "conversation_list",
       { query },
       "conversation_list_response",
@@ -220,7 +156,7 @@ export class AppServerManagementTransport
   async retrieveConversation(
     conversationId: string,
   ): Promise<LettaConversation> {
-    const response = await this.request<ConversationResponse>(
+    const response = await this.request<ConversationRetrieveResponseMessage>(
       "conversation_retrieve",
       { conversation_id: conversationId },
       "conversation_retrieve_response",
@@ -233,9 +169,9 @@ export class AppServerManagementTransport
   }
 
   async createConversation(
-    body: Record<string, unknown>,
+    body: ConversationCreateParams,
   ): Promise<LettaConversation> {
-    const response = await this.request<ConversationResponse>(
+    const response = await this.request<ConversationCreateResponseMessage>(
       "conversation_create",
       { body },
       "conversation_create_response",
@@ -249,9 +185,9 @@ export class AppServerManagementTransport
 
   async updateConversation(
     conversationId: string,
-    body: Record<string, unknown>,
+    body: ConversationUpdateParams,
   ): Promise<LettaConversation> {
-    const response = await this.request<ConversationResponse>(
+    const response = await this.request<ConversationUpdateResponseMessage>(
       "conversation_update",
       { conversation_id: conversationId, body },
       "conversation_update_response",
@@ -265,10 +201,10 @@ export class AppServerManagementTransport
 
   async listConversationMessages(
     conversationId: string,
-    query: ManagementQuery,
+    query: MessageListParams,
   ): Promise<ConversationMessagesResult> {
     const response =
-      await this.request<ConversationMessagesResponse>(
+      await this.request<ConversationMessagesListResponseMessage>(
         "conversation_messages_list",
         { conversation_id: conversationId, query },
         "conversation_messages_list_response",
@@ -294,16 +230,20 @@ export class AppServerManagementTransport
     // counter, while connection identity keeps this pool independent from
     // session clients using the same app-server.
     const { client } = await this.acquireConnection();
-    const command = {
-      type,
-      request_id: client.nextRequestId(type),
-      ...body,
-    } as AppServerRequestCommandWithId;
-    const response = await client.request(command, {
-      predicate: (message): message is typeof message =>
-        message.type === responseType,
-    });
-    return response as unknown as TResponse;
+    return client.requestRaw<TResponse & AppServerRawResponse>(
+      {
+        type,
+        request_id: client.nextRequestId(type),
+        ...body,
+      },
+      {
+        predicate: (message): message is TResponse & AppServerRawResponse =>
+          message !== null &&
+          typeof message === "object" &&
+          "type" in message &&
+          message.type === responseType,
+      },
+    );
   }
 
   private acquireConnection(): Promise<ActiveConnection> {

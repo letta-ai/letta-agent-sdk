@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import type { AgentState } from "@letta-ai/letta-client/resources/agents/agents";
+import type { Message } from "@letta-ai/letta-client/resources/agents/messages";
 import { AppServerManagementTransport } from "../app-server-management.js";
 import { LettaAgentClient as PortableLettaAgentClient } from "../client-entry.js";
 import { LettaAgentClient as NodeLettaAgentClient } from "../index.js";
@@ -12,6 +14,26 @@ type RecordedRequest = {
   url: URL;
   method: string;
   body?: unknown;
+};
+
+const AGENT_FIXTURE: AgentState = {
+  id: "agent-1",
+  name: "Memo",
+  agent_type: "letta_v1_agent",
+  blocks: [],
+  llm_config: {} as AgentState["llm_config"],
+  memory: {} as AgentState["memory"],
+  sources: [],
+  system: "",
+  tags: [],
+  tools: [],
+};
+
+const USER_MESSAGE_FIXTURE: Message = {
+  id: "message-1",
+  content: "hello",
+  date: "2026-07-28T00:00:00Z",
+  message_type: "user_message",
 };
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
@@ -39,13 +61,13 @@ function createManagementFetch(
     requests.push({ url, method, body });
 
     if (url.pathname === "/v1/agents/" && method === "GET") {
-      return jsonResponse([{ id: "agent-1", name: "Memo" }]);
+      return jsonResponse([AGENT_FIXTURE]);
     }
     if (url.pathname === "/v1/agents/agent-1" && method === "GET") {
-      return jsonResponse({ id: "agent-1", name: "Memo" });
+      return jsonResponse(AGENT_FIXTURE);
     }
     if (url.pathname === "/v1/agents/agent-1" && method === "PATCH") {
-      return jsonResponse({ id: "agent-1", name: "Renamed", ...body as object });
+      return jsonResponse({ ...AGENT_FIXTURE, name: "Renamed", ...body as object });
     }
     if (url.pathname === "/v1/agents/agent-1" && method === "DELETE") {
       return new Response(null, { status: 204 });
@@ -97,7 +119,7 @@ function createManagementFetch(
       url.pathname === "/v1/conversations/conv-1/messages" &&
       method === "GET"
     ) {
-      return jsonResponse([{ id: "message-1", message_type: "user_message" }]);
+      return jsonResponse([USER_MESSAGE_FIXTURE]);
     }
     return jsonResponse({ detail: "not found" }, { status: 404 });
   }) as typeof fetch;
@@ -146,14 +168,14 @@ class ManagementSocket {
   protected respond(command: Record<string, unknown>): void {
     const responses: Record<string, Record<string, unknown>> = {
       agent_list: {
-        agents: [{ id: "agent-1", name: "Memo" }],
+        agents: [AGENT_FIXTURE],
       },
       agent_retrieve: {
-        agent: { id: command.agent_id, name: "Memo" },
+        agent: AGENT_FIXTURE,
       },
       agent_update: {
         agent: {
-          id: command.agent_id,
+          ...AGENT_FIXTURE,
           ...(command.body as object),
         },
       },
@@ -199,7 +221,7 @@ class ManagementSocket {
         },
       },
       conversation_messages_list: {
-        messages: [{ id: "message-1", message_type: "user_message" }],
+        messages: [USER_MESSAGE_FIXTURE],
       },
     };
     const type = String(command.type);
@@ -233,7 +255,7 @@ async function exerciseManagementApi(
       limit: 20,
       orderBy: "lastRunCompletion",
     }),
-  ).resolves.toEqual([{ id: "agent-1", name: "Memo" }]);
+  ).resolves.toEqual([AGENT_FIXTURE]);
   await expect(client.agents.retrieve("agent-1")).resolves.toMatchObject({
     id: "agent-1",
   });
@@ -293,7 +315,7 @@ async function exerciseManagementApi(
       order: "desc",
     }),
   ).resolves.toEqual({
-    messages: [{ id: "message-1", message_type: "user_message" }],
+    messages: [USER_MESSAGE_FIXTURE],
   });
 }
 
@@ -479,7 +501,7 @@ describe("portable management namespaces", () => {
     });
 
     await expect(client.agents.list()).resolves.toEqual([
-      { id: "agent-1", name: "Memo" },
+      AGENT_FIXTURE,
     ]);
     expect(
       ManagementSocket.instances.flatMap((socket) => socket.sent),
@@ -644,7 +666,7 @@ describe("app-server management connection lifecycle", () => {
     });
 
     await expect(transport.listAgents({})).resolves.toEqual([
-      { id: "agent-1", name: "Memo" },
+      AGENT_FIXTURE,
     ]);
     const socketCount = ManagementSocket.instances.length;
     expect(socketCount).toBeGreaterThan(0);

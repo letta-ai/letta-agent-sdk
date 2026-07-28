@@ -10,10 +10,7 @@ import type {
   ConversationUpdateParams,
 } from "@letta-ai/letta-client/resources/conversations/conversations";
 import type { MessageListParams } from "@letta-ai/letta-client/resources/conversations/messages";
-import type {
-  ManagementQuery,
-  ManagementTransport,
-} from "./management.js";
+import type { ManagementTransport } from "./management.js";
 import type {
   AgentRepository,
   AgentRepositoryPermissions,
@@ -81,23 +78,20 @@ function isNotFound(error: unknown): boolean {
 export class CloudManagementTransport implements ManagementTransport {
   constructor(private readonly client: Letta) {}
 
-  async listAgents(query: ManagementQuery): Promise<LettaAgent[]> {
-    const page = await this.client.agents.list(query as AgentListParams);
-    return page.items as unknown as LettaAgent[];
+  async listAgents(query: AgentListParams): Promise<LettaAgent[]> {
+    const page = await this.client.agents.list(query);
+    return page.items;
   }
 
   async retrieveAgent(agentId: string): Promise<LettaAgent> {
-    return await this.client.agents.retrieve(agentId) as unknown as LettaAgent;
+    return this.client.agents.retrieve(agentId);
   }
 
   async updateAgent(
     agentId: string,
-    body: Record<string, unknown>,
+    body: AgentUpdateParams,
   ): Promise<LettaAgent> {
-    return await this.client.agents.update(
-      agentId,
-      body as AgentUpdateParams,
-    ) as unknown as LettaAgent;
+    return this.client.agents.update(agentId, body);
   }
 
   async deleteAgent(agentId: string): Promise<void> {
@@ -182,47 +176,38 @@ export class CloudManagementTransport implements ManagementTransport {
   }
 
   async listConversations(
-    query: ManagementQuery,
+    query: ConversationListParams,
   ): Promise<LettaConversation[]> {
-    return await this.client.conversations.list(
-      query as ConversationListParams,
-    ) as LettaConversation[];
+    return this.client.conversations.list(query);
   }
 
   async retrieveConversation(
     conversationId: string,
   ): Promise<LettaConversation> {
-    return await this.client.conversations.retrieve(
-      conversationId,
-    ) as LettaConversation;
+    return this.client.conversations.retrieve(conversationId);
   }
 
   async createConversation(
-    body: Record<string, unknown>,
+    body: ConversationCreateParams,
   ): Promise<LettaConversation> {
-    return await this.client.conversations.create(
-      body as unknown as ConversationCreateParams,
-    ) as LettaConversation;
+    return this.client.conversations.create(body);
   }
 
   async updateConversation(
     conversationId: string,
-    body: Record<string, unknown>,
+    body: ConversationUpdateParams,
   ): Promise<LettaConversation> {
-    return await this.client.conversations.update(
-      conversationId,
-      body as ConversationUpdateParams,
-    ) as LettaConversation;
+    return this.client.conversations.update(conversationId, body);
   }
 
   async listConversationMessages(
     conversationId: string,
-    query: ManagementQuery,
+    query: MessageListParams,
   ): Promise<ConversationMessagesResult> {
     const page = await this.client.conversations.messages.list(
       conversationId,
-      query as MessageListParams,
+      query,
     );
-    return { messages: page.items as unknown as Record<string, unknown>[] };
+    return { messages: page.items };
   }
 }

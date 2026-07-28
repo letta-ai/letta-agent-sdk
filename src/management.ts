@@ -1,4 +1,14 @@
 import type {
+  AgentListParams,
+  AgentUpdateParams,
+} from "@letta-ai/letta-client/resources/agents/agents";
+import type {
+  ConversationCreateParams,
+  ConversationListParams,
+  ConversationUpdateParams,
+} from "@letta-ai/letta-client/resources/conversations/conversations";
+import type { MessageListParams } from "@letta-ai/letta-client/resources/conversations/messages";
+import type {
   AgentRepositoriesClient,
   AgentsClient,
   ConversationsClient,
@@ -15,48 +25,35 @@ import type {
 } from "./management-types.js";
 import type { ListModelsResult } from "./types.js";
 
-export type ManagementQuery = Record<
-  string,
-  string | number | boolean | string[] | null | undefined
->;
-
 export interface ManagementTransport {
-  listAgents(query: ManagementQuery): Promise<LettaAgent[]>;
+  listAgents(query: AgentListParams): Promise<LettaAgent[]>;
   retrieveAgent(agentId: string): Promise<LettaAgent>;
   updateAgent(
     agentId: string,
-    body: Record<string, unknown>,
+    body: AgentUpdateParams,
   ): Promise<LettaAgent>;
   deleteAgent(agentId: string): Promise<void>;
   listModels(): Promise<ListModelsResult>;
   listConversations(
-    query: ManagementQuery,
+    query: ConversationListParams,
   ): Promise<LettaConversation[]>;
   retrieveConversation(
     conversationId: string,
   ): Promise<LettaConversation>;
   createConversation(
-    body: Record<string, unknown>,
+    body: ConversationCreateParams,
   ): Promise<LettaConversation>;
   updateConversation(
     conversationId: string,
-    body: Record<string, unknown>,
+    body: ConversationUpdateParams,
   ): Promise<LettaConversation>;
   listConversationMessages(
     conversationId: string,
-    query: ManagementQuery,
+    query: MessageListParams,
   ): Promise<ConversationMessagesResult>;
 }
 
 type TransportProvider = () => ManagementTransport;
-
-function definedEntries(
-  values: Record<string, unknown>,
-): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(values).filter(([, value]) => value !== undefined),
-  );
-}
 
 function assertNonEmptyId(value: string, name: string): void {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -64,11 +61,12 @@ function assertNonEmptyId(value: string, name: string): void {
   }
 }
 
-function agentListQuery(options: ListAgentsOptions): ManagementQuery {
-  const orderBy = options.orderBy?.replace(
-    /[A-Z]/g,
-    (character) => `_${character.toLowerCase()}`,
-  );
+function agentListQuery(options: ListAgentsOptions): AgentListParams {
+  const orderBy = options.orderBy === "createdAt"
+    ? "created_at"
+    : options.orderBy === "lastRunCompletion"
+      ? "last_run_completion"
+      : undefined;
   return {
     before: options.before,
     after: options.after,
@@ -83,8 +81,8 @@ function agentListQuery(options: ListAgentsOptions): ManagementQuery {
   };
 }
 
-function agentUpdateBody(options: UpdateAgentOptions): Record<string, unknown> {
-  return definedEntries({
+function agentUpdateBody(options: UpdateAgentOptions): AgentUpdateParams {
+  return {
     name: options.name,
     description: options.description,
     model: options.model,
@@ -93,16 +91,20 @@ function agentUpdateBody(options: UpdateAgentOptions): Record<string, unknown> {
     tags: options.tags,
     hidden: options.hidden,
     context_window_limit: options.contextWindowLimit,
-  });
+  };
 }
 
 function conversationListQuery(
   options: ListConversationsOptions,
-): ManagementQuery {
-  const orderBy = options.orderBy?.replace(
-    /[A-Z]/g,
-    (character) => `_${character.toLowerCase()}`,
-  );
+): ConversationListParams {
+  const orderBy: ConversationListParams["order_by"] =
+    options.orderBy === "createdAt"
+      ? "created_at"
+      : options.orderBy === "lastRunCompletion"
+        ? "last_run_completion"
+        : options.orderBy === "lastMessageAt"
+          ? "last_message_at"
+          : undefined;
   return {
     agent_id: options.agentId,
     after: options.after,
@@ -116,8 +118,8 @@ function conversationListQuery(
 
 function conversationCreateBody(
   options: CreateConversationOptions,
-): Record<string, unknown> {
-  return definedEntries({
+): ConversationCreateParams {
+  return {
     agent_id: options.agentId,
     summary: options.summary,
     description: options.description,
@@ -125,25 +127,25 @@ function conversationCreateBody(
     model_settings: options.modelSettings,
     context_window_limit: options.contextWindowLimit,
     hidden: options.hidden,
-  });
+  };
 }
 
 function conversationUpdateBody(
   options: UpdateConversationOptions,
-): Record<string, unknown> {
-  return definedEntries({
+): ConversationUpdateParams {
+  return {
     summary: options.summary,
     description: options.description,
     model: options.model,
     model_settings: options.modelSettings,
     context_window_limit: options.contextWindowLimit,
     archived: options.archived,
-  });
+  };
 }
 
 function conversationMessagesQuery(
   options: ConversationMessagesOptions,
-): ManagementQuery {
+): MessageListParams {
   return {
     before: options.before,
     after: options.after,

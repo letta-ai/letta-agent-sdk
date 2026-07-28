@@ -53,6 +53,11 @@ because they share a name.
   backends. Generated Cloud types belong at the Cloud transport seam; do not
   narrow the shared facade to shapes that the app-server protocol cannot
   promise.
+- Reuse generated Letta entity, request, and response types whenever the SDK
+  contract has the same semantics. Camel-case SDK facades may rename fields,
+  but their value types should derive from the generated params. Do not mirror
+  generated entities as partial `Record<string, unknown>` shapes or rewrite
+  app-server envelopes already exported by `app-server-protocol`.
 - Verify generated route paths against the live API before introducing or
   preserving a generic-request exception. Server routing evolves: a mismatch
   proven in an older PR may no longer exist. Prefer the generated resource as

@@ -71,11 +71,11 @@ export interface RemoteClientRuntimeController {
     options: RuntimeSendTurnOptions,
   ): void;
   abort(runtime: RuntimeScope): Promise<void>;
-  request(
+  request<TResponse extends ProtocolMessage = ProtocolMessage>(
     type: string,
     body: Record<string, unknown>,
     options?: RuntimeRequestOptions,
-  ): Promise<ProtocolMessage>;
+  ): Promise<TResponse>;
   recoverPendingApprovals(
     runtime: RuntimeScope,
     options?: RecoverPendingApprovalsOptions,
