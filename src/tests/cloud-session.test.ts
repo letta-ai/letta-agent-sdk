@@ -51,6 +51,8 @@ type CloudFetchMockOptions = {
     sandboxId: string,
     attempt: number,
   ) => Response | Promise<Response> | undefined;
+  /** Override agent-level recompile responses for failure-path tests. */
+  agentRecompileResponse?: (attempt: number) => Response | undefined;
 };
 
 function createCloudFetchMock(
@@ -60,6 +62,7 @@ function createCloudFetchMock(
 ): typeof fetch {
   let sandboxCreates = 0;
   let sandboxRefreshes = 0;
+  let agentRecompiles = 0;
   return ((input: FetchInput | URL, init?: RequestInit) => {
     const url = urlOf(input);
     const parsed = new URL(url);
@@ -170,10 +173,16 @@ function createCloudFetchMock(
 
     const agentRepositoriesMatch = /^\/v1\/agents\/([^/]+)\/repositories$/.exec(parsed.pathname);
     if (agentRepositoriesMatch && method === "GET") {
-      return Promise.resolve(jsonResponse({ repositories: requests.some((request) => {
-        const requestPath = new URL(request.url).pathname;
-        return request.method === "POST" && requestPath === parsed.pathname;
-      }) ? [{ id: "repo-1", name: "repo-1", is_primary: false }] : [] }));
+      const postedIds = requests
+        .filter((request) => {
+          const requestPath = new URL(request.url).pathname;
+          return request.method === "POST" && requestPath === parsed.pathname;
+        })
+        .map((request) => (request.body as { repository_id?: string } | undefined)?.repository_id)
+        .filter((id): id is string => typeof id === "string");
+      return Promise.resolve(jsonResponse({
+        repositories: postedIds.map((id) => ({ id, name: id, is_primary: false })),
+      }));
     }
 
     if (agentRepositoriesMatch && method === "POST") {
@@ -184,6 +193,19 @@ function createCloudFetchMock(
     const agentRepositoryMatch = /^\/v1\/agents\/([^/]+)\/repositories\/([^/]+)$/.exec(parsed.pathname);
     if (agentRepositoryMatch && method === "DELETE") {
       return Promise.resolve(jsonResponse({ success: true }));
+    }
+
+    const agentRecompileMatch = /^\/v1\/agents\/([^/]+)\/recompile$/.exec(parsed.pathname);
+    if (agentRecompileMatch && method === "POST") {
+      agentRecompiles += 1;
+      const responseOverride = options.agentRecompileResponse?.(agentRecompiles);
+      if (responseOverride) return Promise.resolve(responseOverride);
+      return Promise.resolve(jsonResponse("recompiled system prompt"));
+    }
+
+    const conversationRecompileMatch = /^\/v1\/conversations\/([^/]+)\/recompile$/.exec(parsed.pathname);
+    if (conversationRecompileMatch && method === "POST") {
+      return Promise.resolve(jsonResponse("recompiled conversation system prompt"));
     }
 
     if (parsed.pathname === "/v1/environments" && method === "GET") {
@@ -962,10 +984,311 @@ describe("CloudEnvironmentSession", () => {
       url: "https://api.test/v1/agents/agent-1/repositories",
       body: { repository_id: "repo-1" },
     }));
+    // Recompile is issued after attach (default recompile: true).
+    expect(requests).toContainEqual(expect.objectContaining({
+      method: "POST",
+      url: "https://api.test/v1/agents/agent-1/recompile",
+      body: {},
+    }));
     expect(requests).toContainEqual(expect.objectContaining({
       method: "DELETE",
       url: "https://api.test/v1/agents/agent-1/repositories/repo-1",
     }));
+    // Recompile is also issued after detach (best-effort, default recompile: true).
+    const recompileRequests = requests.filter((r) =>
+      r.method === "POST" && r.url === "https://api.test/v1/agents/agent-1/recompile",
+    );
+    expect(recompileRequests.length).toBe(2);
+  });
+
+  test("recompile: false skips system-prompt recompile on attach and detach", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { terminateOnClose: false },
+    });
+
+    const session = client.resumeSession("agent-1", {
+      resources: [{ type: "repository", repositoryId: "repo-1", recompile: false }],
+    });
+    await asAdvanced(session).initialize();
+    session.close();
+
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(requests).toContainEqual(expect.objectContaining({
+      method: "POST",
+      url: "https://api.test/v1/agents/agent-1/repositories",
+      body: { repository_id: "repo-1" },
+    }));
+    expect(requests).toContainEqual(expect.objectContaining({
+      method: "DELETE",
+      url: "https://api.test/v1/agents/agent-1/repositories/repo-1",
+    }));
+    // No recompile requests should be issued.
+    expect(requests.filter((r) =>
+      r.method === "POST" && r.url === "https://api.test/v1/agents/agent-1/recompile",
+    )).toHaveLength(0);
+  });
+
+  test("fails initialization when attach-phase recompilation fails", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests, undefined, {
+        agentRecompileResponse: () =>
+          jsonResponse({ error: "recompile failed" }, { status: 500 }),
+      }),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { terminateOnClose: false },
+    });
+
+    const session = client.resumeSession("agent-1", {
+      resources: [{ type: "repository", repositoryId: "repo-1" }],
+    });
+
+    await expect(asAdvanced(session).initialize()).rejects.toThrow(
+      "Cloud recompile system prompt failed — recompile failed",
+    );
+    expect(requests).toContainEqual(expect.objectContaining({
+      method: "DELETE",
+      url: "https://api.test/v1/agents/agent-1/repositories/repo-1",
+    }));
+  });
+
+  test("ignores cleanup recompilation failures after detach", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests, undefined, {
+        agentRecompileResponse: (attempt) =>
+          attempt === 2
+            ? jsonResponse({ error: "cleanup recompile failed" }, { status: 500 })
+            : undefined,
+      }),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { terminateOnClose: false },
+    });
+
+    const session = client.resumeSession("agent-1", {
+      resources: [{ type: "repository", repositoryId: "repo-1" }],
+    });
+    await asAdvanced(session).initialize();
+    session.close();
+
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(requests.filter((request) =>
+      request.method === "POST" &&
+      request.url === "https://api.test/v1/agents/agent-1/recompile",
+    )).toHaveLength(2);
+  });
+
+  test("mixed flags do not recompile cleanup for only opt-out session attachments", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    // Seed repo-2 as an existing attachment; this session only owns repo-1.
+    requests.push({
+      method: "POST",
+      url: "https://api.test/v1/agents/agent-1/repositories",
+      headers: {},
+      body: { repository_id: "repo-2" },
+    });
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { terminateOnClose: false },
+    });
+
+    const session = client.resumeSession("agent-1", {
+      resources: [
+        { type: "repository", repositoryId: "repo-1", recompile: false },
+        { type: "repository", repositoryId: "repo-2" },
+      ],
+    });
+    await asAdvanced(session).initialize();
+    session.close();
+
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    // repo-2 defaults to recompile: true, so the attachment batch recompiles.
+    // Cleanup only removes repo-1, whose resource explicitly opted out.
+    const recompileRequests = requests.filter((r) =>
+      r.method === "POST" && r.url === "https://api.test/v1/agents/agent-1/recompile",
+    );
+    expect(recompileRequests).toHaveLength(1);
+    expect(requests).toContainEqual(expect.objectContaining({
+      method: "DELETE",
+      url: "https://api.test/v1/agents/agent-1/repositories/repo-1",
+    }));
+    expect(requests.filter((request) =>
+      request.method === "DELETE" &&
+      request.url.endsWith("/repositories/repo-2"),
+    )).toHaveLength(0);
+  });
+
+  test("batches mixed repository changes into one recompile per lifecycle phase", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { terminateOnClose: false },
+    });
+
+    const session = client.resumeSession("agent-1", {
+      resources: [
+        { type: "repository", repositoryId: "repo-1", recompile: false },
+        { type: "repository", repositoryId: "repo-2" },
+      ],
+    });
+    await asAdvanced(session).initialize();
+    session.close();
+
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(requests.filter((request) =>
+      request.method === "POST" &&
+      request.url === "https://api.test/v1/agents/agent-1/recompile",
+    )).toHaveLength(2);
+    expect(requests.filter((request) =>
+      request.method === "POST" &&
+      request.url === "https://api.test/v1/agents/agent-1/repositories",
+    )).toHaveLength(2);
+    expect(requests.filter((request) =>
+      request.method === "DELETE" &&
+      request.url.includes("/v1/agents/agent-1/repositories/"),
+    )).toHaveLength(2);
+  });
+
+  test("recompiles a resumed conversation after repository attach and detach", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { terminateOnClose: false },
+    });
+
+    const session = client.resumeSession("conv-1", {
+      resources: [{ type: "repository", repositoryId: "repo-1" }],
+    });
+    await asAdvanced(session).initialize();
+    session.close();
+
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const conversationRecompiles = requests.filter((request) =>
+      request.method === "POST" &&
+      request.url === "https://api.test/v1/conversations/conv-1/recompile",
+    );
+    expect(conversationRecompiles).toEqual([
+      expect.objectContaining({ body: { agent_id: "agent-from-conv" } }),
+      expect.objectContaining({ body: { agent_id: "agent-from-conv" } }),
+    ]);
+  });
+
+  test("cleans up repositories when environment resolution fails", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests, undefined, {
+        sandboxConversationEcho: "conv-wrong",
+      }),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+    });
+
+    const session = client.resumeSession("conv-1", {
+      resources: [{ type: "repository", repositoryId: "repo-1" }],
+    });
+
+    await expect(asAdvanced(session).initialize()).rejects.toThrow(
+      "Cloud managed sandbox response conversation mismatch",
+    );
+    expect(requests).toContainEqual(expect.objectContaining({
+      method: "DELETE",
+      url: "https://api.test/v1/agents/agent-from-conv/repositories/repo-1",
+    }));
+    expect(requests.filter((request) =>
+      request.method === "POST" &&
+      request.url === "https://api.test/v1/conversations/conv-1/recompile",
+    )).toHaveLength(2);
+  });
+
+  test("recompiles when a requested repository is already linked", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    requests.push({
+      method: "POST",
+      url: "https://api.test/v1/agents/agent-1/repositories",
+      headers: {},
+      body: { repository_id: "repo-1" },
+    });
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { terminateOnClose: false },
+    });
+
+    const session = client.resumeSession("agent-1", {
+      resources: [{ type: "repository", repositoryId: "repo-1" }],
+    });
+    await asAdvanced(session).initialize();
+    session.close();
+
+    expect(requests).toContainEqual(expect.objectContaining({
+      method: "POST",
+      url: "https://api.test/v1/agents/agent-1/recompile",
+      body: {},
+    }));
+    expect(requests.filter((request) =>
+      request.method === "DELETE" &&
+      request.url.endsWith("/repositories/repo-1"),
+    )).toHaveLength(0);
   });
 
   test("uses an explicit environment before using the Remote Client websocket", async () => {

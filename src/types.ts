@@ -408,6 +408,12 @@ export interface ListRepositoriesResult {
 export interface RepositoryResource {
   type: "repository";
   repositoryId: string;
+  /**
+   * Whether to trigger a system-prompt recompile after attaching (and after
+   * detaching on cleanup) so the session's conversation does not retain
+   * stale repository projections. Defaults to `true`.
+   */
+  recompile?: boolean;
 }
 
 export interface RepositoryFileEntry {
