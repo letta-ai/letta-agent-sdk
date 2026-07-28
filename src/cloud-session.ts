@@ -404,6 +404,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   private sandboxRefreshInFlight: Promise<void> | null = null;
   private sandboxLifecycleClosing = false;
   private attachedRepositoryIds = new Set<string>();
+  private repositoryIdsRequiringCleanupRecompile = new Set<string>();
   private readonly cloudMode: CloudSessionMode;
 
   constructor(
@@ -421,7 +422,15 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
 
   protected override async initializeRuntimeController(): Promise<RuntimeSessionInit> {
     const resolved = await this.resolveRuntime();
-    const connection = await this.resolveConnectionForRuntime(resolved.runtime);
+    const connection = await this.resolveConnectionForRuntime(resolved.runtime).catch(
+      async (error: unknown) => {
+        await this.cleanupSessionRepositories(
+          resolved.runtime.agent_id,
+          resolved.runtime.conversation_id,
+        );
+        throw error;
+      },
+    );
     this.connectionId = connection.connectionId;
 
     const apiKey = getCloudApiKey(this.cloudOptions);
@@ -488,7 +497,10 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       this.removeControlRequestHandler = null;
       client.close();
       await this.cleanupManagedSandbox();
-      await this.cleanupSessionRepositories(resolved.runtime.agent_id);
+      await this.cleanupSessionRepositories(
+        resolved.runtime.agent_id,
+        resolved.runtime.conversation_id,
+      );
       throw error;
     }
   }
@@ -545,7 +557,12 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     this.removeControlRequestHandler?.();
     this.removeControlRequestHandler = null;
     void this.cleanupManagedSandbox();
-    if (this.runtime?.agent_id) void this.cleanupSessionRepositories(this.runtime.agent_id);
+    if (this.runtime?.agent_id) {
+      void this.cleanupSessionRepositories(
+        this.runtime.agent_id,
+        this.runtime.conversation_id,
+      );
+    }
   }
 
   private async resolveRuntime(): Promise<{ runtime: RuntimeScope }> {
@@ -566,27 +583,37 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       );
     }
 
-    await this.attachSessionRepositories(agentId);
+    const shouldRecompileRepositories =
+      await this.attachSessionRepositories(agentId);
 
-    if (this.cloudMode.newConversation) {
-      const conversation = await this.createConversation(agentId);
-      conversationId = conversation.id;
-    } else if (this.cloudMode.defaultConversation) {
-      conversationId = "default";
+    try {
+      if (this.cloudMode.newConversation) {
+        const conversation = await this.createConversation(agentId);
+        conversationId = conversation.id;
+      } else if (this.cloudMode.defaultConversation) {
+        conversationId = "default";
+      }
+
+      if (!conversationId) {
+        throw new Error(
+          "Letta Cloud createSession()/resumeSession() requires an agent id or conversation id.",
+        );
+      }
+
+      if (shouldRecompileRepositories) {
+        await this.recompileSystemPrompt(agentId, conversationId);
+      }
+
+      return { runtime: { agent_id: agentId, conversation_id: conversationId } };
+    } catch (error) {
+      await this.cleanupSessionRepositories(agentId, conversationId);
+      throw error;
     }
-
-    if (!conversationId) {
-      throw new Error(
-        "Letta Cloud createSession()/resumeSession() requires an agent id or conversation id.",
-      );
-    }
-
-    return { runtime: { agent_id: agentId, conversation_id: conversationId } };
   }
 
-  private async attachSessionRepositories(agentId: string): Promise<void> {
+  private async attachSessionRepositories(agentId: string): Promise<boolean> {
     const resources = this.repositoryResources();
-    if (resources.length === 0) return;
+    if (resources.length === 0) return false;
 
     const existing = await this.listAgentRepositories(agentId);
     const existingIds = new Set(existing.map((repository) => repository.id));
@@ -604,18 +631,75 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       await this.cleanupSessionRepositories(agentId);
       throw error;
     }
+
+    // Recompile even when every requested repository was already linked: the
+    // target conversation may still have been compiled before those links
+    // existed. One recompile after the full batch produces the desired state.
+    const shouldRecompile = resources.some(
+      (resource) => resource.recompile !== false,
+    );
+    this.repositoryIdsRequiringCleanupRecompile = new Set(
+      resources
+        .filter(
+          (resource) =>
+            resource.recompile !== false &&
+            this.attachedRepositoryIds.has(resource.repositoryId),
+        )
+        .map((resource) => resource.repositoryId),
+    );
+    return shouldRecompile;
   }
 
-  private async cleanupSessionRepositories(agentId: string): Promise<void> {
+  private async cleanupSessionRepositories(
+    agentId: string,
+    conversationId?: string,
+  ): Promise<void> {
     const repositoryIds = [...this.attachedRepositoryIds];
+    const repositoryIdsRequiringRecompile =
+      this.repositoryIdsRequiringCleanupRecompile;
     this.attachedRepositoryIds.clear();
-    await Promise.all(repositoryIds.map(async (repositoryId) => {
+    this.repositoryIdsRequiringCleanupRecompile = new Set<string>();
+    const recompileAfterDetach = await Promise.all(repositoryIds.map(async (repositoryId) => {
       try {
         await this.unlinkAgentRepository(agentId, repositoryId);
+        return repositoryIdsRequiringRecompile.has(repositoryId);
       } catch {
         // Best-effort cleanup: only repositories this SDK session attached are removed.
+        return false;
       }
     }));
+    // Best-effort recompile after detach so remaining conversations drop stale
+    // repository projections. Errors are swallowed because this runs on close.
+    if (recompileAfterDetach.some(Boolean)) {
+      try {
+        await this.recompileSystemPrompt(agentId, conversationId);
+      } catch {
+        // Best-effort: cleanup must not throw.
+      }
+    }
+  }
+
+  private async recompileSystemPrompt(
+    agentId: string,
+    conversationId?: string,
+  ): Promise<void> {
+    const fetchImpl = getFetch(this.cloudOptions.fetch);
+    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
+    const usesAgentPrompt = !conversationId || conversationId === "default";
+    const path = usesAgentPrompt
+      ? `/v1/agents/${encodeURIComponent(agentId)}/recompile`
+      : `/v1/conversations/${encodeURIComponent(conversationId)}/recompile`;
+    const url = `${baseUrl}${path}`;
+    const response = await fetchImpl(
+      url,
+      {
+        method: "POST",
+        headers: cloudHeaders(this.cloudOptions),
+        body: JSON.stringify(usesAgentPrompt ? {} : { agent_id: agentId }),
+      },
+    );
+    const body = await parseJsonResponse(response);
+    assertOkResponse(response, body, "Cloud recompile system prompt", url);
   }
 
   private repositoryResources(): RepositoryResource[] {
