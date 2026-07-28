@@ -1960,11 +1960,22 @@ describe("CloudEnvironmentSession", () => {
         ]),
       },
     });
-    expect((requests[0]!.body as { tags: string[] }).tags).toEqual([
+    const createBody = requests[0]!.body as {
+      tags: string[];
+      memory_blocks: Array<{ label: string; value: string }>;
+      name?: string;
+      description?: string;
+    };
+    expect(createBody.tags).toEqual([
       "origin:letta-code",
       "git-memory-enabled",
       "team:sdk",
     ]);
+    expect(createBody.memory_blocks).toEqual([
+      { label: "project", value: "Use Bun." },
+    ]);
+    expect(createBody).not.toHaveProperty("name");
+    expect(createBody).not.toHaveProperty("description");
 
     await expect(client.createAgent({
       model: "anthropic/claude-sonnet-4",

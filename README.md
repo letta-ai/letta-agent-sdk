@@ -30,8 +30,16 @@ const client = new LettaAgentClient({
 
 const agentId = await client.createAgent({
   model: "anthropic/claude-opus-4-8",
-  persona: "You are a proactive research assistant.",
-  human: "The user prefers concise summaries with sources and next steps.",
+  memory: [
+    {
+      label: "persona",
+      value: "You are a proactive research assistant.",
+    },
+    {
+      label: "human",
+      value: "The user prefers concise summaries with sources and next steps.",
+    },
+  ],
 });
 
 await using session = client.createSession(agentId);
@@ -43,6 +51,10 @@ for await (const message of session.stream()) {
   }
 }
 ```
+
+`createAgent()` uses the supplied memory as the agent's identity. Letta Code
+personality presets are opt-in: pass `personality: "memo"` (or another preset)
+only when you want that preset's name, description, and memory blocks.
 
 An agent is the persistent entity with memory. A conversation is a thread on that agent. A session is the active connection used to send messages, stream events, execute tools, and handle approvals.
 

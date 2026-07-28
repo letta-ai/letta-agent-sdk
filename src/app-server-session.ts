@@ -12,11 +12,11 @@ import type {
   UpdateModelResponseMessage,
 } from "@letta-ai/letta-code/app-server-protocol";
 import {
-  buildCreateAgentRequestForPersonality,
   buildSystemPrompt,
   GIT_MEMORY_ENABLED_TAG,
   LETTA_CODE_ORIGIN_TAG,
 } from "@letta-ai/letta-code/agent-presets";
+import { buildInitialAgentBody } from "./agent-creation.js";
 import { normalizeAppServerModels } from "./app-server-models.js";
 import {
   buildCanUseToolContext,
@@ -156,17 +156,7 @@ export async function createAgentBody(
   assertRemoteCreateAgentOptionsSupported(options);
 
   const includeOriginTag = settings.includeSdkOriginTag ?? true;
-  const body: Record<string, unknown> = {
-    ...(await buildCreateAgentRequestForPersonality({
-      personalityId: options.personality ?? "memo",
-      ...(options.name !== undefined ? { name: options.name } : {}),
-      ...(options.description !== undefined
-        ? { description: options.description }
-        : {}),
-      ...(options.model !== undefined ? { model: options.model } : {}),
-      ...(options.tags !== undefined ? { extraTags: options.tags } : {}),
-    })),
-  };
+  const body = await buildInitialAgentBody(options);
 
   if (Array.isArray(body.tags)) {
     body.tags = body.tags.filter(
@@ -207,6 +197,11 @@ export async function createAgentBody(
     }
   }
 
+  const hasMemoryConfiguration =
+    Array.isArray(body.memory_blocks) ||
+    options.memory !== undefined ||
+    options.persona !== undefined ||
+    options.human !== undefined;
   const memoryBlocks = Array.isArray(body.memory_blocks)
     ? body.memory_blocks
         .filter(
@@ -238,7 +233,7 @@ export async function createAgentBody(
   if (options.human !== undefined) {
     upsertMemoryBlock(memoryBlocks, { label: "human", value: options.human });
   }
-  body.memory_blocks = memoryBlocks;
+  if (hasMemoryConfiguration) body.memory_blocks = memoryBlocks;
   if (blockIds.length > 0) body.block_ids = blockIds;
 
   return body;
