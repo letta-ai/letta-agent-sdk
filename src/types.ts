@@ -758,6 +758,14 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
    * memory copy. Ignored on remote and cloud transports.
    */
   env?: Record<string, string>;
+  /**
+   * Constrain an SDK-owned local session harness to memory-worker filesystem
+   * access. Agent-ID sessions derive the standard root; set `MEMORY_DIR` or
+   * `LETTA_MEMORY_DIR` for overrides and conversation-ID resumes. Fails closed
+   * without a root or supported kernel sandbox. Excludes agent creation,
+   * management calls, remote/Cloud runtimes, and legacy stdio.
+   */
+  filesystemConfinement?: "memory";
 }
 
 export interface LettaCodeSession extends AsyncDisposable {

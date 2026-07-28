@@ -67,6 +67,7 @@ function stripCloudExecutionOptions(
   const sessionOptions = { ...options };
   delete sessionOptions.environment;
   delete sessionOptions.sandbox;
+  delete sessionOptions.filesystemConfinement;
   return sessionOptions;
 }
 
@@ -342,6 +343,14 @@ export class LettaAgentClientBase {
     action: string,
     options: LettaCodeClientSessionOptions,
   ): void {
+    if (
+      options.filesystemConfinement !== undefined &&
+      options.filesystemConfinement !== "memory"
+    ) {
+      throw new Error(
+        `Invalid filesystemConfinement '${String(options.filesystemConfinement)}'. Valid value: memory.`,
+      );
+    }
     const effectiveEnvironment = options.environment ?? this.environment;
     if (this.backend === "local") {
       if (effectiveEnvironment !== undefined) {
@@ -355,6 +364,19 @@ export class LettaAgentClientBase {
       if (hasRepositoryResources(options)) {
         throw new Error(`${action}() repository resources are only valid with backend: "cloud".`);
       }
+      if (options.filesystemConfinement !== undefined) {
+        const localOptions = this.options as LettaCodeLocalClientOptions;
+        if (this.useLegacyLocalStdio()) {
+          throw new Error(
+            `${action}() filesystemConfinement requires the local app-server transport.`,
+          );
+        }
+        if (localOptions.appServer?.url !== undefined) {
+          throw new Error(
+            `${action}() filesystemConfinement requires an SDK-owned local app-server process.`,
+          );
+        }
+      }
       if (!this.useLegacyLocalStdio()) {
         assertRemoteSessionOptionsSupported(action, options);
       }
@@ -362,6 +384,11 @@ export class LettaAgentClientBase {
     }
 
     if (this.backend === "remote") {
+      if (options.filesystemConfinement !== undefined) {
+        throw new Error(
+          `${action}() filesystemConfinement requires an SDK-owned local app-server process.`,
+        );
+      }
       if (options.environment !== undefined) {
         throw new Error(
           `${action}() environment overrides are only valid with backend: "cloud"; remote url selects the app-server runtime.`,
@@ -377,6 +404,11 @@ export class LettaAgentClientBase {
       return;
     }
     if (this.backend === "cloud") {
+      if (options.filesystemConfinement !== undefined) {
+        throw new Error(
+          `${action}() filesystemConfinement is only supported with backend: "local".`,
+        );
+      }
       const cloudOptions = this.cloudOptions();
       if (cloudOptions.environment !== undefined && options.sandbox !== undefined) {
         throw new Error(`Letta Cloud ${action}() cannot specify sandbox options when the client has a default environment.`);
