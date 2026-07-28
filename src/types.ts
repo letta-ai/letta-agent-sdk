@@ -6,7 +6,14 @@
  */
 
 import type { PersonalityId } from "@letta-ai/letta-code/agent-presets";
-import type { ListModelsResponseModelEntry } from "@letta-ai/letta-code/app-server-protocol";
+import type {
+  DevicePermissionMode,
+  DiffHunk,
+  DiffHunkLine,
+  DiffPreview,
+  ListModelsResponseModelEntry,
+  PermissionSuggestion,
+} from "@letta-ai/letta-code/app-server-protocol";
 import type { Message as LettaMessage } from "@letta-ai/letta-client/resources/agents/messages";
 import type { CreateBlock } from "@letta-ai/letta-client/resources/blocks/blocks";
 import type { LettaCodeCloudSandboxOptions } from "./cloud-sandbox.js";
@@ -764,36 +771,14 @@ export interface GetDeviceStatusOptions {
 }
 
 /** A suggested permission grant attached to a pending approval. */
-export interface SessionPermissionSuggestion {
-  id: string;
-  text: string;
-}
+export type SessionPermissionSuggestion = PermissionSuggestion;
 
-export interface SessionDiffHunkLine {
-  type: "context" | "add" | "remove";
-  content: string;
-}
+export type SessionDiffHunkLine = DiffHunkLine;
 
-export interface SessionDiffHunk {
-  oldStart: number;
-  oldLines: number;
-  newStart: number;
-  newLines: number;
-  lines: SessionDiffHunkLine[];
-}
+export type SessionDiffHunk = DiffHunk;
 
 /** Portable projection of a file-edit diff preview. */
-export type SessionDiffPreview =
-  | {
-      mode: "advanced";
-      fileName: string;
-      hunks: SessionDiffHunk[];
-    }
-  | {
-      mode: "fallback" | "unpreviewable";
-      fileName: string;
-      reason: string;
-    };
+export type SessionDiffPreview = DiffPreview;
 
 /** One tool approval the device is still waiting on. */
 export interface SessionPendingControlRequest {
