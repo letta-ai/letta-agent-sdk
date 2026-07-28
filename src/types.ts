@@ -829,8 +829,9 @@ export interface SessionDeviceStatus {
  */
 export interface CreateAgentOptions {
   /**
-   * Letta Code personality preset. Defaults to "memo". The creation payload
-   * is built by `@letta-ai/letta-code/agent-presets`, matching Chat/Desktop.
+   * Optional Letta Code personality preset. Presets are explicit: when this is
+   * omitted, createAgent() uses the supplied memory blocks directly without
+   * adding personality-derived identity, name, or description fields.
    */
   personality?: LettaCodePersonalityId;
 

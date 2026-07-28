@@ -188,16 +188,18 @@ export {
  *
  * @example
  * ```typescript
- * // Create agent with default settings.
- * const agentId = await createAgent();
- *
- * // Create agent with custom memory
+ * // Create a generic agent with custom memory.
  * const agentId = await createAgent({
- *   memory: ['persona', 'project'],
- *   persona: 'You are a helpful coding assistant',
+ *   memory: [
+ *     { label: 'persona', value: 'You are a helpful coding assistant' },
+ *     { label: 'project', value: 'Use Bun for JavaScript projects' },
+ *   ],
  *   model: 'claude-sonnet-4',
  *   tags: ['project:docs']
  * });
+ *
+ * // Personality presets are explicit opt-ins.
+ * const memoAgentId = await createAgent({ personality: 'memo' });
  *
  * // Then resume the default conversation:
  * const session = resumeSession(agentId);
