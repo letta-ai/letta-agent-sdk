@@ -392,24 +392,6 @@ export function assertCloudSessionOptionsSupported(
   if (options.environment !== undefined && options.sandbox !== undefined) {
     throw new Error(`Letta Cloud ${action}() cannot specify both environment and sandbox options.`);
   }
-  if (options.systemPrompt !== undefined) {
-    throw new Error(`Letta Cloud ${action}() cannot rewrite an existing agent's systemPrompt from the SDK adapter yet.`);
-  }
-  if (options.disallowedTools !== undefined) {
-    throw new Error(`Letta Cloud ${action}() has not wired disallowedTools to the remote device protocol yet.`);
-  }
-  if (options.systemInfoReminder !== undefined) {
-    throw new Error(`Letta Cloud ${action}() has not wired systemInfoReminder to the remote device protocol yet.`);
-  }
-  if (options.dreaming?.behavior !== undefined) {
-    throw new Error(`Letta Cloud ${action}() does not yet support dreaming.behavior overrides.`);
-  }
-  if ((options as { memfsStartup?: unknown }).memfsStartup !== undefined) {
-    throw new Error(`Letta Cloud ${action}() does not support memfsStartup.`);
-  }
-  if (options.includePartialMessages !== undefined) {
-    throw new Error(`Letta Cloud ${action}() streams Remote Client deltas directly; includePartialMessages is not a separate toggle.`);
-  }
 }
 
 export class CloudEnvironmentSession extends RemoteClientSessionCore {

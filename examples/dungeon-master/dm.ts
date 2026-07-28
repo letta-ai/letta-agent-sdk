@@ -9,7 +9,8 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createSession, resumeSession, type Session } from '../../src/index.js';
+import { resumeSession, type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession } from '../create-agent-session.js';
 import { GameState, DEFAULT_CONFIG, PATHS, CAMPAIGN_FILES } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -90,7 +91,7 @@ export async function listCampaigns(): Promise<string[]> {
 /**
  * Create or resume the DM agent
  */
-export async function createDM(state: GameState): Promise<Session> {
+export async function createDM(state: GameState): Promise<LettaCodeSession> {
   if (state.dmAgentId) {
     // Resume existing DM
     return resumeSession(state.dmAgentId, {
@@ -101,7 +102,7 @@ export async function createDM(state: GameState): Promise<Session> {
   }
 
   // Create new DM
-  const session = await createSession({
+  const session = await createAgentSession({
     model: DEFAULT_CONFIG.model,
     systemPrompt: `You are a Dungeon Master - a creative storyteller and game designer who runs tabletop RPG campaigns.
 
@@ -182,7 +183,7 @@ function createStreamPrinter(): (text: string) => void {
  * Send a message to the DM and get response
  */
 export async function chat(
-  session: Session,
+  session: LettaCodeSession,
   message: string,
   onOutput?: (text: string) => void
 ): Promise<string> {
@@ -211,7 +212,7 @@ export async function chat(
 /**
  * Initialize a new DM (create rulebook)
  */
-export async function initializeDM(session: Session, state: GameState): Promise<void> {
+export async function initializeDM(session: LettaCodeSession, state: GameState): Promise<void> {
   console.log(`\n${COLORS.system}The DM is creating its game system...${COLORS.reset}\n`);
   
   const prompt = `You're starting fresh as a Dungeon Master. Your first task is to create your game system.
@@ -246,7 +247,7 @@ Use the Write tool to create rulebook.md now.`;
  * Start a new campaign
  */
 export async function startNewCampaign(
-  session: Session,
+  session: LettaCodeSession,
   state: GameState,
   campaignName: string
 ): Promise<void> {
@@ -284,7 +285,7 @@ Start by greeting me and asking these questions.`;
  * Resume an existing campaign
  */
 export async function resumeCampaign(
-  session: Session,
+  session: LettaCodeSession,
   state: GameState,
   campaignName: string
 ): Promise<void> {
@@ -310,7 +311,7 @@ Use the Read tool to load the campaign state, then continue our adventure.`;
 /**
  * Main gameplay loop
  */
-export async function playSession(session: Session): Promise<void> {
+export async function playSession(session: LettaCodeSession): Promise<void> {
   const readline = await import('node:readline');
   
   const rl = readline.createInterface({

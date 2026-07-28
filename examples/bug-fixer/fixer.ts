@@ -10,7 +10,8 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createSession, resumeSession, type Session } from '../../src/index.js';
+import { resumeSession, type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession } from '../create-agent-session.js';
 import { BugFixerState, DEFAULT_CONFIG } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -78,7 +79,7 @@ export async function saveState(state: BugFixerState): Promise<void> {
 /**
  * Get or create the bug fixer agent
  */
-export async function getOrCreateAgent(state: BugFixerState): Promise<Session> {
+export async function getOrCreateAgent(state: BugFixerState): Promise<LettaCodeSession> {
   if (state.agentId) {
     console.log(`${COLORS.system}Resuming bug fixer agent...${COLORS.reset}`);
     return resumeSession(state.agentId, {
@@ -89,7 +90,7 @@ export async function getOrCreateAgent(state: BugFixerState): Promise<Session> {
   }
 
   console.log(`${COLORS.system}Creating new bug fixer agent...${COLORS.reset}`);
-  const session = await createSession({
+  const session = await createAgentSession({
     model: DEFAULT_CONFIG.model,
     systemPrompt: SYSTEM_PROMPT,
     memory: [
@@ -139,7 +140,7 @@ function createStreamPrinter(): (text: string) => void {
  * Send a message and get response
  */
 export async function chat(
-  session: Session,
+  session: LettaCodeSession,
   message: string,
   onOutput?: (text: string) => void
 ): Promise<string> {
@@ -172,7 +173,7 @@ export async function chat(
  * Fix a bug
  */
 export async function fixBug(
-  session: Session,
+  session: LettaCodeSession,
   state: BugFixerState,
   description: string
 ): Promise<void> {
@@ -203,7 +204,7 @@ Go ahead and fix it.`;
 /**
  * Interactive mode - keep fixing bugs
  */
-export async function interactiveMode(session: Session, state: BugFixerState): Promise<void> {
+export async function interactiveMode(session: LettaCodeSession, state: BugFixerState): Promise<void> {
   const readline = await import('node:readline');
   
   const rl = readline.createInterface({

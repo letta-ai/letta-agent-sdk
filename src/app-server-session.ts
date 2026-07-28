@@ -159,30 +159,6 @@ function assertRemoteCreateAgentOptionsSupported(options: CreateAgentOptions): v
   }
 }
 
-export function assertRemoteSessionOptionsSupported(
-  action: string,
-  options: LettaCodeClientSessionOptions,
-): void {
-  if (options.systemPrompt !== undefined) {
-    throw new Error(`App-server ${action}() does not yet support systemPrompt overrides for existing agents.`);
-  }
-  if (options.disallowedTools !== undefined) {
-    throw new Error(`App-server ${action}() does not yet support disallowedTools.`);
-  }
-  if (options.systemInfoReminder !== undefined) {
-    throw new Error(`App-server ${action}() does not yet support systemInfoReminder overrides.`);
-  }
-  if (options.dreaming?.behavior !== undefined) {
-    throw new Error(`App-server ${action}() does not yet support dreaming.behavior overrides.`);
-  }
-  if ((options as { memfsStartup?: unknown }).memfsStartup !== undefined) {
-    throw new Error(`App-server ${action}() does not support memfsStartup.`);
-  }
-  if (options.includePartialMessages !== undefined) {
-    throw new Error(`App-server ${action}() streams app-server deltas directly and does not support includePartialMessages.`);
-  }
-}
-
 function normalizeMemoryBlock(block: Record<string, unknown>): Record<string, unknown> {
   const normalized = { ...block };
   if (normalized.value === undefined && typeof normalized.content === "string") {

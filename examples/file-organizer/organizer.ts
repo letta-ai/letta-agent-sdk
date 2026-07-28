@@ -10,7 +10,8 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createSession, resumeSession, type Session } from '../../src/index.js';
+import { resumeSession, type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession } from '../create-agent-session.js';
 import { FileOrganizerState, DEFAULT_CONFIG } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -83,7 +84,7 @@ export async function saveState(state: FileOrganizerState): Promise<void> {
 /**
  * Get or create the file organizer agent
  */
-export async function getOrCreateAgent(state: FileOrganizerState): Promise<Session> {
+export async function getOrCreateAgent(state: FileOrganizerState): Promise<LettaCodeSession> {
   if (state.agentId) {
     console.log(`${COLORS.system}Resuming file organizer agent...${COLORS.reset}`);
     return resumeSession(state.agentId, {
@@ -94,7 +95,7 @@ export async function getOrCreateAgent(state: FileOrganizerState): Promise<Sessi
   }
 
   console.log(`${COLORS.system}Creating new file organizer agent...${COLORS.reset}`);
-  const session = await createSession({
+  const session = await createAgentSession({
     model: DEFAULT_CONFIG.model,
     systemPrompt: SYSTEM_PROMPT,
     memory: [
@@ -133,7 +134,7 @@ function createStreamPrinter(): (text: string) => void {
  * Send a message and get response
  */
 export async function chat(
-  session: Session,
+  session: LettaCodeSession,
   message: string,
   onOutput?: (text: string) => void
 ): Promise<string> {
@@ -163,7 +164,7 @@ export async function chat(
  * Organize a directory
  */
 export async function organizeDirectory(
-  session: Session,
+  session: LettaCodeSession,
   state: FileOrganizerState,
   targetDir: string,
   strategy?: string,
@@ -201,7 +202,7 @@ Steps:
 /**
  * Interactive mode
  */
-export async function interactiveMode(session: Session, state: FileOrganizerState): Promise<void> {
+export async function interactiveMode(session: LettaCodeSession, state: FileOrganizerState): Promise<void> {
   const readline = await import('node:readline');
   
   const rl = readline.createInterface({

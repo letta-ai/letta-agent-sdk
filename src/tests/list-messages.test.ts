@@ -224,58 +224,7 @@ describe("controlResponseWaiters routing", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. includePartialMessages arg forwarding
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("includePartialMessages arg forwarding", () => {
-  /**
-   * Simulate transport.ts buildArgs() to verify the flag is included.
-   * The actual transport builds the args array and passes it to spawn().
-   */
-  function buildArgs(options: {
-    agentId?: string;
-    conversationId?: string;
-    includePartialMessages?: boolean;
-  }): string[] {
-    const args: string[] = ["--output", "stream-json"];
-    if (options.agentId) args.push("--agent", options.agentId);
-    if (options.conversationId) args.push("--conv", options.conversationId);
-    if (options.includePartialMessages) args.push("--include-partial-messages");
-    return args;
-  }
-
-  test("flag absent when includePartialMessages is false", () => {
-    const args = buildArgs({ agentId: "agent-1", includePartialMessages: false });
-    expect(args).not.toContain("--include-partial-messages");
-  });
-
-  test("flag absent when includePartialMessages is undefined", () => {
-    const args = buildArgs({ agentId: "agent-1" });
-    expect(args).not.toContain("--include-partial-messages");
-  });
-
-  test("flag present when includePartialMessages is true", () => {
-    const args = buildArgs({ agentId: "agent-1", includePartialMessages: true });
-    expect(args).toContain("--include-partial-messages");
-  });
-
-  test("flag position is after other args (no disruption)", () => {
-    const args = buildArgs({
-      agentId: "agent-1",
-      conversationId: "conv-abc",
-      includePartialMessages: true,
-    });
-    // Other args still present
-    expect(args).toContain("--agent");
-    expect(args).toContain("agent-1");
-    expect(args).toContain("--conv");
-    expect(args).toContain("conv-abc");
-    expect(args).toContain("--include-partial-messages");
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 4. Waiter while stream is active
+// 3. Waiter while stream is active
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("listMessages waiter while stream active", () => {

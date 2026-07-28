@@ -8,7 +8,6 @@ const DEFAULT_LIMIT = 900;
 const FILE_LIMITS: Record<string, number> = {
   "app-server-session.ts": 950,
   "cloud-session.ts": 1_350,
-  "session.ts": 1_650,
   "types.ts": 1_350,
 };
 

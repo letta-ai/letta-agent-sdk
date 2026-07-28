@@ -2,7 +2,6 @@ import { RepositoriesClient } from "./repositories.js";
 import { AppServerManagementTransport } from "./app-server-management.js";
 import {
   AppServerSession,
-  assertRemoteSessionOptionsSupported,
   type AppServerSessionOptions,
 } from "./app-server-session.js";
 import { CloudManagementTransport } from "./cloud-management.js";
@@ -92,7 +91,7 @@ type TurnSession = LettaCodeSession & {
  *
  * `backend` selects how the SDK reaches or runs the Letta Code harness.
  * `local` spawns an SDK-owned Letta Code app-server and speaks the websocket
- * protocol by default, with an explicit stdio fallback for legacy flows.
+ * protocol.
  * `remote` connects to a user-managed Letta Code app-server websocket endpoint.
  * `cloud` uses agents hosted on Letta Cloud, with an explicit remote
  * environment or SDK-managed sandbox.
@@ -140,12 +139,10 @@ export class LettaAgentClientBase {
 
     if (this.backend === "local") {
       const localOptions = options as LettaCodeLocalClientOptions;
-      if (
-        localOptions.transport !== undefined &&
-        localOptions.transport !== "app-server" &&
-        localOptions.transport !== "stdio"
-      ) {
-        throw new Error("Invalid local transport. Valid values: app-server, stdio.");
+      if ("transport" in localOptions) {
+        throw new Error(
+          'Local transport selection has been removed. The local backend always uses the app-server protocol.',
+        );
       }
       const requestTimeoutMs = localOptions.appServer?.requestTimeoutMs;
       if (
@@ -217,49 +214,36 @@ export class LettaAgentClientBase {
   /**
    * Create a new conversation/session.
    *
-   * Without an agent id, this uses the default/LRU agent, matching the legacy
-   * top-level createSession() helper.
+   * The app-server protocol requires an explicit agent id.
    */
   createSession(
-    agentIdOrOptions?: string | LettaCodeClientSessionOptions,
+    agentId: string,
     options: LettaCodeClientSessionOptions = {},
   ): LettaCodeSession {
-    const agentId =
-      typeof agentIdOrOptions === "string" ? agentIdOrOptions : undefined;
-    const resolvedOptions =
-      typeof agentIdOrOptions === "string" ? options : (agentIdOrOptions ?? {});
-
-    this.assertSessionBackend("createSession", resolvedOptions);
-    const sessionOptions = stripCloudExecutionOptions(resolvedOptions);
+    if (typeof agentId !== "string" || agentId.length === 0) {
+      throw new Error("createSession() requires a non-empty agent id.");
+    }
+    const sessionOptions = stripCloudExecutionOptions(options);
     validateCreateSessionOptions(sessionOptions);
+    this.assertSessionBackend("createSession", options);
 
     if (this.backend === "remote") {
-      if (!agentId) {
-        throw new Error(
-          "App-server createSession() requires an agent id. Call createAgent() first or pass an agent id.",
-        );
-      }
       return new AppServerSession(this.appServerSessionOptions(), {
         kind: "session",
         agentId,
         newConversation: true,
-        options: resolvedOptions,
+        options,
       });
     }
     if (this.backend === "cloud") {
-      if (!agentId) {
-        throw new Error(
-          "Letta Cloud createSession() requires an agent id. Call createAgent() first or pass an agent id.",
-        );
-      }
       return new CloudEnvironmentSession(this.cloudOptions(), {
         kind: "session",
         agentId,
         newConversation: true,
-        options: resolvedOptions,
+        options,
       });
     }
-    return this.createLocalSession(agentId, resolvedOptions, sessionOptions);
+    return this.createLocalSession(agentId, options);
   }
 
   /**
@@ -272,9 +256,9 @@ export class LettaAgentClientBase {
     id: string,
     options: LettaCodeClientSessionOptions = {},
   ): LettaCodeSession {
-    this.assertSessionBackend("resumeSession", options);
     const sessionOptions = stripCloudExecutionOptions(options);
     validateCreateSessionOptions(sessionOptions);
+    this.assertSessionBackend("resumeSession", options);
 
     if (this.backend === "remote") {
       if (looksLikeConversationId(id)) {
@@ -306,18 +290,16 @@ export class LettaAgentClientBase {
         options,
       });
     }
-    return this.resumeLocalSession(id, options, sessionOptions);
+    return this.resumeLocalSession(id, options);
   }
 
   /** One-shot prompt convenience helper using a new conversation. */
   async prompt(
     message: SendMessage,
-    agentId?: string,
+    agentId: string,
     options: LettaCodeClientSessionOptions = {},
   ): Promise<SDKResultMessage> {
-    const session = agentId
-      ? this.createSession(agentId, options)
-      : this.createSession(options);
+    const session = this.createSession(agentId, options);
 
     try {
       return await (session as TurnSession).runTurn(message);
@@ -353,19 +335,11 @@ export class LettaAgentClientBase {
       }
       if (options.filesystemConfinement !== undefined) {
         const localOptions = this.options as LettaCodeLocalClientOptions;
-        if (this.useLegacyLocalStdio()) {
-          throw new Error(
-            `${action}() filesystemConfinement requires the local app-server transport.`,
-          );
-        }
         if (localOptions.appServer?.url !== undefined) {
           throw new Error(
             `${action}() filesystemConfinement requires an SDK-owned local app-server process.`,
           );
         }
-      }
-      if (!this.useLegacyLocalStdio()) {
-        assertRemoteSessionOptionsSupported(action, options);
       }
       return;
     }
@@ -387,7 +361,6 @@ export class LettaAgentClientBase {
       if (hasRepositoryResources(options)) {
         throw new Error(`${action}() repository resources are only valid with backend: "cloud".`);
       }
-      assertRemoteSessionOptionsSupported(action, options);
       return;
     }
     if (this.backend === "cloud") {
@@ -411,18 +384,13 @@ export class LettaAgentClientBase {
     );
   }
 
-  protected useLegacyLocalStdio(): boolean {
-    return (this.options as LettaCodeLocalClientOptions).transport === "stdio";
-  }
-
   protected createLocalAgent(_options: CreateAgentOptions): Promise<string> {
     throw this.localBackendUnavailableError();
   }
 
   protected createLocalSession(
-    _agentId: string | undefined,
+    _agentId: string,
     _options: LettaCodeClientSessionOptions,
-    _sessionOptions: CreateSessionOptions,
   ): LettaCodeSession {
     throw this.localBackendUnavailableError();
   }
@@ -430,7 +398,6 @@ export class LettaAgentClientBase {
   protected resumeLocalSession(
     _id: string,
     _options: LettaCodeClientSessionOptions,
-    _sessionOptions: CreateSessionOptions,
   ): LettaCodeSession {
     throw this.localBackendUnavailableError();
   }

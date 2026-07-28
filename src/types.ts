@@ -5,27 +5,6 @@
  * Protocol types are defined locally to avoid relying on broken package subpath exports.
  */
 
-// Re-export protocol types for internal use
-export type {
-  WireMessage,
-  SystemInitMessage,
-  MessageWire,
-  ResultMessage,
-  ErrorMessage,
-  StreamEvent,
-  ControlRequest,
-  ControlResponse,
-  CanUseToolControlRequest,
-  CanUseToolResponse,
-  CanUseToolResponseAllow,
-  CanUseToolResponseDeny,
-  // Configuration types
-  SystemPromptPresetConfig,
-  CreateBlock,
-} from "./protocol.js";
-
-// Import types for use in this file
-import type { CreateBlock, CanUseToolResponse } from "./protocol.js";
 import type { PersonalityId } from "@letta-ai/letta-code/agent-presets";
 import type { LettaCodeCloudSandboxOptions } from "./cloud-sandbox.js";
 export type {
@@ -35,6 +14,26 @@ export type {
 
 /** Letta Code personality preset used to seed a new agent. */
 export type LettaCodePersonalityId = PersonalityId;
+
+/** Custom memory block definition accepted when creating agents. */
+export interface CreateBlock {
+  label: string;
+  value: string;
+  base_template_id?: string | null;
+  deployment_id?: string | null;
+  description?: string | null;
+  entity_id?: string | null;
+  hidden?: boolean | null;
+  is_template?: boolean;
+  limit?: number;
+  metadata?: Record<string, unknown> | null;
+  preserve_on_migration?: boolean | null;
+  project_id?: string | null;
+  read_only?: boolean;
+  tags?: string[] | null;
+  template_id?: string | null;
+  template_name?: string | null;
+}
 
 export interface LettaCodeSocketLike {
   readyState: number;
@@ -151,6 +150,9 @@ export interface DreamingOptions {
   behavior?: DreamingBehavior;
   stepCount?: number;
 }
+
+/** Dreaming settings that can be changed when opening an existing agent session. */
+export type SessionDreamingOptions = Omit<DreamingOptions, "behavior">;
 
 /**
  * Fully-resolved dreaming settings emitted by init messages.
@@ -329,9 +331,7 @@ export interface LettaCodeLocalAppServerOptions {
 
 export interface LettaCodeLocalClientOptions {
   backend?: "local";
-  /** Advanced local transport override. Defaults to app-server. */
-  transport?: "app-server" | "stdio";
-  /** Advanced app-server overrides for local transport. */
+  /** Advanced app-server overrides for local execution. */
   appServer?: LettaCodeLocalAppServerOptions;
 }
 
@@ -492,6 +492,23 @@ export interface CanUseToolPermissionSuggestion {
   text: string;
 }
 
+export interface CanUseToolResponseAllow {
+  behavior: "allow";
+  message?: string;
+  updatedInput?: Record<string, unknown> | null;
+  updatedPermissions?: unknown[];
+}
+
+export interface CanUseToolResponseDeny {
+  behavior: "deny";
+  message: string;
+  interrupt?: boolean;
+}
+
+export type CanUseToolResponse =
+  | CanUseToolResponseAllow
+  | CanUseToolResponseDeny;
+
 /**
  * Additional context for a `can_use_tool` approval request, passed as the
  * optional third argument to {@link CanUseToolCallback}.
@@ -527,69 +544,6 @@ export type CanUseToolCallback = (
   toolInput: Record<string, unknown>,
   context?: CanUseToolContext,
 ) => Promise<CanUseToolResponse> | CanUseToolResponse;
-
-/**
- * Internal session options used by Session/Transport classes.
- * Not user-facing - use CreateSessionOptions or CreateAgentOptions instead.
- * @internal
- */
-export interface InternalSessionOptions {
-  // Agent/conversation routing
-  agentId?: string;
-  conversationId?: string;
-  newConversation?: boolean;
-  defaultConversation?: boolean;
-  createOnly?: boolean;
-
-  // Agent configuration
-  model?: string;
-  reasoningEffort?: ReasoningEffort;
-  embedding?: string;
-  systemPrompt?: SystemPromptConfig;
-
-  // Memory blocks (only for new agents)
-  memory?: MemoryItem[];
-  persona?: string;  // Convenience for persona block
-  human?: string;    // Convenience for human block
-
-  // Tags (only for new agents)
-  tags?: string[];
-
-  // Skills/reminders
-  skillSources?: SkillSource[];
-  systemInfoReminder?: boolean;
-  dreaming?: DreamingOptions;
-
-  // Permissions
-  allowedTools?: string[];
-  disallowedTools?: string[];
-  permissionMode?: PermissionMode;
-  canUseTool?: CanUseToolCallback;
-
-  // Server-side tools (only for new agents); omitted -> harness defaults.
-  baseTools?: string[];
-
-  // Custom tools
-  tools?: AnyAgentTool[];
-
-  // Process settings
-  cwd?: string;
-
-  /** If true, pass --include-partial-messages to CLI for token-level stream_event chunks */
-  includePartialMessages?: boolean;
-
-  /**
-   * Max automatic approval-conflict recovery attempts per runTurn() call.
-   * Set to 0 to disable automatic recovery.
-   */
-  maxApprovalRecoveryAttempts?: number;
-
-  /**
-   * Timeout in milliseconds for a single approval recovery request.
-   */
-  approvalRecoveryTimeoutMs?: number;
-
-}
 
 export type PermissionMode =
   | "standard"
@@ -658,7 +612,8 @@ export interface SendCommandOptions<TResponseType extends string = string> {
 }
 
 /**
- * Options for createSession() and resumeSession() - restricted to options that can be applied to existing agents (LRU/Memo).
+ * Options for createSession() and resumeSession() restricted to settings that
+ * can be applied to existing agents.
  * For creating new agents with custom memory/persona, use createAgent().
  */
 export interface CreateSessionOptions {
@@ -668,9 +623,6 @@ export interface CreateSessionOptions {
   /** Reasoning effort tier to use with the selected/current model on websocket protocol sessions. */
   reasoningEffort?: ReasoningEffort;
 
-  /** System prompt preset (only presets, no custom strings or append) - updates the agent */
-  systemPrompt?: SystemPromptPreset;
-
   /**
    * Exact client-side tool allowlist for the session, including custom SDK
    * tools. When omitted, the harness default toolset and registered custom
@@ -678,9 +630,6 @@ export interface CreateSessionOptions {
    * excluded for SDK sessions.
    */
   allowedTools?: string[];
-
-  /** List of disallowed tool names */
-  disallowedTools?: string[];
 
   /** Permission mode */
   permissionMode?: PermissionMode;
@@ -695,15 +644,9 @@ export interface CreateSessionOptions {
   skillSources?: SkillSource[];
 
   /**
-   * Toggle first-turn system info reminder (device/git/cwd context).
-   * false -> `--no-system-info-reminder`.
-   */
-  systemInfoReminder?: boolean;
-
-  /**
    * Configure dreaming settings.
    */
-  dreaming?: DreamingOptions;
+  dreaming?: SessionDreamingOptions;
 
   /** Custom permission callback - called when tool needs approval */
   canUseTool?: CanUseToolCallback;
@@ -713,12 +656,6 @@ export interface CreateSessionOptions {
    * These tools are registered with the CLI and executed when the LLM calls them.
    */
   tools?: AnyAgentTool[];
-
-  /**
-   * If true, pass --include-partial-messages to CLI to receive token-level
-   * stream_event chunks for incremental assistant/reasoning rendering.
-   */
-  includePartialMessages?: boolean;
 
   /**
    * Max automatic approval-conflict recovery attempts per runTurn() call.
@@ -759,7 +696,7 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
    * access. Agent-ID sessions derive the standard root; set `MEMORY_DIR` or
    * `LETTA_MEMORY_DIR` for overrides and conversation-ID resumes. Fails closed
    * without a root or supported kernel sandbox. Excludes agent creation,
-   * management calls, remote/Cloud runtimes, and legacy stdio.
+   * management calls, and remote/Cloud runtimes.
    */
   filesystemConfinement?: "memory";
 }
