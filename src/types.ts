@@ -674,7 +674,11 @@ export interface CreateSessionOptions {
    */
   approvalRecoveryTimeoutMs?: number;
 
-  /** Cloud repository resources to attach for the lifetime of the SDK session. */
+  /**
+   * Cloud repository resources to attach for the lifetime of the SDK session.
+   * For relationships that should outlive the session, use
+   * `client.agents.repositories.attach()` instead.
+   */
   resources?: RepositoryResource[];
 
 }

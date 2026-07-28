@@ -1,4 +1,5 @@
 import type {
+  AgentRepositoriesClient,
   AgentsClient,
   ConversationsClient,
   ConversationMessagesResult,
@@ -153,8 +154,12 @@ function conversationMessagesQuery(
 
 export function createAgentsClient(
   transport: TransportProvider,
+  repositories: () => AgentRepositoriesClient,
 ): AgentsClient {
   return {
+    get repositories() {
+      return repositories();
+    },
     list: (options = {}) =>
       transport().listAgents(agentListQuery(options)),
     retrieve: (agentId) => transport().retrieveAgent(agentId),

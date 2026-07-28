@@ -181,13 +181,27 @@ function createCloudFetchMock(
         .map((request) => (request.body as { repository_id?: string } | undefined)?.repository_id)
         .filter((id): id is string => typeof id === "string");
       return Promise.resolve(jsonResponse({
-        repositories: postedIds.map((id) => ({ id, name: id, is_primary: false })),
+        repositories: postedIds.map((id) => ({
+          id,
+          name: id,
+          is_primary: false,
+          permissions: "read_write",
+        })),
       }));
     }
 
     if (agentRepositoriesMatch && method === "POST") {
       const body = bodyOf(init) as { repository_id?: string } | undefined;
-      return Promise.resolve(jsonResponse({ success: true, repository: { id: body?.repository_id ?? "repo-1" } }));
+      const id = body?.repository_id ?? "repo-1";
+      return Promise.resolve(jsonResponse({
+        success: true,
+        repository: {
+          id,
+          name: id,
+          is_primary: false,
+          permissions: "read_write",
+        },
+      }));
     }
 
     const agentRepositoryMatch = /^\/v1\/agents\/([^/]+)\/repositories\/([^/]+)$/.exec(parsed.pathname);
