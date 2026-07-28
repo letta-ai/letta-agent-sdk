@@ -1,6 +1,6 @@
 {
   "name": "@letta-ai/letta-agent-sdk",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "packageManager": "bun@1.3.0",
   "description": "SDK for programmatic control of Letta agents",
   "type": "module",
