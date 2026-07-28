@@ -11,6 +11,7 @@ import {
   registerAppServerControlRequestHandler,
 } from "./app-server-session.js";
 import { createCloudStatusTransportConstructor } from "./cloud-status-transport.js";
+import { CloudManagementTransport } from "./cloud-management.js";
 import {
   RemoteEnvironmentClient,
   type RemoteEnvironmentTarget,
@@ -125,12 +126,6 @@ export class CloudManagedSandboxExpiredError extends Error {
 }
 
 type CloudSessionMode = Extract<RuntimeSessionMode, { kind: "session" }>;
-
-type CloudAgentRepository = {
-  id: string;
-  name?: string;
-  is_primary?: boolean;
-};
 
 function getDefaultApiKey(): string | undefined {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } })
@@ -405,6 +400,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   private sandboxLifecycleClosing = false;
   private attachedRepositoryIds = new Set<string>();
   private repositoryIdsRequiringCleanupRecompile = new Set<string>();
+  private readonly repositoryManagement: CloudManagementTransport;
   private readonly cloudMode: CloudSessionMode;
 
   constructor(
@@ -416,6 +412,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       requestTimeoutMs: cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
     });
     this.cloudMode = mode;
+    this.repositoryManagement = new CloudManagementTransport(cloudOptions);
     const tools = mode.options.tools;
     this.externalTools = externalToolsByName(tools);
   }
@@ -615,7 +612,9 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     const resources = this.repositoryResources();
     if (resources.length === 0) return false;
 
-    const existing = await this.listAgentRepositories(agentId);
+    const existing = await this.repositoryManagement.listAgentRepositories(
+      agentId,
+    );
     const existingIds = new Set(existing.map((repository) => repository.id));
 
     try {
@@ -623,7 +622,11 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
         if (existingIds.has(resource.repositoryId) || this.attachedRepositoryIds.has(resource.repositoryId)) {
           continue;
         }
-        await this.linkAgentRepository(agentId, resource.repositoryId);
+        await this.repositoryManagement.attachAgentRepository(
+          agentId,
+          resource.repositoryId,
+          undefined,
+        );
         await this.waitForAgentRepository(agentId, resource.repositoryId);
         this.attachedRepositoryIds.add(resource.repositoryId);
       }
@@ -661,7 +664,10 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     this.repositoryIdsRequiringCleanupRecompile = new Set<string>();
     const recompileAfterDetach = await Promise.all(repositoryIds.map(async (repositoryId) => {
       try {
-        await this.unlinkAgentRepository(agentId, repositoryId);
+        await this.repositoryManagement.detachAgentRepository(
+          agentId,
+          repositoryId,
+        );
         return repositoryIdsRequiringRecompile.has(repositoryId);
       } catch {
         // Best-effort cleanup: only repositories this SDK session attached are removed.
@@ -683,23 +689,15 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     agentId: string,
     conversationId?: string,
   ): Promise<void> {
-    const fetchImpl = getFetch(this.cloudOptions.fetch);
-    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
     const usesAgentPrompt = !conversationId || conversationId === "default";
-    const path = usesAgentPrompt
-      ? `/v1/agents/${encodeURIComponent(agentId)}/recompile`
-      : `/v1/conversations/${encodeURIComponent(conversationId)}/recompile`;
-    const url = `${baseUrl}${path}`;
-    const response = await fetchImpl(
-      url,
-      {
-        method: "POST",
-        headers: cloudHeaders(this.cloudOptions),
-        body: JSON.stringify(usesAgentPrompt ? {} : { agent_id: agentId }),
-      },
+    if (usesAgentPrompt) {
+      await this.repositoryManagement.recompileAgentSystemPrompt(agentId);
+      return;
+    }
+    await this.repositoryManagement.recompileConversationSystemPrompt(
+      agentId,
+      conversationId,
     );
-    const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud recompile system prompt", url);
   }
 
   private repositoryResources(): RepositoryResource[] {
@@ -720,63 +718,18 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     return result;
   }
 
-  private async listAgentRepositories(agentId: string): Promise<CloudAgentRepository[]> {
-    const fetchImpl = getFetch(this.cloudOptions.fetch);
-    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
-    const response = await fetchImpl(
-      `${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/repositories`,
-      { headers: cloudHeaders(this.cloudOptions) },
-    );
-    const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud list agent repositories");
-    if (!body || typeof body !== "object") return [];
-    const repositories = (body as Record<string, unknown>).repositories;
-    return Array.isArray(repositories)
-      ? repositories.filter((repository): repository is CloudAgentRepository => (
-        repository !== null &&
-        typeof repository === "object" &&
-        typeof (repository as Record<string, unknown>).id === "string"
-      ))
-      : [];
-  }
-
   private async waitForAgentRepository(agentId: string, repositoryId: string): Promise<void> {
     const deadline = Date.now() + DEFAULT_REPOSITORY_ATTACH_TIMEOUT_MS;
     while (true) {
-      const repositories = await this.listAgentRepositories(agentId);
+      const repositories = await this.repositoryManagement.listAgentRepositories(
+        agentId,
+      );
       if (repositories.some((repository) => repository.id === repositoryId)) return;
       if (Date.now() >= deadline) {
         throw new Error(`Cloud attach agent repository did not become visible for ${agentId}: ${repositoryId}`);
       }
       await sleep(DEFAULT_REPOSITORY_ATTACH_POLL_INTERVAL_MS);
     }
-  }
-
-  private async linkAgentRepository(agentId: string, repositoryId: string): Promise<void> {
-    const fetchImpl = getFetch(this.cloudOptions.fetch);
-    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
-    const response = await fetchImpl(
-      `${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/repositories`,
-      {
-        method: "POST",
-        headers: cloudHeaders(this.cloudOptions),
-        body: JSON.stringify({ repository_id: repositoryId }),
-      },
-    );
-    const body = await parseJsonResponse(response);
-    assertOkResponse(response, body, "Cloud attach agent repository");
-  }
-
-  private async unlinkAgentRepository(agentId: string, repositoryId: string): Promise<void> {
-    const fetchImpl = getFetch(this.cloudOptions.fetch);
-    const baseUrl = normalizeCloudApiBaseUrl(this.cloudOptions.apiBaseUrl);
-    const response = await fetchImpl(
-      `${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/repositories/${encodeURIComponent(repositoryId)}`,
-      { method: "DELETE", headers: cloudHeaders(this.cloudOptions) },
-    );
-    const body = await parseJsonResponse(response);
-    if (response.status === 404) return;
-    assertOkResponse(response, body, "Cloud detach agent repository");
   }
 
   private async createConversation(agentId: string): Promise<{ id: string; agent_id?: string }> {

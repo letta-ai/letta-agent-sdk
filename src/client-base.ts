@@ -1,4 +1,5 @@
 import { RepositoriesClient } from "./repositories.js";
+import { createAgentRepositoriesClient } from "./agent-repositories.js";
 import { AppServerManagementTransport } from "./app-server-management.js";
 import {
   AppServerSession,
@@ -18,6 +19,7 @@ import {
   type ManagementTransport,
 } from "./management.js";
 import type {
+  AgentRepositoriesClient,
   AgentsClient,
   ConversationsClient,
   ModelsClient,
@@ -104,6 +106,7 @@ export class LettaAgentClientBase {
   readonly models: ModelsClient;
   protected readonly options: LettaCodeClientOptions;
   private repositoriesClient: RepositoriesClient | null = null;
+  private agentRepositoriesClient: AgentRepositoriesClient | null = null;
   private managementTransport: ManagementTransport | null = null;
 
   constructor(options: LettaCodeClientOptions = {}) {
@@ -117,7 +120,10 @@ export class LettaAgentClientBase {
     this.backend = backend;
     this.environment = getOptionsEnvironment(options);
     this.options = options;
-    this.agents = createAgentsClient(() => this.getManagementTransport());
+    this.agents = createAgentsClient(
+      () => this.getManagementTransport(),
+      () => this.getAgentRepositoriesClient(),
+    );
     this.conversations = createConversationsClient(
       () => this.getManagementTransport(),
     );
@@ -429,6 +435,26 @@ export class LettaAgentClientBase {
     }
     this.repositoriesClient ??= new RepositoriesClient(this.cloudOptions());
     return this.repositoriesClient;
+  }
+
+  private getAgentRepositoriesClient(): AgentRepositoriesClient {
+    if (this.backend !== "cloud") {
+      throw new Error(
+        'client.agents.repositories is only available with backend: "cloud".',
+      );
+    }
+    this.agentRepositoriesClient ??= createAgentRepositoriesClient(
+      () => this.getCloudManagementTransport(),
+    );
+    return this.agentRepositoriesClient;
+  }
+
+  private getCloudManagementTransport(): CloudManagementTransport {
+    const transport = this.getManagementTransport();
+    if (!(transport instanceof CloudManagementTransport)) {
+      throw new Error("Cloud management requested for non-cloud backend.");
+    }
+    return transport;
   }
 
   private getManagementTransport(): ManagementTransport {

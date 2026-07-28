@@ -96,7 +96,57 @@ export type ConversationMessagesResult = ListMessagesResult & {
   messages: LettaConversationMessage[];
 };
 
+export type AgentRepositoryPermissions = "read" | "read_write";
+export type AgentRepositoryRecompileTarget = "default" | false;
+
+/** A repository relationship persisted on an agent. */
+export interface AgentRepository {
+  id: string;
+  name: string;
+  isPrimary: boolean;
+  permissions: AgentRepositoryPermissions;
+}
+
+export interface AttachAgentRepositoryOptions {
+  /** Access granted to the agent. Defaults to `read_write` on the server. */
+  permissions?: AgentRepositoryPermissions;
+  /** Recompile the agent's default conversation after attachment. Defaults to `default`. */
+  recompile?: AgentRepositoryRecompileTarget;
+}
+
+export interface DetachAgentRepositoryOptions {
+  /** Recompile the agent's default conversation after detachment. Defaults to `default`. */
+  recompile?: AgentRepositoryRecompileTarget;
+}
+
+/** Persistent agent-repository relationships. Available on the Cloud backend. */
+export interface AgentRepositoriesClient {
+  list(agentId: string): Promise<AgentRepository[]>;
+  /**
+   * Persistently attach a repository, wait for the relationship to become
+   * visible, then recompile the agent's default conversation unless disabled.
+   * If recompilation fails, the relationship remains attached and retrying is safe.
+   */
+  attach(
+    agentId: string,
+    repositoryId: string,
+    options?: AttachAgentRepositoryOptions,
+  ): Promise<AgentRepository>;
+  /**
+   * Persistently detach a repository, wait for the relationship to disappear,
+   * then recompile the agent's default conversation unless disabled. If
+   * recompilation fails, the relationship remains detached and retrying is safe.
+   */
+  detach(
+    agentId: string,
+    repositoryId: string,
+    options?: DetachAgentRepositoryOptions,
+  ): Promise<void>;
+}
+
 export interface AgentsClient {
+  /** Persistent repository relationships for this agent. Cloud only. */
+  readonly repositories: AgentRepositoriesClient;
   list(options?: ListAgentsOptions): Promise<LettaAgent[]>;
   retrieve(agentId: string): Promise<LettaAgent>;
   update(

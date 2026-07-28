@@ -174,16 +174,33 @@ const conversations = await client.conversations.list({
 // No open session required — safe for model pickers and settings screens.
 const { entries: models, availableHandles } = await client.models.list();
 
-await client.agents.delete(agents[0].id);
-
 const repository = await client.repositories.create({ name: "inputs" });
 await client.repositories.files.create(repository.id, {
   path: "brief.md",
   content: "# Project brief\n",
 });
+
+// Persistent agent knowledge: attach once during provisioning. This
+// recompiles the agent's default conversation after the relationship is
+// visible, and session.close() will not detach it.
+await client.agents.repositories.attach(agents[0].id, repository.id, {
+  permissions: "read",
+});
+
+// Remove persistent knowledge explicitly during deprovisioning.
+await client.agents.repositories.detach(agents[0].id, repository.id);
+await client.agents.delete(agents[0].id);
 ```
 
-`client.repositories` is available on the `cloud` backend. See [Cloud repositories](https://docs.letta.com/letta-agent-sdk/repositories) for file operations, version history, and session resources.
+`client.repositories` and `client.agents.repositories` are available on the
+`cloud` backend. Persistent agent relationships belong under
+`client.agents.repositories`; use session `resources` only when the session
+should own attachment and cleanup. Attach and detach recompile the agent's
+default conversation by default; pass `{ recompile: false }` only when the
+caller will handle prompt recompilation separately. Existing explicit
+conversations are not silently recompiled. If recompilation fails after a
+successful relationship mutation, the method rejects but the attachment state
+remains changed; retrying is safe. See [Cloud repositories](https://docs.letta.com/letta-agent-sdk/repositories) for file operations, version history, and session resources.
 
 ## Documentation
 

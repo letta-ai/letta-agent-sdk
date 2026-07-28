@@ -145,6 +145,10 @@ export type {
   AnyAgentTool,
 } from "./types.js";
 export type {
+  AgentRepositoriesClient,
+  AgentRepository,
+  AgentRepositoryRecompileTarget,
+  AttachAgentRepositoryOptions,
   AgentsClient,
   ConversationsClient,
   LettaAgent,
@@ -158,6 +162,8 @@ export type {
   UpdateConversationOptions,
   ConversationMessagesOptions,
   ConversationMessagesResult,
+  DetachAgentRepositoryOptions,
+  AgentRepositoryPermissions,
 } from "./management-types.js";
 
 export { RepositoriesClient } from "./repositories.js";

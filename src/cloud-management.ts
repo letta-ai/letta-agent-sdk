@@ -3,9 +3,11 @@ import type {
   ManagementTransport,
 } from "./management.js";
 import type {
+  AgentRepository,
   ConversationMessagesResult,
   LettaAgent,
   LettaConversation,
+  AgentRepositoryPermissions,
 } from "./management-types.js";
 import type {
   LettaCodeCloudClientOptions,
@@ -79,7 +81,12 @@ function responseErrorMessage(body: unknown, fallback: string): string {
   if (body && typeof body === "object") {
     const record = body as Record<string, unknown>;
     const message = record.message ?? record.error ?? record.detail;
-    if (typeof message === "string" && message.length > 0) return message;
+    const reasonText = record.reason_text;
+    const pieces = [message, reasonText].filter(
+      (value): value is string =>
+        typeof value === "string" && value.length > 0,
+    );
+    if (pieces.length > 0) return pieces.join(": ");
   }
   return fallback;
 }
@@ -123,6 +130,28 @@ function asArray<T>(body: unknown, action: string): T[] {
     throw new Error(`${action} response did not include an array.`);
   }
   return body as T[];
+}
+
+function asAgentRepository(body: unknown, action: string): AgentRepository {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new Error(`${action} response did not include a repository.`);
+  }
+  const repository = body as Record<string, unknown>;
+  const permissions = repository.permissions;
+  if (
+    typeof repository.id !== "string" ||
+    typeof repository.name !== "string" ||
+    typeof repository.is_primary !== "boolean" ||
+    (permissions !== "read" && permissions !== "read_write")
+  ) {
+    throw new Error(`${action} response included an invalid repository.`);
+  }
+  return {
+    id: repository.id,
+    name: repository.name,
+    isPrimary: repository.is_primary,
+    permissions,
+  };
 }
 
 function cloudModelEntry(
@@ -186,6 +215,80 @@ export class CloudManagementTransport implements ManagementTransport {
       "DELETE",
       undefined,
       "Cloud delete agent",
+    );
+  }
+
+  async listAgentRepositories(agentId: string): Promise<AgentRepository[]> {
+    const body = await this.getObject<Record<string, unknown>>(
+      `/v1/agents/${encodeURIComponent(agentId)}/repositories`,
+      {},
+      "Cloud list agent repositories",
+    );
+    if (!Array.isArray(body.repositories)) {
+      throw new Error(
+        "Cloud list agent repositories response did not include repositories.",
+      );
+    }
+    return body.repositories.map((repository) =>
+      asAgentRepository(repository, "Cloud list agent repositories")
+    );
+  }
+
+  async attachAgentRepository(
+    agentId: string,
+    repositoryId: string,
+    permissions: AgentRepositoryPermissions | undefined,
+  ): Promise<AgentRepository> {
+    const body = await this.requestObject<Record<string, unknown>>(
+      `/v1/agents/${encodeURIComponent(agentId)}/repositories`,
+      "POST",
+      {
+        repository_id: repositoryId,
+        ...(permissions !== undefined ? { permissions } : {}),
+      },
+      "Cloud attach agent repository",
+    );
+    return asAgentRepository(
+      body.repository,
+      "Cloud attach agent repository",
+    );
+  }
+
+  async detachAgentRepository(
+    agentId: string,
+    repositoryId: string,
+  ): Promise<void> {
+    await this.requestUrl(
+      this.url(
+        `/v1/agents/${encodeURIComponent(agentId)}/repositories/${encodeURIComponent(repositoryId)}`,
+      ),
+      "DELETE",
+      undefined,
+      "Cloud detach agent repository",
+      [404],
+    );
+  }
+
+  async recompileAgentSystemPrompt(agentId: string): Promise<void> {
+    await this.requestUrl(
+      this.url(`/v1/agents/${encodeURIComponent(agentId)}/recompile`),
+      "POST",
+      {},
+      "Cloud recompile system prompt",
+    );
+  }
+
+  async recompileConversationSystemPrompt(
+    agentId: string,
+    conversationId: string,
+  ): Promise<void> {
+    await this.requestUrl(
+      this.url(
+        `/v1/conversations/${encodeURIComponent(conversationId)}/recompile`,
+      ),
+      "POST",
+      { agent_id: agentId },
+      "Cloud recompile system prompt",
     );
   }
 
@@ -329,6 +432,7 @@ export class CloudManagementTransport implements ManagementTransport {
     method: string,
     body: Record<string, unknown> | undefined,
     action: string,
+    allowedStatuses: readonly number[] = [],
   ): Promise<unknown> {
     const fetchImpl = (this.options.fetch ?? globalThis.fetch)?.bind(
       globalThis,
@@ -342,7 +446,7 @@ export class CloudManagementTransport implements ManagementTransport {
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
     const responseBody = await parseResponse(response);
-    if (!response.ok) {
+    if (!response.ok && !allowedStatuses.includes(response.status)) {
       throw cloudRequestError(
         response,
         responseBody,
