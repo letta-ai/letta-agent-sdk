@@ -278,6 +278,7 @@ function fakeAppServerHandle(
           is_processing: false,
           current_permission_mode: "acceptEdits",
           current_working_directory: "/workspace/project",
+          memory_directory: "/memory/agent-123",
           pending_control_requests: [
             {
               request_id: "approval-1",
@@ -2012,6 +2013,7 @@ describe("LettaAgentClient", () => {
         isProcessing: false,
         permissionMode: "acceptEdits",
         workingDirectory: "/workspace/project",
+        memoryDirectory: "/memory/agent-123",
         pendingControlRequests: [
           {
             requestId: "approval-1",
@@ -2049,6 +2051,7 @@ describe("LettaAgentClient", () => {
       expect(await session.getDeviceStatus()).toMatchObject({
         permissionMode: "acceptEdits",
         workingDirectory: "/workspace/project",
+        memoryDirectory: "/memory/agent-123",
       });
       expect(fakeControlSocket().sent.filter(
         (command) => (command as { type?: string }).type === "sync",

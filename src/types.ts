@@ -851,6 +851,8 @@ export interface SessionDeviceStatus {
   permissionMode: PermissionMode;
   /** Working directory currently applied to this runtime scope. */
   workingDirectory: string | null;
+  /** Agent memory checkout on the computer executing this session. */
+  memoryDirectory: string | null;
   /** Approvals the device is still waiting on (foreground-resume UI). */
   pendingControlRequests: SessionPendingControlRequest[];
   /** Full wire `device_status` payload as an escape hatch. */
