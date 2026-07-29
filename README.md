@@ -121,6 +121,30 @@ await using session = client.createSession(agentId, {
 
 Local execution (embedded Letta Code harness / app server) requires Node.js 22.19 or newer.
 
+### MCP tools
+
+Pass stdio MCP servers as session options. The SDK starts them in the session
+cwd, namespaces their tools as `mcp__<server>__<tool>`, and exposes them through
+Letta Code's external-tool protocol. Servers are closed with the session.
+
+```ts
+await using session = client.createSession(agentId, {
+  cwd: process.cwd(),
+  mcpServers: [
+    {
+      name: "filesystem",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-filesystem", process.cwd()],
+    },
+  ],
+});
+```
+
+MCP stdio processes require the Node package entry; they are not available from
+`@letta-ai/letta-agent-sdk/client` in browser or React Native environments. For
+a simple smoke test, the official `@modelcontextprotocol/server-everything`
+package runs over stdio with `npx -y @modelcontextprotocol/server-everything`.
+
 ### Managed Cloud sandbox repositories
 
 Cloud sessions can clone up to 10 GitHub repositories into the managed

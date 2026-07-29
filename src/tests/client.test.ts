@@ -834,6 +834,41 @@ describe("LettaAgentClient", () => {
     }
   });
 
+  test("registers session MCP tools through the app-server external-tool protocol", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+    const session = client.resumeSession("agent-123", {
+      cwd: process.cwd(),
+      mcpServers: [
+        {
+          name: "fixture",
+          command: process.execPath,
+          args: [
+            new URL(
+              "./dist/index.js",
+              import.meta.resolve(
+                "@modelcontextprotocol/server-everything/package.json",
+              ),
+            ).pathname,
+          ],
+        },
+      ],
+    });
+
+    try {
+      await asAdvanced(session).initialize();
+      const registered = JSON.stringify(fakeControlSocket().sent[0]);
+      expect(registered).toContain("mcp__fixture__echo");
+      expect(registered).toContain("mcp__fixture__get-sum");
+    } finally {
+      session.close();
+    }
+  });
+
   test("constructs remote backend and keeps cloud construction typed", () => {
     const remoteClient = new LettaAgentClient({
       backend: "remote",
