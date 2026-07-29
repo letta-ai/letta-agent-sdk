@@ -23,6 +23,7 @@ import {
   isHeadlessAutoAllowTool,
   requiresRuntimeUserInput,
 } from "./interactiveToolPolicy.js";
+import { connectMcpServers, type McpToolBridge } from "./mcp-runtime.js";
 import { applyUniqueRequestIds } from "./request-ids.js";
 import {
   RemoteClientSessionCore,
@@ -690,6 +691,7 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
 export class AppServerSession extends RemoteClientSessionCore {
   private ownedConnection: { close(): void } | null = null;
   private externalTools = new Map<string, AnyAgentTool>();
+  private mcpBridge: McpToolBridge | null = null;
   private removeExternalToolHandler: (() => void) | null = null;
   private removeControlRequestHandler: (() => void) | null = null;
 
@@ -726,6 +728,18 @@ export class AppServerSession extends RemoteClientSessionCore {
         ? { requestTimeoutMs: this.remoteOptions.requestTimeoutMs }
         : {}),
     }));
+
+    const options = this.currentOptions();
+    this.mcpBridge = await connectMcpServers(
+      "mcpServers" in options ? options.mcpServers : undefined,
+      {
+        cwd: options.cwd,
+        reservedToolNames: this.externalTools.keys(),
+      },
+    );
+    for (const tool of this.mcpBridge.tools) {
+      this.externalTools.set(tool.name, tool);
+    }
 
     this.removeControlRequestHandler = registerAppServerControlRequestHandler({
       client,
@@ -765,6 +779,8 @@ export class AppServerSession extends RemoteClientSessionCore {
       this.removeExternalToolHandler = null;
       this.removeControlRequestHandler?.();
       this.removeControlRequestHandler = null;
+      void this.mcpBridge?.close();
+      this.mcpBridge = null;
       client.close();
       throw error;
     }
@@ -775,6 +791,8 @@ export class AppServerSession extends RemoteClientSessionCore {
     this.removeExternalToolHandler = null;
     this.removeControlRequestHandler?.();
     this.removeControlRequestHandler = null;
+    void this.mcpBridge?.close();
+    this.mcpBridge = null;
     this.ownedConnection?.close();
     this.ownedConnection = null;
   }
@@ -821,7 +839,7 @@ export class AppServerSession extends RemoteClientSessionCore {
     if (options.skillSources !== undefined) {
       command.skill_sources = [...new Set(options.skillSources)];
     }
-    const groups = externalToolGroups(options.tools);
+    const groups = externalToolGroups([...this.externalTools.values()]);
     if (groups) command.external_tools = groups;
 
     if (this.mode.kind === "create-agent") {

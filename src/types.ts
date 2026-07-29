@@ -266,6 +266,27 @@ export interface AgentTool<TParams, TResult> {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type AnyAgentTool = AgentTool<any, unknown>;
 
+/** Environment variable passed to a stdio MCP server. */
+export interface McpServerEnvironmentVariable {
+  name: string;
+  value: string;
+}
+
+/**
+ * A stdio MCP server whose tools should be exposed to a Letta Code session.
+ *
+ * The environment accepts either the object form commonly used by MCP clients
+ * or the name/value array used by ACP clients such as Zed.
+ */
+export interface McpServerConfig {
+  name: string;
+  command: string;
+  args?: string[];
+  env?: Record<string, string> | McpServerEnvironmentVariable[];
+  /** Override the session cwd for this server process. */
+  cwd?: string;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // TOP-LEVEL CLIENT TYPES
 // ═══════════════════════════════════════════════════════════════
@@ -645,6 +666,12 @@ export interface CreateSessionOptions {
    * These tools are registered with the CLI and executed when the LLM calls them.
    */
   tools?: AnyAgentTool[];
+
+  /**
+   * Stdio MCP servers whose tools execute in the SDK process and are exposed
+   * through Letta Code's external-tool protocol for this session.
+   */
+  mcpServers?: McpServerConfig[];
 
   /**
    * Max automatic approval-conflict recovery attempts per runTurn() call.

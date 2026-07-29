@@ -29,6 +29,10 @@
  */
 
 import { LettaAgentClient } from "./client.js";
+import { connectMcpServers as connectNodeMcpServers } from "./mcp.js";
+import { registerMcpConnector } from "./mcp-runtime.js";
+
+registerMcpConnector(connectNodeMcpServers);
 import type {
   CreateSessionOptions,
   CreateAgentOptions,
@@ -143,6 +147,8 @@ export type {
   AgentToolResultContent,
   AgentToolUpdateCallback,
   AnyAgentTool,
+  McpServerConfig,
+  McpServerEnvironmentVariable,
 } from "./types.js";
 export type {
   AgentRepositoriesClient,

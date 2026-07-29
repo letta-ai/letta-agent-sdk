@@ -40,9 +40,11 @@
   },
   "dependencies": {
     "@letta-ai/letta-client": "^1.12.1",
-    "@letta-ai/letta-code": "0.29.9"
+    "@letta-ai/letta-code": "0.29.9",
+    "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/server-everything": "^2026.7.4",
     "@types/bun": "latest",
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0"

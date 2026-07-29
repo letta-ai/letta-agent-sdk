@@ -14,6 +14,7 @@ import {
   registerAppServerControlRequestHandler,
 } from "./app-server-session.js";
 import { createCloudStatusTransportConstructor } from "./cloud-status-transport.js";
+import { connectMcpServers, type McpToolBridge } from "./mcp-runtime.js";
 import { CloudManagementTransport } from "./cloud-management.js";
 import {
   createCloudClient,
@@ -301,6 +302,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   private removeExternalToolHandler: (() => void) | null = null;
   private removeControlRequestHandler: (() => void) | null = null;
   private externalTools = new Map<string, AnyAgentTool>();
+  private mcpBridge: McpToolBridge | null = null;
   private managedSandbox: ManagedCloudSandbox | null = null;
   private sandboxRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private sandboxRefreshInFlight: Promise<void> | null = null;
@@ -361,6 +363,17 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       }),
       requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
     }));
+    const options = this.currentOptions();
+    this.mcpBridge = await connectMcpServers(
+      "mcpServers" in options ? options.mcpServers : undefined,
+      {
+        cwd: options.cwd,
+        reservedToolNames: this.externalTools.keys(),
+      },
+    );
+    for (const tool of this.mcpBridge.tools) {
+      this.externalTools.set(tool.name, tool);
+    }
     this.removeControlRequestHandler = registerAppServerControlRequestHandler({
       client,
       getRuntime: () => this.runtime,
@@ -400,6 +413,8 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       this.removeExternalToolHandler = null;
       this.removeControlRequestHandler?.();
       this.removeControlRequestHandler = null;
+      void this.mcpBridge?.close();
+      this.mcpBridge = null;
       client.close();
       await this.cleanupManagedSandbox();
       await this.cleanupSessionRepositories(
@@ -432,7 +447,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     if (options.skillSources !== undefined) {
       command.skill_sources = [...new Set(options.skillSources)];
     }
-    const groups = externalToolGroups(options.tools);
+    const groups = externalToolGroups([...this.externalTools.values()]);
     if (groups) command.external_tools = groups;
 
     return (await client.runtimeStart(
@@ -461,6 +476,8 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     this.removeExternalToolHandler = null;
     this.removeControlRequestHandler?.();
     this.removeControlRequestHandler = null;
+    void this.mcpBridge?.close();
+    this.mcpBridge = null;
     void this.cleanupManagedSandbox();
     if (this.runtime?.agent_id) {
       void this.cleanupSessionRepositories(
