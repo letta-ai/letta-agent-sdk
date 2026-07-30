@@ -148,7 +148,6 @@ export type {
   AgentToolUpdateCallback,
   AnyAgentTool,
   McpServerConfig,
-  McpServerEnvironmentVariable,
   McpStdioServerConfig,
   McpHttpServerConfig,
   McpSseServerConfig,

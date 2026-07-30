@@ -268,19 +268,12 @@ export interface AgentTool<TParams, TResult> {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type AnyAgentTool = AgentTool<any, unknown>;
 
-/** Environment variable passed to a stdio MCP server. */
-export interface McpServerEnvironmentVariable {
-  name: string;
-  value: string;
-}
-
 /** A local MCP process connected over stdin/stdout. */
 export interface McpStdioServerConfig {
   type?: "stdio";
   command: string;
   args?: string[];
-  /** Object form, or ACP-compatible name/value entries. */
-  env?: Record<string, string> | McpServerEnvironmentVariable[];
+  env?: Record<string, string>;
   /** Override the session cwd for this server process. */
   cwd?: string;
 }

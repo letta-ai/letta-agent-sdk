@@ -146,22 +146,11 @@ function toLettaMcpServerConfig(
     transport: "stdio",
     command: config.command,
     args: config.args ?? [],
-    env: normalizeEnvironment(config.env),
+    ...(config.env ? { env: config.env } : {}),
     ...(config.cwd ?? sessionCwd
       ? { cwd: config.cwd ?? sessionCwd }
       : {}),
   };
-}
-
-function normalizeEnvironment(
-  env: Extract<McpServerConfig, { command: string }>["env"],
-): Record<string, string> | undefined {
-  if (!env) return undefined;
-  if (!Array.isArray(env)) return env;
-
-  const result: Record<string, string> = {};
-  for (const entry of env) result[entry.name] = entry.value;
-  return result;
 }
 
 function bridgeTool(
