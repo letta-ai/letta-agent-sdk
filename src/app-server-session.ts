@@ -23,7 +23,11 @@ import {
   isHeadlessAutoAllowTool,
   requiresRuntimeUserInput,
 } from "./interactiveToolPolicy.js";
-import { connectMcpServers, type McpToolBridge } from "./mcp-runtime.js";
+import {
+  connectMcpServers,
+  expandMcpToolWildcards,
+  type McpToolBridge,
+} from "./mcp-runtime.js";
 import { applyUniqueRequestIds } from "./request-ids.js";
 import {
   RemoteClientSessionCore,
@@ -270,6 +274,7 @@ export function createExternalToolCallHandler(
         ...(part.data !== undefined ? { data: part.data } : {}),
         ...(part.mimeType !== undefined ? { mimeType: part.mimeType } : {}),
       })),
+      ...(result.isError === true ? { is_error: true } : {}),
     };
   };
 }
@@ -692,6 +697,7 @@ export class AppServerSession extends RemoteClientSessionCore {
   private ownedConnection: { close(): void } | null = null;
   private externalTools = new Map<string, AnyAgentTool>();
   private mcpBridge: McpToolBridge | null = null;
+  private mcpCleanup: Promise<void> = Promise.resolve();
   private removeExternalToolHandler: (() => void) | null = null;
   private removeControlRequestHandler: (() => void) | null = null;
 
@@ -715,6 +721,7 @@ export class AppServerSession extends RemoteClientSessionCore {
   }
 
   protected override async initializeRuntimeController(): Promise<RuntimeSessionInit> {
+    await this.mcpCleanup;
     const url = await this.resolveAppServerUrl();
     const client = applyUniqueRequestIds(createAppServerClient({
       url,
@@ -762,16 +769,25 @@ export class AppServerSession extends RemoteClientSessionCore {
 
       const tools = agentToolNames(response.agent);
       const skillSources = this.currentOptions().skillSources;
+      const mcpToolNames = this.mcpBridge?.tools.map((tool) => tool.name) ?? [];
+      const allowedTools = expandMcpToolWildcards(
+        this.currentOptions().allowedTools,
+        mcpToolNames,
+      );
+      const availableTools =
+        tools === undefined && mcpToolNames.length === 0
+          ? undefined
+          : [...(tools ?? []), ...mcpToolNames];
       return {
         controller: new AppServerRuntimeController(
           client,
           this.remoteOptions,
-          this.currentOptions().allowedTools,
+          allowedTools,
         ),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
         modelSettings: objectRecord(response.agent?.model_settings) ?? null,
-        ...(tools !== undefined ? { tools } : {}),
+        ...(availableTools !== undefined ? { tools: availableTools } : {}),
         ...(skillSources !== undefined ? { skillSources: [...skillSources] } : {}),
       };
     } catch (error) {
@@ -779,8 +795,7 @@ export class AppServerSession extends RemoteClientSessionCore {
       this.removeExternalToolHandler = null;
       this.removeControlRequestHandler?.();
       this.removeControlRequestHandler = null;
-      void this.mcpBridge?.close();
-      this.mcpBridge = null;
+      await this.closeMcpBridge();
       client.close();
       throw error;
     }
@@ -791,10 +806,20 @@ export class AppServerSession extends RemoteClientSessionCore {
     this.removeExternalToolHandler = null;
     this.removeControlRequestHandler?.();
     this.removeControlRequestHandler = null;
-    void this.mcpBridge?.close();
-    this.mcpBridge = null;
+    this.mcpCleanup = this.closeMcpBridge();
     this.ownedConnection?.close();
     this.ownedConnection = null;
+  }
+
+  protected override async onCoreDisposed(): Promise<void> {
+    await this.mcpCleanup;
+  }
+
+  private closeMcpBridge(): Promise<void> {
+    const bridge = this.mcpBridge;
+    this.mcpBridge = null;
+    for (const tool of bridge?.tools ?? []) this.externalTools.delete(tool.name);
+    return bridge?.close() ?? Promise.resolve();
   }
 
   private async resolveAppServerUrl(): Promise<string> {

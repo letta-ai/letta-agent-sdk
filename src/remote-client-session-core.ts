@@ -572,6 +572,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
 
   async [Symbol.asyncDispose](): Promise<void> {
     this.close();
+    await this.onCoreDisposed();
   }
 
   async changeDeviceState(
@@ -632,6 +633,10 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
 
   protected onCoreClose(): void {
     // Optional hook for subclass-owned resources outside the controller.
+  }
+
+  protected async onCoreDisposed(): Promise<void> {
+    // Optional hook for awaiting asynchronous cleanup started by onCoreClose().
   }
 
   protected currentOptions(): LettaCodeClientSessionOptions | CreateAgentOptions {

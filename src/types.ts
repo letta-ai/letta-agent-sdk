@@ -227,6 +227,8 @@ export interface AgentToolResultContent {
  */
 export interface AgentToolResult<T> {
   content: AgentToolResultContent[];
+  /** Whether the tool completed with a model-visible error result. */
+  isError?: boolean;
   details?: T;
 }
 
@@ -266,26 +268,38 @@ export interface AgentTool<TParams, TResult> {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type AnyAgentTool = AgentTool<any, unknown>;
 
-/** Environment variable passed to a stdio MCP server. */
-export interface McpServerEnvironmentVariable {
-  name: string;
-  value: string;
-}
-
-/**
- * A stdio MCP server whose tools should be exposed to a Letta Code session.
- *
- * The environment accepts either the object form commonly used by MCP clients
- * or the name/value array used by ACP clients such as Zed.
- */
-export interface McpServerConfig {
-  name: string;
+/** A local MCP process connected over stdin/stdout. */
+export interface McpStdioServerConfig {
+  type?: "stdio";
   command: string;
   args?: string[];
-  env?: Record<string, string> | McpServerEnvironmentVariable[];
+  env?: Record<string, string>;
   /** Override the session cwd for this server process. */
   cwd?: string;
 }
+
+/** A remote MCP server using Streamable HTTP. */
+export interface McpHttpServerConfig {
+  type: "http";
+  url: string;
+  headers?: Record<string, string>;
+}
+
+/** A remote MCP server using the legacy SSE transport. */
+export interface McpSseServerConfig {
+  type: "sse";
+  url: string;
+  headers?: Record<string, string>;
+}
+
+/** One MCP server definition. The key in {@link McpServers} supplies its name. */
+export type McpServerConfig =
+  | McpStdioServerConfig
+  | McpHttpServerConfig
+  | McpSseServerConfig;
+
+/** MCP servers keyed by the name used in `mcp__<server>__<tool>`. */
+export type McpServers = Record<string, McpServerConfig>;
 
 // ═══════════════════════════════════════════════════════════════
 // TOP-LEVEL CLIENT TYPES
@@ -668,10 +682,11 @@ export interface CreateSessionOptions {
   tools?: AnyAgentTool[];
 
   /**
-   * Stdio MCP servers whose tools execute in the SDK process and are exposed
-   * through Letta Code's external-tool protocol for this session.
+   * Session-scoped MCP servers keyed by server name. Stdio processes and
+   * remote HTTP/SSE connections run in the Node SDK process and are exposed
+   * through Letta Code's external-tool protocol.
    */
-  mcpServers?: McpServerConfig[];
+  mcpServers?: McpServers;
 
   /**
    * Max automatic approval-conflict recovery attempts per runTurn() call.

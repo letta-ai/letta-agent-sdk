@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { connectMcpServers } from "../mcp.js";
-import type { McpServerConfig } from "../types.js";
+import { expandMcpToolWildcards } from "../mcp-runtime.js";
+import type { McpServerConfig, McpServers } from "../types.js";
 
 const EVERYTHING_SERVER = fileURLToPath(
   new URL(
@@ -10,17 +11,20 @@ const EVERYTHING_SERVER = fileURLToPath(
   ),
 );
 
-function stdioServer(name = "test"): McpServerConfig {
+function stdioServer(): McpServerConfig {
   return {
-    name,
     command: process.execPath,
     args: [EVERYTHING_SERVER],
   };
 }
 
+function stdioServers(name = "test"): McpServers {
+  return { [name]: stdioServer() };
+}
+
 describe("MCP tool bridge", () => {
   test("lists namespaced tools and proxies calls", async () => {
-    const bridge = await connectMcpServers([stdioServer()], { log: () => {} });
+    const bridge = await connectMcpServers(stdioServers(), { log: () => {} });
     try {
       const names = bridge.tools.map((tool) => tool.name);
       expect(names).toContain("mcp__test__echo");
@@ -40,40 +44,44 @@ describe("MCP tool bridge", () => {
     }
   });
 
-  test("surfaces MCP call validation failures", async () => {
-    const bridge = await connectMcpServers([stdioServer()], { log: () => {} });
+  test("preserves model-visible MCP errors", async () => {
+    const bridge = await connectMcpServers(stdioServers(), { log: () => {} });
     try {
       const echo = bridge.tools.find((tool) => tool.name === "mcp__test__echo");
-      expect(echo?.execute("call-2", {})).rejects.toThrow();
+      const result = await echo?.execute("call-2", {});
+      expect(result?.isError).toBe(true);
     } finally {
       await bridge.close();
     }
   });
 
-  test("avoids collisions with custom and other MCP tools", async () => {
+  test("avoids collisions with custom and normalized MCP names", async () => {
     const bridge = await connectMcpServers(
-      [stdioServer(), stdioServer()],
       {
-        reservedToolNames: ["mcp__test__echo"],
+        "test.one": stdioServer(),
+        test_one: stdioServer(),
+      },
+      {
+        reservedToolNames: ["mcp__test_one__echo"],
         log: () => {},
       },
     );
     try {
       const names = bridge.tools.map((tool) => tool.name);
-      expect(names).toContain("mcp__test__echo_2");
-      expect(names).toContain("mcp__test__echo_3");
+      expect(names).toContain("mcp__test_one__echo_2");
+      expect(names).toContain("mcp__test_one__echo_3");
     } finally {
       await bridge.close();
     }
   });
 
-  test("skips an unavailable server without dropping healthy servers", async () => {
+  test("reports an unavailable server without dropping healthy servers", async () => {
     const logs: string[] = [];
     const bridge = await connectMcpServers(
-      [
-        { name: "broken", command: "/nonexistent/mcp-server" },
-        stdioServer(),
-      ],
+      {
+        broken: { command: "/nonexistent/mcp-server" },
+        test: stdioServer(),
+      },
       { log: (message) => logs.push(message) },
     );
     try {
@@ -86,5 +94,19 @@ describe("MCP tool bridge", () => {
     } finally {
       await bridge.close();
     }
+  });
+
+  test("expands Claude-style MCP allowlist wildcards", () => {
+    expect(
+      expandMcpToolWildcards(
+        ["Read", "mcp__exa__*", "mcp__github__issues"],
+        ["mcp__exa__search", "mcp__exa__fetch", "mcp__other__tool"],
+      ),
+    ).toEqual([
+      "Read",
+      "mcp__exa__search",
+      "mcp__exa__fetch",
+      "mcp__github__issues",
+    ]);
   });
 });

@@ -8,6 +8,7 @@ import type {
   CreateSessionOptions,
   CreateAgentOptions,
   MemoryItem, 
+  McpServers,
   CreateBlock,
   SystemPromptPreset,
   SkillSource,
@@ -173,11 +174,41 @@ function validateReasoningEffort(value: unknown): void {
   }
 }
 
+function validateMcpServers(servers: McpServers | undefined): void {
+  if (servers === undefined) return;
+  if (!servers || typeof servers !== "object" || Array.isArray(servers)) {
+    throw new Error("Invalid mcpServers. Expected an object keyed by server name.");
+  }
+  for (const [name, config] of Object.entries(servers)) {
+    if (name.length === 0) {
+      throw new Error("Invalid mcpServers. Server names must be non-empty.");
+    }
+    if (!config || typeof config !== "object" || Array.isArray(config)) {
+      throw new Error(`Invalid MCP server '${name}'. Expected a configuration object.`);
+    }
+    if (config.type === "http" || config.type === "sse") {
+      if (typeof config.url !== "string" || config.url.length === 0) {
+        throw new Error(`Invalid MCP server '${name}'. Expected a non-empty url.`);
+      }
+      continue;
+    }
+    if (config.type !== undefined && config.type !== "stdio") {
+      throw new Error(
+        `Invalid MCP server '${name}' type '${String(config.type)}'. Valid values: stdio, http, sse.`,
+      );
+    }
+    if (typeof config.command !== "string" || config.command.length === 0) {
+      throw new Error(`Invalid MCP server '${name}'. Expected a non-empty command.`);
+    }
+  }
+}
+
 /**
  * Validate CreateSessionOptions (used by createSession and resumeSession).
  */
 export function validateCreateSessionOptions(options: CreateSessionOptions): void {
   validateSkillSources(options.skillSources);
+  validateMcpServers(options.mcpServers);
   validateReasoningEffort(options.reasoningEffort);
   validateDreamingOptions(options.dreaming);
   validateApprovalRecoveryOptions(options);

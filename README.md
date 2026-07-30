@@ -123,27 +123,44 @@ Local execution (embedded Letta Code harness / app server) requires Node.js 22.1
 
 ### MCP tools
 
-Pass stdio MCP servers as session options. The SDK starts them in the session
-cwd, namespaces their tools as `mcp__<server>__<tool>`, and exposes them through
-Letta Code's external-tool protocol. Servers are closed with the session.
+Pass MCP servers by name in session options. The SDK supports local stdio,
+Streamable HTTP, and legacy SSE transports. It namespaces discovered tools as
+`mcp__<server>__<tool>` and exposes them through Letta Code's external-tool
+protocol.
 
 ```ts
 await using session = client.createSession(agentId, {
   cwd: process.cwd(),
-  mcpServers: [
-    {
-      name: "filesystem",
+  mcpServers: {
+    filesystem: {
       command: "npx",
       args: ["-y", "@modelcontextprotocol/server-filesystem", process.cwd()],
     },
-  ],
+    exa: {
+      type: "http",
+      url: "https://mcp.exa.ai/mcp",
+    },
+    github: {
+      type: "http",
+      url: "https://api.githubcopilot.com/mcp/",
+      headers: {
+        Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+      },
+    },
+  },
+  allowedTools: ["mcp__filesystem__*", "mcp__exa__*", "mcp__github__list_issues"],
 });
 ```
 
-MCP stdio processes require the Node package entry; they are not available from
-`@letta-ai/letta-agent-sdk/client` in browser or React Native environments. For
-a simple smoke test, the official `@modelcontextprotocol/server-everything`
-package runs over stdio with `npx -y @modelcontextprotocol/server-everything`.
+Connections start concurrently during session initialization. A failed server
+is skipped without dropping healthy servers. OAuth is host-managed, matching
+the Claude Agent SDK: complete OAuth in your application and provide the access
+token through `headers`. The SDK does not open an interactive browser flow.
+
+MCP connections run in the Node SDK process and close with the session. This
+includes MCP used by remote and Cloud sessions: stdio servers see the SDK host
+filesystem, not a managed sandbox. MCP is unavailable from the portable
+`@letta-ai/letta-agent-sdk/client` browser and React Native entry point.
 
 ### Managed Cloud sandbox repositories
 
