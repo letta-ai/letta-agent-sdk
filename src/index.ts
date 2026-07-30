@@ -149,6 +149,12 @@ export type {
   AnyAgentTool,
   McpServerConfig,
   McpServerEnvironmentVariable,
+  McpStdioServerConfig,
+  McpHttpServerConfig,
+  McpSseServerConfig,
+  McpServers,
+  McpServerConnectionStatus,
+  McpServerStatus,
 } from "./types.js";
 export type {
   AgentRepositoriesClient,

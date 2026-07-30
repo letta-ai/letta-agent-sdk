@@ -1,8 +1,9 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
-  getDefaultEnvironment,
-  StdioClientTransport,
-} from "@modelcontextprotocol/sdk/client/stdio.js";
+  type ConnectedMcpServer,
+  connectMcpServer,
+  type McpServerConfig as LettaMcpServerConfig,
+  type McpToolDefinition,
+} from "@letta-ai/letta-code/mcp-client";
 import type {
   ConnectMcpServersOptions,
   McpToolBridge,
@@ -11,10 +12,13 @@ import type {
   AgentToolResultContent,
   AnyAgentTool,
   McpServerConfig,
+  McpServerStatus,
+  McpServers,
 } from "./types.js";
 
 const EMPTY_BRIDGE: McpToolBridge = {
   tools: [],
+  statuses: [],
   close: async () => undefined,
 };
 
@@ -23,98 +27,145 @@ const CLIENT_INFO = {
   version: "1",
 };
 
+type NamedMcpServer = {
+  name: string;
+  config: McpServerConfig;
+};
+
+type ConnectionResult =
+  | {
+      server: NamedMcpServer;
+      connection: ConnectedMcpServer;
+    }
+  | {
+      server: NamedMcpServer;
+      error: unknown;
+    };
+
 /**
- * Connect stdio MCP servers and expose their tools through Letta Code's
- * external-tool protocol. A broken server is skipped so it cannot prevent the
- * rest of a session from starting.
+ * Connect session-scoped MCP servers through Letta Code's transport-neutral
+ * client and expose their tools through the external-tool protocol. A broken
+ * server is reported but cannot prevent healthy servers from loading.
  */
 export async function connectMcpServers(
-  servers: readonly McpServerConfig[] | undefined,
+  servers: McpServers | undefined,
   options: ConnectMcpServersOptions = {},
 ): Promise<McpToolBridge> {
-  if (!servers || servers.length === 0) return EMPTY_BRIDGE;
+  const namedServers = Object.entries(servers ?? {}).map(([name, config]) => ({
+    name,
+    config,
+  }));
+  if (namedServers.length === 0) return EMPTY_BRIDGE;
 
   const log = options.log ?? ((message: string) => console.error(message));
-  const clients: Client[] = [];
+  const results = await Promise.all(
+    namedServers.map(async (server): Promise<ConnectionResult> => {
+      try {
+        const connection = await connectMcpServer(
+          toLettaMcpServerConfig(server, options.cwd),
+          {
+            clientInfo: CLIENT_INFO,
+            stderr: "inherit",
+          },
+        );
+        return { server, connection };
+      } catch (error) {
+        return { server, error };
+      }
+    }),
+  );
+
+  const connections: ConnectedMcpServer[] = [];
   const tools: AnyAgentTool[] = [];
+  const statuses: McpServerStatus[] = [];
   const taken = new Set(options.reservedToolNames ?? []);
 
-  for (const server of servers) {
-    let client: Client | null = null;
-    try {
-      client = new Client(CLIENT_INFO);
-      await client.connect(
-        new StdioClientTransport({
-          command: server.command,
-          args: server.args ?? [],
-          env: {
-            ...getDefaultEnvironment(),
-            ...normalizeEnvironment(server.env),
-          },
-          cwd: server.cwd ?? options.cwd,
-          stderr: "inherit",
-        }),
-      );
-
-      const listed = await client.listTools();
-      clients.push(client);
-      for (const tool of listed.tools) {
-        const name = uniqueName(
-          `mcp__${sanitize(server.name)}__${sanitize(tool.name)}`,
-          taken,
-        );
-        tools.push(
-          bridgeTool(client, server.name, tool, name),
-        );
-      }
-      log(
-        `MCP server "${server.name}" connected (${listed.tools.length} tool${listed.tools.length === 1 ? "" : "s"})`,
-      );
-    } catch (error) {
-      if (client && !clients.includes(client)) {
-        await client.close().catch(() => undefined);
-      }
-      log(`MCP server "${server.name}" unavailable: ${String(error)}`);
+  for (const result of results) {
+    if ("error" in result) {
+      const error = errorMessage(result.error);
+      const status: McpServerStatus = {
+        name: result.server.name,
+        status: isAuthorizationError(result.error) ? "needs-auth" : "failed",
+        tools: [],
+        error,
+      };
+      statuses.push(status);
+      log(`MCP server "${result.server.name}" unavailable: ${error}`);
+      continue;
     }
-  }
 
-  if (clients.length === 0) return EMPTY_BRIDGE;
+    connections.push(result.connection);
+    const toolNames: string[] = [];
+    for (const tool of result.connection.tools) {
+      const name = uniqueName(
+        `mcp__${sanitize(result.server.name)}__${sanitize(tool.name)}`,
+        taken,
+      );
+      toolNames.push(name);
+      tools.push(bridgeTool(result.connection, result.server.name, tool, name));
+    }
+    statuses.push({
+      name: result.server.name,
+      status: "connected",
+      tools: toolNames,
+    });
+    log(
+      `MCP server "${result.server.name}" connected (${toolNames.length} tool${toolNames.length === 1 ? "" : "s"})`,
+    );
+  }
 
   let closed = false;
   return {
     tools,
+    statuses,
     close: async () => {
       if (closed) return;
       closed = true;
-      await Promise.all(
-        clients.map((client) => client.close().catch(() => undefined)),
+      await Promise.allSettled(
+        connections.map((connection) => connection.close()),
       );
     },
   };
 }
 
+function toLettaMcpServerConfig(
+  server: NamedMcpServer,
+  sessionCwd: string | undefined,
+): LettaMcpServerConfig {
+  const config = server.config;
+  if (config.type === "http" || config.type === "sse") {
+    return {
+      name: server.name,
+      transport: config.type,
+      url: config.url,
+      ...(config.headers ? { headers: config.headers } : {}),
+    };
+  }
+  return {
+    name: server.name,
+    transport: "stdio",
+    command: config.command,
+    args: config.args ?? [],
+    env: normalizeEnvironment(config.env),
+    ...(config.cwd ?? sessionCwd
+      ? { cwd: config.cwd ?? sessionCwd }
+      : {}),
+  };
+}
+
 function normalizeEnvironment(
-  env: McpServerConfig["env"],
-): Record<string, string> {
-  if (!env) return {};
+  env: Extract<McpServerConfig, { command: string }>["env"],
+): Record<string, string> | undefined {
+  if (!env) return undefined;
   if (!Array.isArray(env)) return env;
 
   const result: Record<string, string> = {};
-  for (const entry of env) {
-    result[entry.name] = entry.value;
-  }
+  for (const entry of env) result[entry.name] = entry.value;
   return result;
 }
 
-interface McpToolDefinition {
-  name: string;
-  title?: string;
-  description?: string;
-  inputSchema?: unknown;
-}
-
 function bridgeTool(
-  client: Client,
+  connection: ConnectedMcpServer,
   serverName: string,
   tool: McpToolDefinition,
   name: string,
@@ -126,39 +177,22 @@ function bridgeTool(
       tool.description && tool.description.trim().length > 0
         ? tool.description
         : `The ${tool.name} tool from the ${serverName} MCP server.`,
-    parameters: toolParameters(tool.inputSchema),
+    parameters: tool.inputSchema,
     execute: async (_toolCallId, args, signal) => {
-      const result = await client.callTool(
-        {
-          name: tool.name,
-          arguments: isRecord(args) ? args : {},
-        },
-        undefined,
+      const result = await connection.callTool(
+        tool.name,
+        isRecord(args) ? args : {},
         signal ? { signal } : undefined,
       );
-      const content = toToolResultContent(result.content);
-      if (result.isError) {
-        throw new Error(
-          content
-            .map((item) => item.text ?? "")
-            .filter(Boolean)
-            .join("\n") || `${tool.name} failed`,
-        );
-      }
-      return { content };
+      return {
+        content: toToolResultContent(result.content),
+        ...(result.isError === true ? { isError: true } : {}),
+      };
     },
   };
 }
 
-function toolParameters(inputSchema: unknown): Record<string, unknown> {
-  if (isRecord(inputSchema) && inputSchema.type === "object") {
-    return inputSchema;
-  }
-  return { type: "object", properties: {} };
-}
-
-function toToolResultContent(content: unknown): AgentToolResultContent[] {
-  if (!Array.isArray(content)) return [];
+function toToolResultContent(content: unknown[]): AgentToolResultContent[] {
   const mapped: AgentToolResultContent[] = [];
   for (const block of content) {
     if (!isRecord(block)) continue;
@@ -184,7 +218,7 @@ function toToolResultContent(content: unknown): AgentToolResultContent[] {
 }
 
 function sanitize(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return name.replace(/[^a-zA-Z0-9_-]/g, "_") || "tool";
 }
 
 function uniqueName(name: string, taken: Set<string>): string {
@@ -196,6 +230,20 @@ function uniqueName(name: string, taken: Set<string>): string {
   }
   taken.add(candidate);
   return candidate;
+}
+
+function isAuthorizationError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.name === "UnauthorizedError" ||
+    /\b(unauthorized|authorization[_ -]required|needs[_ -]auth)\b/i.test(
+      error.message,
+    )
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -17,6 +17,23 @@ describe("validation", () => {
     ).not.toThrow();
   });
 
+  test("validates keyed MCP server configurations", () => {
+    expect(() =>
+      validateCreateSessionOptions({
+        mcpServers: {
+          local: { command: "node", args: ["server.js"] },
+          remote: { type: "http", url: "https://example.com/mcp" },
+        },
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      validateCreateSessionOptions({
+        mcpServers: [{ name: "old", command: "node" }],
+      } as never),
+    ).toThrow("Expected an object keyed by server name");
+  });
+
   test("rejects invalid session reasoning effort", () => {
     expect(() =>
       validateCreateSessionOptions({

@@ -14,7 +14,11 @@ import {
   registerAppServerControlRequestHandler,
 } from "./app-server-session.js";
 import { createCloudStatusTransportConstructor } from "./cloud-status-transport.js";
-import { connectMcpServers, type McpToolBridge } from "./mcp-runtime.js";
+import {
+  connectMcpServers,
+  expandMcpToolWildcards,
+  type McpToolBridge,
+} from "./mcp-runtime.js";
 import { CloudManagementTransport } from "./cloud-management.js";
 import {
   createCloudClient,
@@ -303,6 +307,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   private removeControlRequestHandler: (() => void) | null = null;
   private externalTools = new Map<string, AnyAgentTool>();
   private mcpBridge: McpToolBridge | null = null;
+  private mcpCleanup: Promise<void> = Promise.resolve();
   private managedSandbox: ManagedCloudSandbox | null = null;
   private sandboxRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private sandboxRefreshInFlight: Promise<void> | null = null;
@@ -328,6 +333,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   protected override async initializeRuntimeController(): Promise<RuntimeSessionInit> {
+    await this.mcpCleanup;
     const resolved = await this.resolveRuntime();
     const connection = await this.resolveConnectionForRuntime(resolved.runtime).catch(
       async (error: unknown) => {
@@ -394,18 +400,28 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
 
       const tools = agentToolNames(response.agent);
       const skillSources = this.currentOptions().skillSources;
+      const mcpToolNames = this.mcpBridge?.tools.map((tool) => tool.name) ?? [];
+      const allowedTools = expandMcpToolWildcards(
+        this.currentOptions().allowedTools,
+        mcpToolNames,
+      );
+      const availableTools =
+        tools === undefined && mcpToolNames.length === 0
+          ? undefined
+          : [...(tools ?? []), ...mcpToolNames];
       return {
         controller: new AppServerRuntimeController(
           client,
           {
             requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
           },
-          this.currentOptions().allowedTools,
+          allowedTools,
         ),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
         modelSettings: response.agent?.model_settings ?? null,
-        ...(tools !== undefined ? { tools } : {}),
+        mcpServers: this.mcpBridge?.statuses ?? [],
+        ...(availableTools !== undefined ? { tools: availableTools } : {}),
         ...(skillSources !== undefined ? { skillSources: [...skillSources] } : {}),
       };
     } catch (error) {
@@ -413,8 +429,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       this.removeExternalToolHandler = null;
       this.removeControlRequestHandler?.();
       this.removeControlRequestHandler = null;
-      void this.mcpBridge?.close();
-      this.mcpBridge = null;
+      await this.closeMcpBridge();
       client.close();
       await this.cleanupManagedSandbox();
       await this.cleanupSessionRepositories(
@@ -476,8 +491,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     this.removeExternalToolHandler = null;
     this.removeControlRequestHandler?.();
     this.removeControlRequestHandler = null;
-    void this.mcpBridge?.close();
-    this.mcpBridge = null;
+    this.mcpCleanup = this.closeMcpBridge();
     void this.cleanupManagedSandbox();
     if (this.runtime?.agent_id) {
       void this.cleanupSessionRepositories(
@@ -485,6 +499,17 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
         this.runtime.conversation_id,
       );
     }
+  }
+
+  protected override async onCoreDisposed(): Promise<void> {
+    await this.mcpCleanup;
+  }
+
+  private closeMcpBridge(): Promise<void> {
+    const bridge = this.mcpBridge;
+    this.mcpBridge = null;
+    for (const tool of bridge?.tools ?? []) this.externalTools.delete(tool.name);
+    return bridge?.close() ?? Promise.resolve();
   }
 
   private async resolveRuntime(): Promise<{ runtime: RuntimeScope }> {
