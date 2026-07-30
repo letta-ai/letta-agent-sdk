@@ -152,8 +152,6 @@ export type {
   McpHttpServerConfig,
   McpSseServerConfig,
   McpServers,
-  McpServerConnectionStatus,
-  McpServerStatus,
 } from "./types.js";
 export type {
   AgentRepositoriesClient,

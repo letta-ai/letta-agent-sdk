@@ -787,7 +787,6 @@ export class AppServerSession extends RemoteClientSessionCore {
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
         modelSettings: objectRecord(response.agent?.model_settings) ?? null,
-        mcpServers: this.mcpBridge?.statuses ?? [],
         ...(availableTools !== undefined ? { tools: availableTools } : {}),
         ...(skillSources !== undefined ? { skillSources: [...skillSources] } : {}),
       };

@@ -150,17 +150,10 @@ await using session = client.createSession(agentId, {
   },
   allowedTools: ["mcp__filesystem__*", "mcp__exa__*", "mcp__github__list_issues"],
 });
-
-const statuses = await session.mcpServerStatus();
-for (const server of statuses) {
-  if (server.status === "failed" || server.status === "needs-auth") {
-    console.warn(`${server.name}: ${server.error}`);
-  }
-}
 ```
 
 Connections start concurrently during session initialization. A failed server
-is reported without dropping healthy servers. OAuth is host-managed, matching
+is skipped without dropping healthy servers. OAuth is host-managed, matching
 the Claude Agent SDK: complete OAuth in your application and provide the access
 token through `headers`. The SDK does not open an interactive browser flow.
 

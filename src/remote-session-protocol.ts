@@ -6,7 +6,6 @@ import type {
   ListMessagesResult,
   ListModelsResult,
   MessageContentItem,
-  McpServerStatus,
   RecoverPendingApprovalsOptions,
   RecoverPendingApprovalsResult,
   ReasoningEffort,
@@ -99,7 +98,6 @@ export type RuntimeSessionInit = {
   model?: string | null;
   modelSettings?: Record<string, unknown> | null;
   tools?: string[];
-  mcpServers?: McpServerStatus[];
   /** Effective runtime skill source override, when explicitly requested. */
   skillSources?: SkillSource[];
 };

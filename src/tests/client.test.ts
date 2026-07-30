@@ -861,13 +861,6 @@ describe("LettaAgentClient", () => {
     try {
       const init = await asAdvanced(session).initialize();
       expect(init.tools).toContain("mcp__fixture__echo");
-      expect(init.mcpServers).toContainEqual(
-        expect.objectContaining({
-          name: "fixture",
-          status: "connected",
-        }),
-      );
-      expect(await session.mcpServerStatus()).toEqual(init.mcpServers ?? []);
       const registered = JSON.stringify(fakeControlSocket().sent[0]);
       expect(registered).toContain("mcp__fixture__echo");
       expect(registered).toContain("mcp__fixture__get-sum");

@@ -10,7 +10,6 @@ import type {
   ListModelsResult,
   ListMessagesOptions,
   ListMessagesResult,
-  McpServerStatus,
   RecoverPendingApprovalsOptions,
   RecoverPendingApprovalsResult,
   RemoveQueuedMessageResult,
@@ -64,13 +63,6 @@ export type {
   RuntimeTurnResult,
 } from "./remote-session-protocol.js";
 
-function copyMcpStatus(status: McpServerStatus): McpServerStatus {
-  return {
-    ...status,
-    tools: [...status.tools],
-  };
-}
-
 export abstract class RemoteClientSessionCore implements LettaCodeSession {
   protected controller: RemoteClientRuntimeController | null = null;
   protected runtime: RuntimeScope | null = null;
@@ -88,7 +80,6 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   private removeMessageHandler: (() => void) | null = null;
   private readonly turns: RemoteTurnCoordinator;
   private toolNames: string[] | undefined;
-  private mcpStatuses: McpServerStatus[] = [];
   private deviceStatusListeners = new Set<(status: SessionDeviceStatus) => void>();
   private deviceStatusRefreshCancels = new Set<(error: Error) => void>();
 
@@ -163,7 +154,6 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
           ? this._modelSettings.model
           : "";
     this.toolNames = init.tools;
-    this.mcpStatuses = init.mcpServers?.map(copyMcpStatus) ?? [];
     this.removeMessageHandler = this.controller.onMessage((message) => {
       if (this.runtime) this.turns.handleProtocolMessage(message, this.runtime);
     });
@@ -186,9 +176,6 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       model: this._model,
     };
     if (this.toolNames !== undefined) initMessage.tools = this.toolNames;
-    if (this.mcpStatuses.length > 0) {
-      initMessage.mcpServers = this.mcpStatuses.map(copyMcpStatus);
-    }
     if (init.skillSources !== undefined) {
       initMessage.skillSources = init.skillSources;
     }
@@ -214,7 +201,6 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     this._modelSettings = null;
     this._model = "";
     this.toolNames = undefined;
-    this.mcpStatuses = [];
     this.initialized = false;
   }
 
@@ -554,11 +540,6 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       state.hasMore = page.hasMore;
     }
     return state;
-  }
-
-  async mcpServerStatus(): Promise<McpServerStatus[]> {
-    if (!this.initialized) await this.initialize();
-    return this.mcpStatuses.map(copyMcpStatus);
   }
 
   close(): void {

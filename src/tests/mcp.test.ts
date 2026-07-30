@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { connectMcpServers } from "../mcp.js";
 import { expandMcpToolWildcards } from "../mcp-runtime.js";
@@ -23,29 +22,6 @@ function stdioServers(name = "test"): McpServers {
   return { [name]: stdioServer() };
 }
 
-async function authorizationRequiredServer(): Promise<{
-  url: string;
-  close(): Promise<void>;
-}> {
-  const server = createServer((_request, response) => {
-    response.writeHead(401, {
-      "Content-Type": "application/json",
-      "WWW-Authenticate":
-        'Bearer resource_metadata="http://127.0.0.1/.well-known/oauth-protected-resource"',
-    });
-    response.end(JSON.stringify({ error: "authorization_required" }));
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Could not start authorization test server");
-  }
-  return {
-    url: `http://127.0.0.1:${address.port}/mcp`,
-    close: () => new Promise((resolve) => server.close(() => resolve())),
-  };
-}
-
 describe("MCP tool bridge", () => {
   test("lists namespaced tools and proxies calls", async () => {
     const bridge = await connectMcpServers(stdioServers(), { log: () => {} });
@@ -53,11 +29,6 @@ describe("MCP tool bridge", () => {
       const names = bridge.tools.map((tool) => tool.name);
       expect(names).toContain("mcp__test__echo");
       expect(names).toContain("mcp__test__get-sum");
-      expect(bridge.statuses).toContainEqual({
-        name: "test",
-        status: "connected",
-        tools: expect.arrayContaining(["mcp__test__echo"]),
-      });
 
       const echo = bridge.tools.find((tool) => tool.name === "mcp__test__echo");
       expect(echo?.parameters).toMatchObject({
@@ -117,34 +88,11 @@ describe("MCP tool bridge", () => {
       expect(bridge.tools.map((tool) => tool.name)).toContain(
         "mcp__test__echo",
       );
-      expect(bridge.statuses.find(({ name }) => name === "broken")).toMatchObject(
-        { status: "failed", tools: [] },
-      );
       expect(logs.some((line) => line.includes('"broken" unavailable'))).toBe(
         true,
       );
     } finally {
       await bridge.close();
-    }
-  });
-
-  test("reports remote authorization challenges", async () => {
-    const server = await authorizationRequiredServer();
-    try {
-      const bridge = await connectMcpServers(
-        { protected: { type: "http", url: server.url } },
-        { log: () => {} },
-      );
-      expect(bridge.statuses).toEqual([
-        expect.objectContaining({
-          name: "protected",
-          status: "needs-auth",
-          tools: [],
-        }),
-      ]);
-      await bridge.close();
-    } finally {
-      await server.close();
     }
   });
 

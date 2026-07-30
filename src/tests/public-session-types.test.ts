@@ -7,7 +7,6 @@ type HasKey<K extends PropertyKey> = K extends keyof LettaCodeSession ? true : f
 
 type _HasSend = AssertTrue<HasKey<"send">>;
 type _HasStream = AssertTrue<HasKey<"stream">>;
-type _HasMcpServerStatus = AssertTrue<HasKey<"mcpServerStatus">>;
 type _HasAbort = AssertTrue<HasKey<"abort">>;
 type _HasSendCommand = AssertTrue<HasKey<"sendCommand">>;
 type _HasListMessages = AssertTrue<HasKey<"listMessages">>;

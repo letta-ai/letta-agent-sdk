@@ -12,13 +12,11 @@ import type {
   AgentToolResultContent,
   AnyAgentTool,
   McpServerConfig,
-  McpServerStatus,
   McpServers,
 } from "./types.js";
 
 const EMPTY_BRIDGE: McpToolBridge = {
   tools: [],
-  statuses: [],
   close: async () => undefined,
 };
 
@@ -77,47 +75,32 @@ export async function connectMcpServers(
 
   const connections: ConnectedMcpServer[] = [];
   const tools: AnyAgentTool[] = [];
-  const statuses: McpServerStatus[] = [];
   const taken = new Set(options.reservedToolNames ?? []);
 
   for (const result of results) {
     if ("error" in result) {
-      const error = errorMessage(result.error);
-      const status: McpServerStatus = {
-        name: result.server.name,
-        status: isAuthorizationError(result.error) ? "needs-auth" : "failed",
-        tools: [],
-        error,
-      };
-      statuses.push(status);
-      log(`MCP server "${result.server.name}" unavailable: ${error}`);
+      log(
+        `MCP server "${result.server.name}" unavailable: ${errorMessage(result.error)}`,
+      );
       continue;
     }
 
     connections.push(result.connection);
-    const toolNames: string[] = [];
     for (const tool of result.connection.tools) {
       const name = uniqueName(
         `mcp__${sanitize(result.server.name)}__${sanitize(tool.name)}`,
         taken,
       );
-      toolNames.push(name);
       tools.push(bridgeTool(result.connection, result.server.name, tool, name));
     }
-    statuses.push({
-      name: result.server.name,
-      status: "connected",
-      tools: toolNames,
-    });
     log(
-      `MCP server "${result.server.name}" connected (${toolNames.length} tool${toolNames.length === 1 ? "" : "s"})`,
+      `MCP server "${result.server.name}" connected (${result.connection.tools.length} tool${result.connection.tools.length === 1 ? "" : "s"})`,
     );
   }
 
   let closed = false;
   return {
     tools,
-    statuses,
     close: async () => {
       if (closed) return;
       closed = true;
@@ -219,16 +202,6 @@ function uniqueName(name: string, taken: Set<string>): string {
   }
   taken.add(candidate);
   return candidate;
-}
-
-function isAuthorizationError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  return (
-    error.name === "UnauthorizedError" ||
-    /\b(unauthorized|authorization[_ -]required|needs[_ -]auth)\b/i.test(
-      error.message,
-    )
-  );
 }
 
 function errorMessage(error: unknown): string {

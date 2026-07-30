@@ -301,20 +301,6 @@ export type McpServerConfig =
 /** MCP servers keyed by the name used in `mcp__<server>__<tool>`. */
 export type McpServers = Record<string, McpServerConfig>;
 
-export type McpServerConnectionStatus =
-  | "connected"
-  | "failed"
-  | "needs-auth";
-
-/** Connection state for one session-scoped MCP server. */
-export interface McpServerStatus {
-  name: string;
-  status: McpServerConnectionStatus;
-  /** Namespaced tools exposed by this server. */
-  tools: string[];
-  error?: string;
-}
-
 // ═══════════════════════════════════════════════════════════════
 // TOP-LEVEL CLIENT TYPES
 // ═══════════════════════════════════════════════════════════════
@@ -753,8 +739,6 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
 export interface LettaCodeSession extends AsyncDisposable {
   send(message: SendMessage): Promise<void>;
   stream(): AsyncGenerator<SDKMessage>;
-  /** Return the latest MCP connection snapshot, initializing the session if needed. */
-  mcpServerStatus(): Promise<McpServerStatus[]>;
   abort(): Promise<void>;
   sendCommand(command: SDKProtocolCommand): Promise<void>;
   sendCommand<TResponse extends SDKProtocolMessage = SDKProtocolMessage>(
@@ -1008,8 +992,6 @@ export interface SDKInitMessage {
   model: string;
   /** Backend-reported tool names, when the transport exposes an authoritative list. */
   tools?: string[];
-  /** MCP connection state after session startup. */
-  mcpServers?: McpServerStatus[];
   memfsEnabled?: boolean;
   skillSources?: SkillSource[];
   systemInfoReminderEnabled?: boolean;

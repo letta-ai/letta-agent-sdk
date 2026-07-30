@@ -1,12 +1,7 @@
-import type {
-  AnyAgentTool,
-  McpServerStatus,
-  McpServers,
-} from "./types.js";
+import type { AnyAgentTool, McpServers } from "./types.js";
 
 export interface McpToolBridge {
   tools: AnyAgentTool[];
-  statuses: McpServerStatus[];
   close(): Promise<void>;
 }
 
@@ -33,7 +28,7 @@ export async function connectMcpServers(
   options: ConnectMcpServersOptions = {},
 ): Promise<McpToolBridge> {
   if (!servers || Object.keys(servers).length === 0) {
-    return { tools: [], statuses: [], close: async () => undefined };
+    return { tools: [], close: async () => undefined };
   }
   if (!connector) {
     throw new Error(
