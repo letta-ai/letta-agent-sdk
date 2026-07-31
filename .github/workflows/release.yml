@@ -92,7 +92,9 @@ jobs:
 
           if [ -n "$LETTA_CODE_VERSION" ] && [ "$CURRENT_CODE_VERSION" = "$LETTA_CODE_VERSION" ]; then
             NEW_VERSION="$OLD_VERSION"
+            UPDATE_MANIFESTS=false
           else
+            UPDATE_MANIFESTS=true
             if [[ "$OLD_VERSION" == *-* ]]; then
               OLD_IS_PRERELEASE=true
               BASE_VERSION=$(echo "$OLD_VERSION" | sed 's/-.*//')
@@ -146,8 +148,10 @@ jobs:
           echo "npm_tag=$NPM_TAG" >> "$GITHUB_OUTPUT"
           echo "tag=v$NEW_VERSION" >> "$GITHUB_OUTPUT"
           echo "letta_code_version=$LETTA_CODE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "update_manifests=$UPDATE_MANIFESTS" >> "$GITHUB_OUTPUT"
 
       - name: Update package manifests
+        if: steps.version.outputs.update_manifests == 'true'
         env:
           NEW_VERSION: ${{ steps.version.outputs.new_version }}
           LETTA_CODE_VERSION: ${{ steps.version.outputs.letta_code_version }}
