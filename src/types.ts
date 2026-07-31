@@ -635,6 +635,22 @@ export interface SendCommandOptions<TResponseType extends string = string> {
   predicate?: (message: SDKProtocolMessage) => boolean;
 }
 
+export type ClientToolsetBase =
+  | "auto"
+  | "codex"
+  | "codex_snake"
+  | "default"
+  | "gemini"
+  | "gemini_snake"
+  | "none";
+
+export interface ClientToolsetConfig {
+  /** Request-scoped base toolset. Omitted preserves the harness preference. */
+  base?: ClientToolsetBase;
+  /** Additional bundled client tools to load before applying allowedTools. */
+  include?: string[];
+}
+
 /**
  * Options for createSession() and resumeSession() restricted to settings that
  * can be applied to existing agents.
@@ -654,6 +670,13 @@ export interface CreateSessionOptions {
    * excluded for SDK sessions.
    */
   allowedTools?: string[];
+
+  /**
+   * Request-scoped built-in client toolset selection. The base chooses a
+   * harness preset without changing persisted settings; include adds bundled
+   * tools before allowedTools is applied.
+   */
+  toolset?: ClientToolsetConfig;
 
   /** Permission mode */
   permissionMode?: PermissionMode;

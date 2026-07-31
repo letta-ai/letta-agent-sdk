@@ -22,6 +22,16 @@ const VALID_SKILL_SOURCES: SkillSource[] = [
   "project",
 ];
 
+const VALID_TOOLSET_BASES = [
+  "auto",
+  "codex",
+  "codex_snake",
+  "default",
+  "gemini",
+  "gemini_snake",
+  "none",
+] as const;
+
 const VALID_REASONING_EFFORTS = [
   "none",
   "minimal",
@@ -111,6 +121,34 @@ function validateSystemPromptPreset(preset: string): void {
     throw new Error(
       `Invalid system prompt preset '${preset}'. ` +
         `Valid presets: ${validPresets.join(", ")}`
+    );
+  }
+}
+
+function validateClientToolset(
+  toolset: CreateSessionOptions["toolset"],
+): void {
+  if (toolset === undefined) return;
+  if (!toolset || typeof toolset !== "object" || Array.isArray(toolset)) {
+    throw new Error("Invalid toolset. Expected an object with optional base and include fields.");
+  }
+  if (
+    toolset.base !== undefined &&
+    !VALID_TOOLSET_BASES.includes(toolset.base)
+  ) {
+    throw new Error(
+      `Invalid toolset.base '${String(toolset.base)}'. Valid values: ${VALID_TOOLSET_BASES.join(", ")}`,
+    );
+  }
+  if (
+    toolset.include !== undefined &&
+    (!Array.isArray(toolset.include) ||
+      toolset.include.some(
+        (toolName) => typeof toolName !== "string" || toolName.length === 0,
+      ))
+  ) {
+    throw new Error(
+      "Invalid toolset.include. Expected an array of non-empty bundled tool names.",
     );
   }
 }
@@ -207,6 +245,7 @@ function validateMcpServers(servers: McpServers | undefined): void {
  * Validate CreateSessionOptions (used by createSession and resumeSession).
  */
 export function validateCreateSessionOptions(options: CreateSessionOptions): void {
+  validateClientToolset(options.toolset);
   validateSkillSources(options.skillSources);
   validateMcpServers(options.mcpServers);
   validateReasoningEffort(options.reasoningEffort);

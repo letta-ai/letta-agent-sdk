@@ -46,6 +46,7 @@ import type {
   AnyAgentTool,
   CanUseToolContext,
   CanUseToolResponse,
+  ClientToolsetConfig,
   CreateAgentOptions,
   LettaCodeRemoteClientOptions,
   LettaCodeClientSessionOptions,
@@ -528,6 +529,7 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
     private readonly client: AppServerClient,
     private readonly options: AppServerSessionOptions,
     private readonly clientToolAllowlist?: readonly string[],
+    private readonly clientToolset?: ClientToolsetConfig,
   ) {}
 
   onMessage(handler: (message: ProtocolMessage, channel?: string) => void): () => void {
@@ -557,6 +559,16 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
     };
     if (this.clientToolAllowlist !== undefined) {
       payload.client_tool_allowlist = [...new Set(this.clientToolAllowlist)];
+    }
+    if (this.clientToolset !== undefined) {
+      payload.client_toolset = {
+        ...(this.clientToolset.base !== undefined
+          ? { base: this.clientToolset.base }
+          : {}),
+        ...(this.clientToolset.include !== undefined
+          ? { include: [...new Set(this.clientToolset.include)] }
+          : {}),
+      };
     }
     // SDK sessions are headless: interactive user-input tools are always
     // excluded from the toolset (harnesses without support ignore the flag
@@ -768,10 +780,11 @@ export class AppServerSession extends RemoteClientSessionCore {
       }
 
       const tools = agentToolNames(response.agent);
-      const skillSources = this.currentOptions().skillSources;
+      const skillSources = options.skillSources;
+      const clientToolset = "toolset" in options ? options.toolset : undefined;
       const mcpToolNames = this.mcpBridge?.tools.map((tool) => tool.name) ?? [];
       const allowedTools = expandMcpToolWildcards(
-        this.currentOptions().allowedTools,
+        options.allowedTools,
         mcpToolNames,
       );
       const availableTools =
@@ -783,6 +796,7 @@ export class AppServerSession extends RemoteClientSessionCore {
           client,
           this.remoteOptions,
           allowedTools,
+          clientToolset,
         ),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",

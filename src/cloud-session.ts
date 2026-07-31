@@ -399,10 +399,11 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       }
 
       const tools = agentToolNames(response.agent);
-      const skillSources = this.currentOptions().skillSources;
+      const skillSources = options.skillSources;
+      const clientToolset = "toolset" in options ? options.toolset : undefined;
       const mcpToolNames = this.mcpBridge?.tools.map((tool) => tool.name) ?? [];
       const allowedTools = expandMcpToolWildcards(
-        this.currentOptions().allowedTools,
+        options.allowedTools,
         mcpToolNames,
       );
       const availableTools =
@@ -416,6 +417,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
             requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
           },
           allowedTools,
+          clientToolset,
         ),
         runtime: response.runtime,
         model: typeof response.agent?.model === "string" ? response.agent.model : "",
