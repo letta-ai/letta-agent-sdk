@@ -1,5 +1,7 @@
 name: Bump version and release
 
+run-name: Release @letta-ai/letta-agent-sdk (${{ inputs.cascade_id || 'manual' }})
+
 on:
   workflow_dispatch:
     inputs:
@@ -11,6 +13,18 @@ on:
         description: "Publish as prerelease? (leave empty for stable, or enter tag like 'next')"
         required: false
         default: ""
+      letta_code_version:
+        description: "Exact @letta-ai/letta-code version to require"
+        required: false
+        default: ""
+      cascade_id:
+        description: "Release cascade correlation id from @letta-ai/letta-code"
+        required: false
+        default: ""
+
+concurrency:
+  group: release-${{ github.repository }}-${{ github.workflow }}
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -18,7 +32,7 @@ jobs:
     environment: npm-publish
     permissions:
       contents: write
-      id-token: write  # Required for npm OIDC trusted publishing
+      id-token: write # Required for npm OIDC trusted publishing
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,91 +54,169 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Upgrade npm for OIDC support
         run: npm install -g npm@latest
 
-      - name: Bump version
+      - name: Plan release
         id: version
+        shell: bash
         run: |
-          VERSION_TYPE="${{ github.event.inputs.version_type || 'patch' }}"
-          PRERELEASE_TAG="${{ github.event.inputs.prerelease }}"
-          OLD_VERSION=$(jq -r '.version' package.json)
-          
-          # Check if old version is a prerelease (contains -)
-          if [[ "$OLD_VERSION" == *-* ]]; then
-            OLD_IS_PRERELEASE=true
-            BASE_VERSION=$(echo "$OLD_VERSION" | sed 's/-.*//')
-          else
-            OLD_IS_PRERELEASE=false
-            BASE_VERSION="$OLD_VERSION"
-          fi
-          
-          # Split base version into parts
-          IFS='.' read -ra VERSION_PARTS <<< "$BASE_VERSION"
-          MAJOR=${VERSION_PARTS[0]}
-          MINOR=${VERSION_PARTS[1]}
-          PATCH=${VERSION_PARTS[2]}
-          
-          # Always bump based on version_type
-          if [ "$VERSION_TYPE" = "major" ]; then
-            MAJOR=$((MAJOR + 1))
-            MINOR=0
-            PATCH=0
-          elif [ "$VERSION_TYPE" = "minor" ]; then
-            MINOR=$((MINOR + 1))
-            PATCH=0
-          else
-            # patch - only bump if not coming from prerelease
-            # (prerelease → stable with patch just drops the suffix)
-            if [ "$OLD_IS_PRERELEASE" = "false" ]; then
-              PATCH=$((PATCH + 1))
-            fi
-          fi
-          
-          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-          
-          # Handle prerelease suffix
-          if [ -n "$PRERELEASE_TAG" ]; then
-            # Making a prerelease
-            if [[ "$OLD_VERSION" == "${NEW_VERSION}-${PRERELEASE_TAG}."* ]]; then
-              # Same base + same tag: increment prerelease number
-              PRERELEASE_NUM=$(echo "$OLD_VERSION" | sed "s/${NEW_VERSION}-${PRERELEASE_TAG}\.\([0-9]*\)/\1/")
-              PRERELEASE_NUM=$((PRERELEASE_NUM + 1))
-            else
-              # Different base or different tag: start at 1
-              PRERELEASE_NUM=1
-            fi
-            NEW_VERSION="${NEW_VERSION}-${PRERELEASE_TAG}.${PRERELEASE_NUM}"
-            echo "npm_tag=$PRERELEASE_TAG" >> $GITHUB_OUTPUT
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
-          else
-            # Making a stable release - NEW_VERSION is already just the base
-            echo "npm_tag=latest" >> $GITHUB_OUTPUT
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
-          fi
-          
-          # Update package.json
-          jq --arg version "$NEW_VERSION" '.version = $version' package.json > package.json.tmp
-          mv package.json.tmp package.json
-          
-          echo "old_version=$OLD_VERSION" >> $GITHUB_OUTPUT
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
+          set -euo pipefail
 
-      - name: Commit and push version bump
+          VERSION_TYPE="${{ inputs.version_type || 'patch' }}"
+          PRERELEASE_TAG="${{ inputs.prerelease }}"
+          LETTA_CODE_VERSION="${{ inputs.letta_code_version }}"
+          CASCADE_ID="${{ inputs.cascade_id }}"
+          PACKAGE_NAME=$(jq -r '.name' package.json)
+          OLD_VERSION=$(jq -r '.version' package.json)
+          CURRENT_CODE_VERSION=$(jq -r '.dependencies["@letta-ai/letta-code"]' package.json)
+
+          if [ -n "$CASCADE_ID" ]; then
+            if [ -z "$LETTA_CODE_VERSION" ]; then
+              echo "::error::Cascade releases must include letta_code_version."
+              exit 1
+            fi
+
+            if [ "$VERSION_TYPE" != "patch" ] || [ -n "$PRERELEASE_TAG" ]; then
+              echo "::error::Cascade releases must be stable patch releases."
+              exit 1
+            fi
+
+            if [[ ! "$LETTA_CODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Cascade letta_code_version must be a stable semver version, got '$LETTA_CODE_VERSION'."
+              exit 1
+            fi
+          fi
+
+          if [ -n "$LETTA_CODE_VERSION" ] && [ "$CURRENT_CODE_VERSION" = "$LETTA_CODE_VERSION" ]; then
+            NEW_VERSION="$OLD_VERSION"
+          else
+            if [[ "$OLD_VERSION" == *-* ]]; then
+              OLD_IS_PRERELEASE=true
+              BASE_VERSION=$(echo "$OLD_VERSION" | sed 's/-.*//')
+            else
+              OLD_IS_PRERELEASE=false
+              BASE_VERSION="$OLD_VERSION"
+            fi
+
+            IFS='.' read -ra VERSION_PARTS <<< "$BASE_VERSION"
+            MAJOR=${VERSION_PARTS[0]}
+            MINOR=${VERSION_PARTS[1]}
+            PATCH=${VERSION_PARTS[2]}
+
+            if [ "$VERSION_TYPE" = "major" ]; then
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+            elif [ "$VERSION_TYPE" = "minor" ]; then
+              MINOR=$((MINOR + 1))
+              PATCH=0
+            else
+              if [ "$OLD_IS_PRERELEASE" = "false" ]; then
+                PATCH=$((PATCH + 1))
+              fi
+            fi
+
+            NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+
+            if [ -n "$PRERELEASE_TAG" ]; then
+              if [[ "$OLD_VERSION" == "${NEW_VERSION}-${PRERELEASE_TAG}."* ]]; then
+                PRERELEASE_NUM=$(echo "$OLD_VERSION" | sed "s/${NEW_VERSION}-${PRERELEASE_TAG}\.\([0-9]*\)/\1/")
+                PRERELEASE_NUM=$((PRERELEASE_NUM + 1))
+              else
+                PRERELEASE_NUM=1
+              fi
+              NEW_VERSION="${NEW_VERSION}-${PRERELEASE_TAG}.${PRERELEASE_NUM}"
+            fi
+          fi
+
+          if [[ "$NEW_VERSION" == *-* ]]; then
+            NPM_TAG=$(echo "$NEW_VERSION" | sed -E 's/^[0-9]+\.[0-9]+\.[0-9]+-([^.]+)(\..*)?$/\1/')
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            NPM_TAG=latest
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "old_version=$OLD_VERSION" >> "$GITHUB_OUTPUT"
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "npm_tag=$NPM_TAG" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "letta_code_version=$LETTA_CODE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Update package manifests
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new_version }}
+          LETTA_CODE_VERSION: ${{ steps.version.outputs.letta_code_version }}
         run: |
-          git add package.json
-          git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }} [skip ci]"
-          git tag "${{ steps.version.outputs.tag }}"
-          git push origin main
-          git push origin "${{ steps.version.outputs.tag }}"
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+
+          pkg.version = process.env.NEW_VERSION;
+          if (process.env.LETTA_CODE_VERSION) {
+            pkg.dependencies["@letta-ai/letta-code"] = process.env.LETTA_CODE_VERSION;
+          }
+
+          fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+          NODE
+
+          npm install --package-lock-only --ignore-scripts
+
+      - name: Inspect release state
+        id: release_state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          git fetch --tags origin
+
+          TAG="${{ steps.version.outputs.tag }}"
+          PACKAGE_NAME="${{ steps.version.outputs.package_name }}"
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if npm view "$PACKAGE_NAME@$NEW_VERSION" version >/dev/null 2>&1; then
+            echo "npm_published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "npm_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Refuse package changes for already-published versions
+        if: steps.release_state.outputs.npm_published == 'true'
+        run: |
+          set -euo pipefail
+
+          if ! git diff --quiet -- package.json package-lock.json; then
+            echo "::error::${{ steps.version.outputs.package_name }}@${{ steps.version.outputs.new_version }} is already published; refusing to change package manifests without publishing a new version."
+            exit 1
+          fi
 
       - name: Install dependencies
         run: bun install
 
       - name: Lint & Type Check
         run: bun run check
+
+      - name: Unit Tests
+        run: bun test
 
       - name: Build
         run: bun run build
@@ -134,8 +226,30 @@ jobs:
           LETTA_API_KEY: ${{ secrets.LETTA_API_KEY }}
         run: bun examples/v2-examples.ts basic
 
+      - name: Commit and push release changes
+        id: commit
+        run: |
+          set -euo pipefail
+
+          git add package.json package-lock.json
+
+          if git diff --cached --quiet; then
+            echo "committed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }} [skip ci]"
+          git push origin main
+          echo "committed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Push release tag
+        if: steps.release_state.outputs.tag_exists != 'true'
+        run: |
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
       - name: Create GitHub Release
-        if: steps.version.outputs.is_prerelease == 'false'
+        if: steps.version.outputs.is_prerelease == 'false' && steps.release_state.outputs.release_exists != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -145,4 +259,5 @@ jobs:
           generate_release_notes: true
 
       - name: Publish to npm
+        if: steps.release_state.outputs.npm_published != 'true'
         run: npm publish --access public --tag ${{ steps.version.outputs.npm_tag }}
