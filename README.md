@@ -121,6 +121,25 @@ await using session = client.createSession(agentId, {
 
 Local execution (embedded Letta Code harness / app server) requires Node.js 22.19 or newer.
 
+### Built-in client toolsets
+
+Use `toolset` to select a request-scoped harness preset and add bundled client
+tools. `allowedTools` remains the final visibility boundary across bundled and
+custom tools.
+
+```ts
+await using session = client.createSession(agentId, {
+  toolset: {
+    base: "none",
+    include: ["Read", "LS", "Glob", "Grep"],
+  },
+  allowedTools: ["Read", "LS", "Glob", "Grep"],
+});
+```
+
+The override applies to this SDK session's turns without changing the agent's
+persisted harness toolset preference.
+
 ### MCP tools
 
 Pass MCP servers by name in session options. The SDK supports local stdio,

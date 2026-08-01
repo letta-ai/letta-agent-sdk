@@ -1331,6 +1331,11 @@ describe("CloudEnvironmentSession", () => {
       cwd: "/repo",
       permissionMode: "unrestricted",
       skillSources: [],
+      toolset: {
+        base: "none",
+        include: ["Read", "LS", "Glob", "Grep"],
+      },
+      allowedTools: ["Read", "LS", "Glob", "Grep"],
       dreaming: { trigger: "step-count", stepCount: 3 },
     });
     const init = await asAdvanced(session).initialize();
@@ -1409,6 +1414,11 @@ describe("CloudEnvironmentSession", () => {
       payload: {
         kind: "create_message",
         messages: [expect.objectContaining({ role: "user", content: "hello" })],
+        client_tool_allowlist: ["Read", "LS", "Glob", "Grep"],
+        client_toolset: {
+          base: "none",
+          include: ["Read", "LS", "Glob", "Grep"],
+        },
       },
     });
     expect(inputCommand.payload).not.toHaveProperty("supports_control_response");

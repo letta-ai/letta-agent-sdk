@@ -930,7 +930,11 @@ describe("LettaAgentClient", () => {
 
     const session = client.createSession("agent-123", {
       cwd: "/tmp/project",
-      allowedTools: ["Bash", "Read", "Write", "Edit", "Read"],
+      toolset: {
+        base: "none",
+        include: ["Read", "LS", "Glob", "Grep", "Read"],
+      },
+      allowedTools: ["Read", "LS", "Glob", "Grep", "Read"],
     });
     try {
       const init = await asAdvanced(session).initialize();
@@ -957,7 +961,11 @@ describe("LettaAgentClient", () => {
         runtime: { agent_id: "agent-123", conversation_id: "conv-created" },
         payload: {
           kind: "create_message",
-          client_tool_allowlist: ["Bash", "Read", "Write", "Edit"],
+          client_tool_allowlist: ["Read", "LS", "Glob", "Grep"],
+          client_toolset: {
+            base: "none",
+            include: ["Read", "LS", "Glob", "Grep"],
+          },
         },
       });
       const payload = inputCommand?.payload as Record<string, unknown> | undefined;
@@ -988,6 +996,7 @@ describe("LettaAgentClient", () => {
       const payload = inputCommand?.payload as Record<string, unknown> | undefined;
       // No allowlist by default — the harness default toolset applies…
       expect(payload).not.toHaveProperty("client_tool_allowlist");
+      expect(payload).not.toHaveProperty("client_toolset");
       // …with interactive user-input tools excluded via the protocol flag.
       expect(payload?.exclude_interactive_tools).toBe(true);
     } finally {

@@ -13,6 +13,10 @@ describe("validation", () => {
         maxApprovalRecoveryAttempts: 2,
         approvalRecoveryTimeoutMs: 3000,
         reasoningEffort: "high",
+        toolset: {
+          base: "none",
+          include: ["Read", "LS", "Glob", "Grep"],
+        },
       }),
     ).not.toThrow();
   });
@@ -32,6 +36,20 @@ describe("validation", () => {
         mcpServers: [{ name: "old", command: "node" }],
       } as never),
     ).toThrow("Expected an object keyed by server name");
+  });
+
+  test("rejects invalid client toolset configuration", () => {
+    expect(() =>
+      validateCreateSessionOptions({
+        toolset: { base: "invented" },
+      } as never),
+    ).toThrow("Invalid toolset.base");
+
+    expect(() =>
+      validateCreateSessionOptions({
+        toolset: { include: ["Read", ""] },
+      }),
+    ).toThrow("Invalid toolset.include");
   });
 
   test("rejects invalid session reasoning effort", () => {
