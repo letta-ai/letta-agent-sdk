@@ -7,7 +7,7 @@ import type {
 
 export type AdvancedSession = LettaCodeSession & {
   initialize(): Promise<SDKInitMessage>;
-  runTurn(message: SendMessage): Promise<SDKResultMessage>;
+  sendAndWaitForResult(message: SendMessage): Promise<SDKResultMessage>;
   updateToolset(toolsetPreference: string): Promise<void>;
 };
 

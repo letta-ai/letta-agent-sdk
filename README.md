@@ -53,7 +53,6 @@ An agent is the persistent entity with memory. A conversation is a thread on tha
 - `createSession(agentId)` starts a new conversation.
 - `resumeSession(conversationId)` resumes a saved conversation.
 - `resumeSession(agentId)` resumes the agent's default conversation.
-- `prompt(message, agentId)` runs a one-shot prompt in a new conversation.
 
 Portable sessions also expose the stateful controls needed by interactive
 clients:

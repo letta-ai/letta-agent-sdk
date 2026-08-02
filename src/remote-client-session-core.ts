@@ -13,7 +13,6 @@ import type {
   RecoverPendingApprovalsOptions,
   RecoverPendingApprovalsResult,
   RemoveQueuedMessageResult,
-  RunTurnOptions,
   SDKInitMessage,
   SDKMessage,
   SDKProtocolCommand,
@@ -225,10 +224,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     }
   }
 
-  async runTurn(
-    message: SendMessage,
-    _options: RunTurnOptions = {},
-  ): Promise<SDKResultMessage> {
+  async sendAndWaitForResult(message: SendMessage): Promise<SDKResultMessage> {
     if (this.turns.hasInFlightTurn()) {
       throw new Error(
         `A turn is already in flight for this ${this.label} session. Use send() and stream() to let the listener queue messages.`,

@@ -10,8 +10,6 @@ describe("validation", () => {
           trigger: "step-count",
           stepCount: 6,
         },
-        maxApprovalRecoveryAttempts: 2,
-        approvalRecoveryTimeoutMs: 3000,
         reasoningEffort: "high",
         toolset: {
           base: "none",
@@ -96,20 +94,6 @@ describe("validation", () => {
         },
       }),
     ).toThrow("Invalid dreaming.stepCount");
-  });
-
-  test("rejects invalid approval recovery options", () => {
-    expect(() =>
-      validateCreateSessionOptions({
-        maxApprovalRecoveryAttempts: -1,
-      }),
-    ).toThrow("Invalid maxApprovalRecoveryAttempts");
-
-    expect(() =>
-      validateCreateSessionOptions({
-        approvalRecoveryTimeoutMs: 0,
-      }),
-    ).toThrow("Invalid approvalRecoveryTimeoutMs");
   });
 
   test("rejects removed memfsStartup option", () => {
