@@ -77,6 +77,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   private readonly requestTimeoutMs: number | undefined;
   private initializePromise: Promise<SDKInitMessage> | null = null;
   private removeMessageHandler: (() => void) | null = null;
+  private detachTransportDisconnect: (() => void) | null = null;
   private readonly turns: RemoteTurnCoordinator;
   private toolNames: string[] | undefined;
   private deviceStatusListeners = new Set<(status: SessionDeviceStatus) => void>();
@@ -188,6 +189,8 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   private cleanupFailedInitialize(): void {
     this.removeMessageHandler?.();
     this.removeMessageHandler = null;
+    this.detachTransportDisconnect?.();
+    this.detachTransportDisconnect = null;
     this.controller?.close();
     this.controller = null;
     // Subclass-owned resources (spawned connections, sandboxes, handlers)
@@ -543,6 +546,8 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     this.closed = true;
     this.removeMessageHandler?.();
     this.removeMessageHandler = null;
+    this.detachTransportDisconnect?.();
+    this.detachTransportDisconnect = null;
     this.turns.close();
     for (const cancel of [...this.deviceStatusRefreshCancels]) {
       cancel(new Error(`Session closed while waiting for ${this.label} device status`));
@@ -618,6 +623,35 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   }
 
   protected abstract initializeRuntimeController(): Promise<RuntimeSessionInit>;
+
+  /**
+   * Fail the session when its transport drops unexpectedly.
+   *
+   * Without this an in-flight turn parks forever: nextMessage() only settles
+   * through the coordinator, and the socket's own pending-request rejection
+   * covers request/response commands, not streaming turns.
+   *
+   * The session is not revived — the runtime lived on the dead socket. The
+   * caller observes the error and rebuilds via resumeSession().
+   *
+   * Subclasses call this only once their runtime is live: a drop before that
+   * already surfaces as a rejected connect or runtime-start, and failing the
+   * session there would defeat initialize()'s retry path. Explicit closes do
+   * not notify, so this fires for faults only. Detaching stays here so every
+   * teardown path — clean close and failed initialize alike — covers it.
+   */
+  protected watchTransportDisconnect(client: {
+    onDisconnect(handler: () => void): () => void;
+  }): void {
+    this.detachTransportDisconnect?.();
+    this.detachTransportDisconnect = client.onDisconnect(() => {
+      if (this.closed) return;
+      this.turns.closeWithError(
+        `The ${this.label} connection closed unexpectedly; resume the conversation to continue.`,
+      );
+      this.close();
+    });
+  }
 
   protected async afterRuntimeInitialized(): Promise<void> {
     // Optional hook for subclasses to send transport-specific startup frames.

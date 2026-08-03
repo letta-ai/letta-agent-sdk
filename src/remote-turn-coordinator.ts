@@ -160,6 +160,33 @@ export class RemoteTurnCoordinator {
     });
   }
 
+  /**
+   * Close after the transport dropped, surfacing the failure to stream
+   * consumers first.
+   *
+   * A plain close() resolves waiting consumers with `null`, which is
+   * indistinguishable from a conversation ending normally. A dead socket
+   * cannot deliver a turn-scoped failure of its own, so the error is
+   * synthesized here before the queue drains.
+   */
+  closeWithError(detail: string): void {
+    if (this.closed) return;
+    const active = this.activeTurn;
+    if (active) {
+      this.failTurn(active, detail);
+    } else {
+      this.enqueue({
+        type: "error",
+        message: detail,
+        errorCode: "error",
+        stopReason: "error",
+        errorDetail: detail,
+        recoverable: false,
+      });
+    }
+    this.close();
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;

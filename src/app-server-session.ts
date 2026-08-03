@@ -779,6 +779,8 @@ export class AppServerSession extends RemoteClientSessionCore {
         throw new Error(response.error ?? "Failed to start app-server runtime");
       }
 
+      this.watchTransportDisconnect(client);
+
       const tools = agentToolNames(response.agent);
       const skillSources = options.skillSources;
       const clientToolset = "toolset" in options ? options.toolset : undefined;
