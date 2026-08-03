@@ -86,8 +86,8 @@ function looksLikeConversationId(id: string): boolean {
   return id.startsWith("conv-") || id.startsWith("local-conv-");
 }
 
-type TurnSession = LettaCodeSession & {
-  runTurn(message: SendMessage): Promise<SDKResultMessage>;
+type OneShotSession = LettaCodeSession & {
+  sendAndWaitForResult(message: SendMessage): Promise<SDKResultMessage>;
 };
 
 /**
@@ -314,7 +314,10 @@ export class LettaAgentClientBase {
     return this.resumeLocalSession(id, options);
   }
 
-  /** One-shot prompt convenience helper using a new conversation. */
+  /**
+   * One-shot convenience for scripts, smoke tests, and evals.
+   * Applications should use a session when they need interactive turn state.
+   */
   async prompt(
     message: SendMessage,
     agentId: string,
@@ -323,7 +326,7 @@ export class LettaAgentClientBase {
     const session = this.createSession(agentId, options);
 
     try {
-      return await (session as TurnSession).runTurn(message);
+      return await (session as OneShotSession).sendAndWaitForResult(message);
     } finally {
       session.close();
     }

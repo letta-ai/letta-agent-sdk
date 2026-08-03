@@ -68,20 +68,6 @@ export interface TextContent {
   text: string;
 }
 
-export interface RunTurnOptions {
-  /**
-   * Max automatic approval-conflict recovery attempts for this turn.
-   * Overrides session-level maxApprovalRecoveryAttempts when provided.
-   */
-  maxApprovalRecoveryAttempts?: number;
-
-  /**
-   * Timeout in milliseconds for each approval recovery request.
-   * Overrides session-level approvalRecoveryTimeoutMs when provided.
-   */
-  recoveryTimeoutMs?: number;
-}
-
 export interface RecoverPendingApprovalsOptions {
   /**
    * Timeout in milliseconds for the recovery control request.
@@ -710,17 +696,6 @@ export interface CreateSessionOptions {
    * through Letta Code's external-tool protocol.
    */
   mcpServers?: McpServers;
-
-  /**
-   * Max automatic approval-conflict recovery attempts per runTurn() call.
-   * Set to 0 to disable automatic recovery.
-   */
-  maxApprovalRecoveryAttempts?: number;
-
-  /**
-   * Timeout in milliseconds for a single approval recovery request.
-   */
-  approvalRecoveryTimeoutMs?: number;
 
   /**
    * Cloud repository resources to attach for the lifetime of the SDK session.

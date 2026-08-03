@@ -54,28 +54,6 @@ function getBlockLabels(memory: MemoryItem[]): string[] {
     .filter((label): label is string => label !== null);
 }
 
-function validateApprovalRecoveryOptions(options: CreateSessionOptions): void {
-  if (
-    options.maxApprovalRecoveryAttempts !== undefined &&
-    (!Number.isInteger(options.maxApprovalRecoveryAttempts) ||
-      options.maxApprovalRecoveryAttempts < 0)
-  ) {
-    throw new Error(
-      "Invalid maxApprovalRecoveryAttempts. Expected a non-negative integer."
-    );
-  }
-
-  if (
-    options.approvalRecoveryTimeoutMs !== undefined &&
-    (!Number.isInteger(options.approvalRecoveryTimeoutMs) ||
-      options.approvalRecoveryTimeoutMs <= 0)
-  ) {
-    throw new Error(
-      "Invalid approvalRecoveryTimeoutMs. Expected a positive integer."
-    );
-  }
-}
-
 function validateRemovedSessionOptions(options: CreateSessionOptions): void {
   const removedOptions = options as CreateSessionOptions & Record<string, unknown>;
   if (removedOptions.systemPrompt !== undefined) {
@@ -250,7 +228,6 @@ export function validateCreateSessionOptions(options: CreateSessionOptions): voi
   validateMcpServers(options.mcpServers);
   validateReasoningEffort(options.reasoningEffort);
   validateDreamingOptions(options.dreaming);
-  validateApprovalRecoveryOptions(options);
   validateRemovedSessionOptions(options);
 }
 

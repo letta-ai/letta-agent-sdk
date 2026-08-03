@@ -654,7 +654,7 @@ describe("CloudEnvironmentSession", () => {
       const controlSocket = FakeCloudSocket.socket("control")!;
       expect(new URL(controlSocket.url).pathname).toBe("/v1/environments/conn-agent-1/status/ws");
 
-      const result = await asAdvanced(session).runTurn("hello");
+      const result = await asAdvanced(session).sendAndWaitForResult("hello");
       expect(result).toMatchObject({ success: true, result: "hello from cloud" });
       expect(requests.filter((request) =>
         new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes/refresh"
@@ -862,7 +862,7 @@ describe("CloudEnvironmentSession", () => {
       // and retry without duplicating the message.
       let thrown: unknown;
       try {
-        await asAdvanced(session).runTurn("hello");
+        await asAdvanced(session).sendAndWaitForResult("hello");
       } catch (error) {
         thrown = error;
       }
@@ -1400,7 +1400,7 @@ describe("CloudEnvironmentSession", () => {
       request_id: expect.any(String),
     }));
 
-    const result = await asAdvanced(session).runTurn("hello");
+    const result = await asAdvanced(session).sendAndWaitForResult("hello");
     expect(result).toMatchObject({
       type: "result",
       success: true,
@@ -1474,7 +1474,7 @@ describe("CloudEnvironmentSession", () => {
 
     const session = client.resumeSession("agent-1");
     try {
-      const result = await asAdvanced(session).runTurn("hello");
+      const result = await asAdvanced(session).sendAndWaitForResult("hello");
       expect(result).toMatchObject({
         success: true,
         result: "hello once",
@@ -2042,7 +2042,7 @@ describe("CloudEnvironmentSession", () => {
       },
     });
 
-    const result = await asAdvanced(session).runTurn("run pwd");
+    const result = await asAdvanced(session).sendAndWaitForResult("run pwd");
 
     expect(result).toMatchObject({ success: true, result: "approved" });
     expect(decisions).toEqual([
@@ -2101,7 +2101,7 @@ describe("CloudEnvironmentSession", () => {
       },
     });
 
-    const result = await asAdvanced(session).runTurn("run pwd");
+    const result = await asAdvanced(session).sendAndWaitForResult("run pwd");
 
     expect(result).toMatchObject({ success: true, result: "approved" });
     expect(decisions).toEqual([{ toolName: "Bash", input: { command: "pwd" } }]);
@@ -2331,7 +2331,7 @@ describe("CloudEnvironmentSession", () => {
     });
 
     const session = client.resumeSession("agent-1");
-    const result = await asAdvanced(session).runTurn("trigger failure");
+    const result = await asAdvanced(session).sendAndWaitForResult("trigger failure");
 
     expect(result).toMatchObject({
       type: "result",
@@ -2362,7 +2362,7 @@ describe("CloudEnvironmentSession", () => {
     });
 
     const session = client.resumeSession("agent-1");
-    const result = await asAdvanced(session).runTurn("trigger delayed failure");
+    const result = await asAdvanced(session).sendAndWaitForResult("trigger delayed failure");
 
     expect(result).toMatchObject({
       type: "result",

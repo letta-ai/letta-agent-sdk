@@ -5,7 +5,7 @@
  *
  * @example
  * ```typescript
- * import { LettaAgentClient, createAgent, createSession, resumeSession, prompt } from '@letta-ai/letta-agent-sdk';
+ * import { LettaAgentClient, createAgent, createSession, resumeSession } from '@letta-ai/letta-agent-sdk';
  *
  * const client = new LettaAgentClient({ backend: 'local' });
  * const agentId = await client.createAgent();
@@ -23,8 +23,6 @@
  * // Create new conversation on specific agent
  * const session = createSession(agentId);
  *
- * // One-shot prompt in a new conversation
- * const result = await prompt('Hello', agentId);
  * ```
  */
 
@@ -83,7 +81,6 @@ export type {
   SDKProtocolMessage,
   SDKProtocolCommand,
   SendCommandOptions,
-  RunTurnOptions,
   RecoverPendingApprovalsOptions,
   RecoverPendingApprovalsResult,
   ChangeDeviceStateOptions,
@@ -265,18 +262,20 @@ export function resumeSession(
 }
 
 /**
- * One-shot prompt convenience function.
+ * One-shot convenience for scripts, smoke tests, and evals.
  *
- * Uses the specified agent in a new conversation.
- * - Uses a short-lived session and returns the final turn result.
+ * Creates a short-lived conversation, waits for the final result, and closes
+ * the session. Applications that need streaming, approvals, cancellation,
+ * queueing, or continued interaction should use createSession() with send()
+ * and stream() instead.
  *
  * @example
  * ```typescript
  * const result = await prompt('What is the capital of France?', agentId);  // specific agent
  * ```
  */
-type TurnSession = LettaCodeSession & {
-  runTurn(message: SendMessage): Promise<SDKResultMessage>;
+type OneShotSession = LettaCodeSession & {
+  sendAndWaitForResult(message: SendMessage): Promise<SDKResultMessage>;
 };
 
 type InitializableSession = LettaCodeSession & {
@@ -291,7 +290,7 @@ export async function prompt(
   const session = createSession(agentId, options);
 
   try {
-    return await (session as TurnSession).runTurn(message);
+    return await (session as OneShotSession).sendAndWaitForResult(message);
   } finally {
     session.close();
   }
