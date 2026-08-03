@@ -1135,6 +1135,55 @@ describe("LettaAgentClient", () => {
     }
   });
 
+  // Regression: an app-server restart used to leave stream() parked forever on
+  // a resolve-only promise, because sessions never subscribed to the
+  // disconnect signal the transport already exposed.
+  test(
+    "an app-server disconnect ends a parked stream instead of hanging",
+    async () => {
+      FakeAppServerSocket.instances = [];
+      FakeAppServerSocket.inputScenario = "hang";
+      // No requestTimeoutMs: on the default path no per-turn timer is armed,
+      // so the disconnect is the only thing that can settle the turn.
+      const client = new LettaAgentClient({
+        backend: "remote",
+        url: "http://127.0.0.1:4500",
+        WebSocket: FakeAppServerSocket,
+      });
+
+      const session = client.createSession("agent-123");
+      try {
+        await asAdvanced(session).initialize();
+        await session.send("this turn never comes back");
+
+        const messages: unknown[] = [];
+        const drained = (async () => {
+          for await (const message of session.stream()) messages.push(message);
+        })();
+        // Let the consumer park in nextMessage() before the socket dies.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        // A server-side drop, not a client close: the SDK never asked for it.
+        fakeStreamSocket().close();
+        await drained;
+
+        expect(messages[0]).toMatchObject({
+          type: "error",
+          stopReason: "error",
+        });
+        expect(messages.at(-1)).toMatchObject({
+          type: "result",
+          success: false,
+          errorCode: "error",
+        });
+      } finally {
+        FakeAppServerSocket.inputScenario = "normal";
+        session.close();
+      }
+    },
+    5000,
+  );
+
   test("websocket protocol sessions wait through auto-handled requires_approval stops", async () => {
     FakeAppServerSocket.instances = [];
     FakeAppServerSocket.inputScenario = "autoApprovalContinuation";
