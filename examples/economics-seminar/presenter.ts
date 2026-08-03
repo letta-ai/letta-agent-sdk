@@ -105,6 +105,9 @@ export async function createPresenter(
         description: 'Research approach refined over time',
       },
     ],
+    // web_search is server-side, so it has to be attached at creation;
+    // allowedTools alone only gates the harness's client-side tools.
+    baseTools: ['web_search'],
     allowedTools: ['web_search', 'Read', 'Write'],
     permissionMode: 'unrestricted',
   });

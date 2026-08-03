@@ -921,10 +921,14 @@ export interface CreateAgentOptions {
   hidden?: boolean;
 
   /**
-   * Server-side tools to attach at creation. When omitted, the harness
-   * applies its created-agent defaults (web_search, fetch_webpage). Pass []
-   * for none or an explicit list to override. Client-side tools (Bash,
-   * Edit, …) are provided by the harness at runtime and are unaffected.
+   * Server-side tools to attach at creation. SDK agents attach none by
+   * default — pass an explicit list to opt in. `[]` is the explicit spelling
+   * of the default.
+   *
+   * Note that server-side tools have no client-side equivalent, so agents
+   * that need web access must ask for it here (`["web_search",
+   * "fetch_webpage"]` is what the CLI attaches). Client-side tools (Bash,
+   * Edit, …) come from the harness at runtime and are unaffected.
    */
   baseTools?: string[];
 

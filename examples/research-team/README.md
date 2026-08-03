@@ -302,6 +302,8 @@ This will:
 ### Web Search
 The Researcher agent uses the `web_search` tool to find real academic sources. No external API keys needed - it uses Letta's built-in search capability.
 
+`web_search` runs server-side, so it is attached at creation via `baseTools: ['web_search']`. SDK-created agents get no server-side tools unless you ask for them; `allowedTools` only gates the harness's client-side tools (Read, Write, Glob, …).
+
 ### Agent Persistence
 Agent IDs are stored in `output/team-state.json`. Running `--reset` clears this file and creates fresh agents on the next run. This is useful for:
 - Starting over with clean memory

@@ -120,6 +120,9 @@ export async function createResearcher(
         description: 'Accumulated knowledge of key concepts and influential works',
       },
     ],
+    // web_search is server-side, so it has to be attached at creation;
+    // allowedTools alone only gates the harness's client-side tools.
+    baseTools: ['web_search'],
     allowedTools: ['web_search', 'Glob', 'Read', 'Write'],
     permissionMode: 'unrestricted',
   });
