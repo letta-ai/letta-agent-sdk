@@ -74,6 +74,23 @@ function isNotFound(error: unknown): boolean {
   return error instanceof APIError && error.status === 404;
 }
 
+/**
+ * The SDK cursor contract is chronological: `before` always means older and
+ * `after` always means newer. The Cloud REST API interprets cursors relative
+ * to sort order instead, and its default order is newest-first, so descending
+ * requests need their cursor keys swapped at this boundary. The app-server
+ * transport already receives chronological cursors and must not swap.
+ */
+function toOrderRelativeCursors(query: MessageListParams): MessageListParams {
+  if ((query.order ?? "desc") !== "desc") return query;
+  const { before, after, ...rest } = query;
+  return {
+    ...rest,
+    ...(after != null ? { before: after } : {}),
+    ...(before != null ? { after: before } : {}),
+  };
+}
+
 /** Cloud management backed by the canonical generated Letta TypeScript client. */
 export class CloudManagementTransport implements ManagementTransport {
   constructor(private readonly client: Letta) {}
@@ -206,7 +223,7 @@ export class CloudManagementTransport implements ManagementTransport {
   ): Promise<ConversationMessagesResult> {
     const page = await this.client.conversations.messages.list(
       conversationId,
-      query,
+      toOrderRelativeCursors(query),
     );
     return { messages: page.items };
   }

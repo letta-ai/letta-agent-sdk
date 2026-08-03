@@ -81,8 +81,11 @@ export interface UpdateConversationOptions {
 }
 
 export interface ConversationMessagesOptions {
+  /** Return messages before this message ID (cursor for older pages, regardless of `order`). */
   before?: Present<MessageListParams["before"]>;
+  /** Return messages after this message ID (cursor for newer pages, regardless of `order`). */
   after?: Present<MessageListParams["after"]>;
+  /** Sort order of the returned page. Defaults to "desc" (newest first). */
   order?: "asc" | "desc";
   limit?: Present<MessageListParams["limit"]>;
 }

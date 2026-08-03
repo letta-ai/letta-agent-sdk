@@ -408,8 +408,11 @@ describe("portable management namespaces", () => {
         body: { summary: "Renamed thread", archived: false },
       },
       {
+        // The chronological `before` cursor maps to the REST `after` key on
+        // descending requests because the API reads cursors relative to sort
+        // order.
         path: "/v1/conversations/conv-1/messages",
-        query: { before: "message-2", order: "desc", limit: "50" },
+        query: { after: "message-2", order: "desc", limit: "50" },
         method: "GET",
         body: undefined,
       },
@@ -424,6 +427,91 @@ describe("portable management namespaces", () => {
     expect(deleteRequest?.url.toString()).toBe(
       "https://api.test/v1/agents/agent-1",
     );
+  });
+
+  test("pages older cloud history with chronological before cursors", async () => {
+    // Five messages, message-1 oldest. The mock reproduces the measured REST
+    // behavior: cursors are interpreted relative to the requested sort order,
+    // and the default order is newest-first.
+    const history: Message[] = [1, 2, 3, 4, 5].map((n) => ({
+      id: `message-${n}`,
+      content: `m${n}`,
+      date: `2026-07-28T00:0${n}:00Z`,
+      message_type: "user_message",
+    }));
+    const requests: RecordedRequest[] = [];
+    const fetchMock = (async (
+      input: FetchInput | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url = new URL(String(input));
+      requests.push({ url, method: init?.method ?? "GET" });
+      const order = url.searchParams.get("order") ?? "desc";
+      const sequence =
+        order === "desc" ? [...history].reverse() : [...history];
+      const after = url.searchParams.get("after");
+      const before = url.searchParams.get("before");
+      let start = 0;
+      let end = sequence.length;
+      if (after) {
+        start = sequence.findIndex((message) => message.id === after) + 1;
+      }
+      if (before) {
+        end = sequence.findIndex((message) => message.id === before);
+      }
+      const limit = Number(url.searchParams.get("limit") ?? "50");
+      return jsonResponse(sequence.slice(start, end).slice(0, limit));
+    }) as typeof fetch;
+
+    const client = new PortableLettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: fetchMock,
+    });
+
+    // Walk the conversation to its beginning; every page must be strictly
+    // older than the previous one with no duplicate ids.
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 3; page++) {
+      const { messages } = await client.conversations.listMessages("conv-1", {
+        limit: 2,
+        ...(cursor ? { before: cursor } : {}),
+      });
+      seen.push(...messages.map((message) => message.id));
+      cursor = messages[messages.length - 1]?.id;
+    }
+    expect(seen).toEqual([
+      "message-5",
+      "message-4",
+      "message-3",
+      "message-2",
+      "message-1",
+    ]);
+
+    // On the wire, descending pagination must have swapped the chronological
+    // cursor onto the REST after key.
+    const cursorQueries = requests.map(({ url }) =>
+      Object.fromEntries(url.searchParams),
+    );
+    expect(cursorQueries[1]).toEqual({ after: "message-4", limit: "2" });
+    expect(cursorQueries[2]).toEqual({ after: "message-2", limit: "2" });
+
+    // Ascending requests already agree with the chronological contract and
+    // must pass through unchanged.
+    const ascending = await client.conversations.listMessages("conv-1", {
+      order: "asc",
+      after: "message-2",
+      limit: 2,
+    });
+    expect(ascending.messages.map((message) => message.id)).toEqual([
+      "message-3",
+      "message-4",
+    ]);
+    expect(
+      Object.fromEntries(requests[requests.length - 1]!.url.searchParams),
+    ).toEqual({ after: "message-2", order: "asc", limit: "2" });
   });
 
   test("maps the same API to app-server protocol commands", async () => {
@@ -477,6 +565,13 @@ describe("portable management namespaces", () => {
         summary: "Mobile thread",
         model: "openai/gpt-5.6",
       },
+    });
+    // The app-server backend already speaks chronological cursors, so the
+    // Cloud-only order-relative swap must not apply here.
+    expect(commands[9]).toMatchObject({
+      type: "conversation_messages_list",
+      conversation_id: "conv-1",
+      query: { before: "message-2", order: "desc", limit: 50 },
     });
     expect(
       ManagementSocket.instances.every(
