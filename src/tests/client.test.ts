@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { resolveAppServerChannelUrl } from "@letta-ai/letta-code/app-server-client";
 import * as sdk from "../index.js";
 import { LettaAgentClient } from "../index.js";
@@ -847,12 +848,17 @@ describe("LettaAgentClient", () => {
         fixture: {
           command: process.execPath,
           args: [
-            new URL(
-              "./dist/index.js",
-              import.meta.resolve(
-                "@modelcontextprotocol/server-everything/package.json",
+            // fileURLToPath, not URL.pathname: pathname percent-encodes
+            // spaces and non-ASCII characters in the checkout path, which
+            // breaks spawning the fixture server.
+            fileURLToPath(
+              new URL(
+                "./dist/index.js",
+                import.meta.resolve(
+                  "@modelcontextprotocol/server-everything/package.json",
+                ),
               ),
-            ).pathname,
+            ),
           ],
         },
       },
