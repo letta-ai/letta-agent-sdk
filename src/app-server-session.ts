@@ -174,19 +174,16 @@ export async function createAgentBody(
 
   if (options.embedding !== undefined) body.embedding = options.embedding;
   if (options.hidden !== undefined) body.hidden = options.hidden;
-  // When baseTools is omitted, the harness applies its created-agent
-  // defaults (web_search, fetch_webpage). An explicit list is pinned exactly:
-  // `tools` alone does not suppress the Letta agent type's defaults, so both
-  // default tool attachment and its default tool rules are disabled here.
+  // Agent SDK sessions provide their tools through the harness at runtime, so
+  // never attach the API's server-side base tools implicitly. An explicit list
+  // is pinned exactly instead.
   if (options.baseTools === undefined) {
     delete body.tools;
-    delete body.include_base_tools;
-    delete body.include_base_tool_rules;
   } else {
     body.tools = options.baseTools;
-    body.include_base_tools = false;
-    body.include_base_tool_rules = false;
   }
+  body.include_base_tools = false;
+  body.include_base_tool_rules = false;
 
   if (options.systemPrompt === undefined) {
     if (options.memfs === false) {

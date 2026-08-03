@@ -1433,7 +1433,7 @@ describe("LettaAgentClient", () => {
     });
   });
 
-  test("createAgent leaves server-side tools to the harness defaults when baseTools is omitted", async () => {
+  test("createAgent disables server-side tools when baseTools is omitted", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({
       backend: "remote",
@@ -1448,10 +1448,11 @@ describe("LettaAgentClient", () => {
     const command = fakeControlSocket().sent[0] as {
       create_agent?: { body?: Record<string, unknown> };
     };
-    // The harness applies its created-agent defaults (web_search,
-    // fetch_webpage); the SDK does not pin them client-side.
+    expect(command.create_agent?.body).toMatchObject({
+      include_base_tools: false,
+      include_base_tool_rules: false,
+    });
     expect(command.create_agent?.body).not.toHaveProperty("tools");
-    expect(command.create_agent?.body).not.toHaveProperty("include_base_tools");
   });
 
   test("baseTools: [] attaches no server-side tools", async () => {
@@ -1479,7 +1480,7 @@ describe("LettaAgentClient", () => {
     });
   });
 
-  test("an explicit baseTools list overrides the default server-side tools", async () => {
+  test("an explicit baseTools list attaches only the requested server-side tools", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({
       backend: "remote",
@@ -1504,7 +1505,7 @@ describe("LettaAgentClient", () => {
     });
   });
 
-  test("default toolset contract: harness owns both defaults; SDK only excludes interactive tools", async () => {
+  test("default toolset contract: creation has no server tools and turns use harness client tools", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({
       backend: "remote",
@@ -1512,16 +1513,18 @@ describe("LettaAgentClient", () => {
       WebSocket: FakeAppServerSocket,
     });
 
-    // 1. Creation sends no tool fields — the harness applies its
-    //    created-agent defaults (web_search, fetch_webpage).
+    // 1. Creation explicitly disables server-side base tools.
     const agentId = await client.createAgent({
       model: "anthropic/claude-sonnet-4",
     });
     const createCommand = fakeControlSocket().sent[0] as {
       create_agent?: { body?: Record<string, unknown> };
     };
+    expect(createCommand.create_agent?.body).toMatchObject({
+      include_base_tools: false,
+      include_base_tool_rules: false,
+    });
     expect(createCommand.create_agent?.body).not.toHaveProperty("tools");
-    expect(createCommand.create_agent?.body).not.toHaveProperty("include_base_tools");
 
     // 2. Every turn keeps the harness default toolset (no pinned allowlist)
     //    and excludes interactive user-input tools via the protocol flag.

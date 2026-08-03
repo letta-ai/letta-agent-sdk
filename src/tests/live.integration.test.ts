@@ -373,7 +373,7 @@ describeLive("live integration: letta-agent-sdk", () => {
   );
 
   test(
-    "createAgent attaches exactly the default server-side toolset",
+    "createAgent attaches no server-side tools by default",
     async () => {
       const createdAgentId = await createAgent({
         name: `sdk-toolset-test-${Date.now()}`,
@@ -386,7 +386,7 @@ describeLive("live integration: letta-agent-sdk", () => {
           .map((t) => t?.name)
           .filter((name): name is string => typeof name === "string")
           .sort();
-        expect(toolNames).toEqual(["fetch_webpage", "web_search"]);
+        expect(toolNames).toEqual([]);
       } finally {
         await deleteAgent(createdAgentId);
       }

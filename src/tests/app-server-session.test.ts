@@ -23,8 +23,8 @@ describe("createAgentBody", () => {
     expect(body).not.toHaveProperty("description");
     expect(body).not.toHaveProperty("memory_blocks");
     expect(body).not.toHaveProperty("tools");
-    expect(body).not.toHaveProperty("include_base_tools");
-    expect(body).not.toHaveProperty("include_base_tool_rules");
+    expect(body.include_base_tools).toBe(false);
+    expect(body.include_base_tool_rules).toBe(false);
   });
 
   test("uses caller memory as the complete identity without a personality preset", async () => {
@@ -56,8 +56,8 @@ describe("createAgentBody", () => {
       })),
     } as unknown as Record<string, unknown>;
     delete expected.tools;
-    delete expected.include_base_tools;
-    delete expected.include_base_tool_rules;
+    expected.include_base_tools = false;
+    expected.include_base_tool_rules = false;
 
     expect(body).toEqual(expected);
   });
