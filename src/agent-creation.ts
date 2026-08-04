@@ -1,66 +1,104 @@
 import {
-  buildCreatedAgentTags,
-  buildCreateAgentRequestForPersonality,
-  buildSystemPrompt,
-  LETTA_CODE_AGENT_TYPE,
-  MODEL_PRESETS,
+  buildCreateAgentRequest,
+  type CreateAgentMemoryBlock,
+  type CreateAgentRequest,
 } from "@letta-ai/letta-code/agent-presets";
 import type { CreateAgentOptions } from "./types.js";
 
-const DEFAULT_MODEL_ID = "auto";
-const DEFAULT_SUMMARIZATION_MODEL = "letta/auto";
-
-function resolveModel(modelIdentifier: string): string {
-  const preset = MODEL_PRESETS.find(
-    (model) =>
-      model.id === modelIdentifier || model.handle === modelIdentifier,
-  );
-  if (preset) return preset.handle;
-
-  // Preserve support for model handles supplied by self-hosted servers even
-  // when they are not present in the bundled catalog.
-  if (modelIdentifier.includes("/")) return modelIdentifier;
-
-  throw new Error(`Unknown model: ${modelIdentifier}`);
+function isPresetSystemPrompt(value: string): boolean {
+  return [
+    "default",
+    "letta-claude",
+    "letta-codex",
+    "letta-gemini",
+    "claude",
+    "codex",
+    "gemini",
+  ].includes(value);
 }
 
-/**
- * Build the standard harness portion of a create-agent request.
- *
- * Personality presets are explicit opt-ins. Without one, the SDK builds a
- * generic agent and lets the caller's memory blocks define its identity.
- */
-export async function buildInitialAgentBody(
+function assertCreateAgentOptionsSupported(options: CreateAgentOptions): void {
+  if (
+    options.allowedTools !== undefined ||
+    options.disallowedTools !== undefined
+  ) {
+    throw new Error(
+      "App-server createAgent() does not yet support allowedTools/disallowedTools.",
+    );
+  }
+  if (options.canUseTool !== undefined) {
+    throw new Error(
+      "App-server createAgent() does not yet support canUseTool callbacks.",
+    );
+  }
+  if (options.systemInfoReminder !== undefined) {
+    throw new Error(
+      "App-server createAgent() does not yet support systemInfoReminder overrides.",
+    );
+  }
+  if (options.dreaming?.behavior !== undefined) {
+    throw new Error(
+      "App-server createAgent() does not yet support dreaming.behavior overrides.",
+    );
+  }
+}
+
+/** Translate SDK convenience options into the canonical Letta Code request. */
+export async function createAgentBody(
   options: CreateAgentOptions,
-): Promise<Record<string, unknown>> {
-  if (options.personality !== undefined) {
-    return {
-      ...(await buildCreateAgentRequestForPersonality({
-        personalityId: options.personality,
-        ...(options.name !== undefined ? { name: options.name } : {}),
-        ...(options.description !== undefined
-          ? { description: options.description }
-          : {}),
-        ...(options.model !== undefined ? { model: options.model } : {}),
-        ...(options.tags !== undefined ? { extraTags: options.tags } : {}),
-      })),
-    };
+): Promise<CreateAgentRequest> {
+  assertCreateAgentOptionsSupported(options);
+
+  let system: string | undefined;
+  if (options.systemPrompt !== undefined) {
+    if (
+      typeof options.systemPrompt !== "string" ||
+      isPresetSystemPrompt(options.systemPrompt)
+    ) {
+      throw new Error(
+        "createAgent() does not yet support system prompt presets for this backend.",
+      );
+    }
+    system = options.systemPrompt;
   }
 
-  return {
-    agent_type: LETTA_CODE_AGENT_TYPE,
-    ...(options.name !== undefined ? { name: options.name } : {}),
-    ...(options.description !== undefined
-      ? { description: options.description }
-      : {}),
-    model: resolveModel(options.model ?? DEFAULT_MODEL_ID),
-    system: buildSystemPrompt("default", "memfs"),
-    tags: buildCreatedAgentTags({
-      enableMemfs: true,
-      tags: options.tags ?? [],
-    }),
-    initial_message_sequence: [],
-    parallel_tool_calls: true,
-    compaction_settings: { model: DEFAULT_SUMMARIZATION_MODEL },
-  };
+  const memoryBlocks: CreateAgentMemoryBlock[] = [];
+  const blockIds: string[] = [];
+  for (const item of options.memory ?? []) {
+    if (typeof item === "string") {
+      throw new Error(
+        "App-server createAgent() does not yet support memory preset names.",
+      );
+    }
+    if ("blockId" in item) {
+      blockIds.push(item.blockId);
+    } else {
+      memoryBlocks.push({ ...item });
+    }
+  }
+  if (options.persona !== undefined) {
+    memoryBlocks.push({ label: "persona", value: options.persona });
+  }
+  if (options.human !== undefined) {
+    memoryBlocks.push({ label: "human", value: options.human });
+  }
+  const hasMemoryConfiguration =
+    options.memory !== undefined ||
+    options.persona !== undefined ||
+    options.human !== undefined;
+
+  return buildCreateAgentRequest({
+    personalityId: options.personality,
+    name: options.name,
+    description: options.description,
+    model: options.model,
+    system,
+    memoryBlocks: hasMemoryConfiguration ? memoryBlocks : undefined,
+    blockIds,
+    extraTags: options.tags,
+    enableMemfs: options.memfs ?? true,
+    baseTools: options.baseTools,
+    embedding: options.embedding,
+    hidden: options.hidden,
+  });
 }

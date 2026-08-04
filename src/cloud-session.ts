@@ -5,10 +5,10 @@ import {
   createAppServerClient,
   type AppServerClient,
 } from "@letta-ai/letta-code/app-server-client";
+import { createAgentBody } from "./agent-creation.js";
 import {
   AppServerRuntimeController,
   agentToolNames,
-  createAgentBody,
   createExternalToolCallHandler,
   externalToolGroups,
   registerAppServerControlRequestHandler,

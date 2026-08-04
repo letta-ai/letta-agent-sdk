@@ -11,12 +11,7 @@ import type {
   RuntimeStartResponseMessage,
   UpdateModelResponseMessage,
 } from "@letta-ai/letta-code/app-server-protocol";
-import {
-  buildSystemPrompt,
-  GIT_MEMORY_ENABLED_TAG,
-  LETTA_CODE_ORIGIN_TAG,
-} from "@letta-ai/letta-code/agent-presets";
-import { buildInitialAgentBody } from "./agent-creation.js";
+import { createAgentBody } from "./agent-creation.js";
 import { normalizeAppServerModels } from "./app-server-models.js";
 import {
   buildCanUseToolContext,
@@ -99,151 +94,9 @@ export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
   connect?: (
     sessionEnv?: Record<string, string>,
   ) => Promise<{ url: string; close(): void }>;
-  /** Whether SDK create-agent payloads should add the origin tag automatically. */
-  includeSdkOriginTag?: boolean;
 };
 
 export type AppServerSessionMode = RuntimeSessionMode;
-
-function isPresetSystemPrompt(value: string): boolean {
-  return [
-    "default",
-    "letta-claude",
-    "letta-codex",
-    "letta-gemini",
-    "claude",
-    "codex",
-    "gemini",
-  ].includes(value);
-}
-
-function assertRemoteCreateAgentOptionsSupported(options: CreateAgentOptions): void {
-  if (options.allowedTools !== undefined || options.disallowedTools !== undefined) {
-    throw new Error("App-server createAgent() does not yet support allowedTools/disallowedTools.");
-  }
-  if (options.canUseTool !== undefined) {
-    throw new Error("App-server createAgent() does not yet support canUseTool callbacks.");
-  }
-  if (options.systemInfoReminder !== undefined) {
-    throw new Error("App-server createAgent() does not yet support systemInfoReminder overrides.");
-  }
-  if (options.dreaming?.behavior !== undefined) {
-    throw new Error("App-server createAgent() does not yet support dreaming.behavior overrides.");
-  }
-}
-
-function normalizeMemoryBlock(block: Record<string, unknown>): Record<string, unknown> {
-  const normalized = { ...block };
-  if (normalized.value === undefined && typeof normalized.content === "string") {
-    normalized.value = normalized.content;
-  }
-  return normalized;
-}
-
-function upsertMemoryBlock(
-  blocks: Array<Record<string, unknown>>,
-  block: Record<string, unknown>,
-): void {
-  const label = block.label;
-  if (typeof label === "string") {
-    const existingIndex = blocks.findIndex((candidate) => candidate.label === label);
-    if (existingIndex >= 0) {
-      blocks[existingIndex] = block;
-      return;
-    }
-  }
-  blocks.push(block);
-}
-
-export async function createAgentBody(
-  options: CreateAgentOptions,
-  settings: { includeSdkOriginTag?: boolean } = {},
-): Promise<Record<string, unknown>> {
-  assertRemoteCreateAgentOptionsSupported(options);
-
-  const includeOriginTag = settings.includeSdkOriginTag ?? true;
-  const body = await buildInitialAgentBody(options);
-
-  if (Array.isArray(body.tags)) {
-    body.tags = body.tags.filter(
-      (tag) =>
-        (includeOriginTag || tag !== LETTA_CODE_ORIGIN_TAG) &&
-        (options.memfs !== false || tag !== GIT_MEMORY_ENABLED_TAG),
-    );
-  }
-
-  if (options.embedding !== undefined) body.embedding = options.embedding;
-  if (options.hidden !== undefined) body.hidden = options.hidden;
-  // When baseTools is omitted, the harness applies its created-agent
-  // defaults (web_search, fetch_webpage). An explicit list is pinned exactly:
-  // `tools` alone does not suppress the Letta agent type's defaults, so both
-  // default tool attachment and its default tool rules are disabled here.
-  if (options.baseTools === undefined) {
-    delete body.tools;
-    delete body.include_base_tools;
-    delete body.include_base_tool_rules;
-  } else {
-    body.tools = options.baseTools;
-    body.include_base_tools = false;
-    body.include_base_tool_rules = false;
-  }
-
-  if (options.systemPrompt === undefined) {
-    if (options.memfs === false) {
-      body.system = buildSystemPrompt("default", "standard");
-    }
-  } else {
-    if (typeof options.systemPrompt === "string") {
-      if (isPresetSystemPrompt(options.systemPrompt)) {
-        throw new Error("createAgent() does not yet support system prompt presets for this backend.");
-      }
-      body.system = options.systemPrompt;
-    } else {
-      throw new Error("createAgent() does not yet support system prompt preset objects for this backend.");
-    }
-  }
-
-  const hasMemoryConfiguration =
-    Array.isArray(body.memory_blocks) ||
-    options.memory !== undefined ||
-    options.persona !== undefined ||
-    options.human !== undefined;
-  const memoryBlocks = Array.isArray(body.memory_blocks)
-    ? body.memory_blocks
-        .filter(
-          (block): block is Record<string, unknown> =>
-            block !== null && typeof block === "object",
-        )
-        .map((block) => ({ ...block }))
-    : [];
-  const blockIds: string[] = [];
-  for (const item of options.memory ?? []) {
-    if (typeof item === "string") {
-      throw new Error("App-server createAgent() does not yet support memory preset names.");
-    }
-    if ("blockId" in item) {
-      blockIds.push(item.blockId);
-    } else {
-      upsertMemoryBlock(
-        memoryBlocks,
-        normalizeMemoryBlock(item as unknown as Record<string, unknown>),
-      );
-    }
-  }
-  if (options.persona !== undefined) {
-    upsertMemoryBlock(memoryBlocks, {
-      label: "persona",
-      value: options.persona,
-    });
-  }
-  if (options.human !== undefined) {
-    upsertMemoryBlock(memoryBlocks, { label: "human", value: options.human });
-  }
-  if (hasMemoryConfiguration) body.memory_blocks = memoryBlocks;
-  if (blockIds.length > 0) body.block_ids = blockIds;
-
-  return body;
-}
 
 export function externalToolGroups(tools: AnyAgentTool[] | undefined): Array<Record<string, unknown>> | undefined {
   if (!tools || tools.length === 0) return undefined;
@@ -885,9 +738,7 @@ export class AppServerSession extends RemoteClientSessionCore {
 
     if (this.mode.kind === "create-agent") {
       command.create_agent = {
-        body: await createAgentBody(this.mode.options, {
-          includeSdkOriginTag: this.remoteOptions.includeSdkOriginTag,
-        }),
+        body: await createAgentBody(this.mode.options),
         // Hidden (worker-style) agents default to unpinned.
         pin_global:
           this.remoteOptions.pinGlobalAgent ??

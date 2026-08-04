@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
-  buildCreateAgentRequestForPersonality,
+  buildCreateAgentRequest,
   buildSystemPrompt,
   LETTA_CODE_AGENT_TYPE,
 } from "@letta-ai/letta-code/agent-presets";
-import { createAgentBody } from "../app-server-session.js";
+import { createAgentBody } from "../agent-creation.js";
 
 describe("createAgentBody", () => {
   test("builds a generic harness agent when personality is omitted", async () => {
@@ -18,13 +18,13 @@ describe("createAgentBody", () => {
       initial_message_sequence: [],
       parallel_tool_calls: true,
       compaction_settings: { model: "letta/auto" },
+      tools: ["web_search", "fetch_webpage"],
+      include_base_tools: false,
+      include_base_tool_rules: false,
     });
     expect(body).not.toHaveProperty("name");
     expect(body).not.toHaveProperty("description");
     expect(body).not.toHaveProperty("memory_blocks");
-    expect(body).not.toHaveProperty("tools");
-    expect(body).not.toHaveProperty("include_base_tools");
-    expect(body).not.toHaveProperty("include_base_tool_rules");
   });
 
   test("uses caller memory as the complete identity without a personality preset", async () => {
@@ -49,17 +49,41 @@ describe("createAgentBody", () => {
       personality: "memo",
       model: "openai/gpt-5.2",
     });
-    const expected = {
-      ...(await buildCreateAgentRequestForPersonality({
+    expect(body).toEqual(
+      await buildCreateAgentRequest({
         personalityId: "memo",
         model: "openai/gpt-5.2",
-      })),
-    } as unknown as Record<string, unknown>;
-    delete expected.tools;
-    delete expected.include_base_tools;
-    delete expected.include_base_tool_rules;
+      }),
+    );
+  });
 
-    expect(body).toEqual(expected);
+  test("translates convenience memory inputs before canonical creation", async () => {
+    const body = await createAgentBody({
+      personality: "memo",
+      memory: [
+        { label: "persona", value: "Memory persona" },
+        { blockId: "block-shared" },
+      ],
+      persona: "Convenience persona",
+      human: "Convenience human",
+    });
+
+    expect(body.memory_blocks).toEqual(
+      expect.arrayContaining([
+        { label: "persona", value: "Convenience persona" },
+        { label: "human", value: "Convenience human" },
+      ]),
+    );
+    expect(body.block_ids).toEqual(["block-shared"]);
+  });
+
+  test("keeps MemFS mode and exact base tools in the canonical request", async () => {
+    const body = await createAgentBody({ memfs: false, baseTools: [] });
+    expect(body.system).toBe(buildSystemPrompt("default", "standard"));
+    expect(body.tags).toEqual(["origin:letta-code"]);
+    expect(body.tools).toEqual([]);
+    expect(body.include_base_tools).toBe(false);
+    expect(body.include_base_tool_rules).toBe(false);
   });
 
   test("preserves custom prompts", async () => {
