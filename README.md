@@ -108,6 +108,38 @@ session's `canUseTool` callback.
 | `local` | Current computer | Current computer through an SDK-managed App Server |
 | `remote` | Configured by the App Server | A user-managed App Server computer |
 
+### Choose a computer
+
+Cloud clients can list the computers registered with the current Letta account
+and select one by name when opening a session:
+
+```ts
+const { computers } = await client.computers.list({ onlineOnly: true });
+for (const computer of computers) {
+  console.log(computer.name, computer.deviceId, computer.status);
+}
+
+await using session = client.resumeSession(agentId, {
+  computer: "Work laptop",
+});
+await session.send("Run the test suite on this computer.");
+```
+
+Computer names must uniquely identify a registered computer. For persisted
+selections, use the stable `deviceId`; a `connectionId` identifies only the
+current online lease and can rotate after reconnects:
+
+```ts
+await using session = client.resumeSession(agentId, {
+  computer: { deviceId: "device-..." },
+});
+```
+
+`client.computers.get(deviceId)` retrieves one computer and
+`client.computers.resolve(selector)` resolves a name or ID to its current online
+connection. The previous client-level and session-level `environment` options
+remain as deprecated compatibility aliases for `computer`.
+
 ### Local
 
 ```ts
@@ -227,7 +259,7 @@ For authenticated Remote App Servers in React Native, pass the platform WebSocke
 
 ## Management APIs
 
-The client exposes agent, conversation, model, and Cloud repository management alongside active sessions:
+The client exposes agent, conversation, model, computer, and Cloud repository management alongside active sessions:
 
 ```ts
 const agents = await client.agents.list({ tags: ["support"] });

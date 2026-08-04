@@ -882,11 +882,12 @@ describe("LettaAgentClient", () => {
     });
     const cloudClient = new LettaAgentClient({
       backend: "cloud",
-      environment: { name: "LettaDevelopers" },
+      computer: { name: "LettaDevelopers" },
     });
 
     expect(remoteClient.backend).toBe("remote");
     expect(cloudClient.backend).toBe("cloud");
+    expect(cloudClient.computer).toEqual({ name: "LettaDevelopers" });
     expect(cloudClient.environment).toEqual({ name: "LettaDevelopers" });
   });
 
@@ -912,6 +913,24 @@ describe("LettaAgentClient", () => {
     } finally {
       session.close();
     }
+  });
+
+  test("rejects conflicting computer and environment selectors", () => {
+    expect(() =>
+      new LettaAgentClient({
+        backend: "cloud",
+        computer: "Work laptop",
+        environment: "legacy-name",
+      }),
+    ).toThrow('either "computer" or deprecated "environment"');
+
+    const client = new LettaAgentClient({ backend: "cloud" });
+    expect(() =>
+      client.resumeSession("agent-123", {
+        computer: "Work laptop",
+        environment: "legacy-name",
+      }),
+    ).toThrow("cannot specify both computer and deprecated environment");
   });
 
   test("constructs cloud backend sessions without using the local fallback", () => {

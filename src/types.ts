@@ -17,6 +17,7 @@ import type {
 import type { Message as LettaMessage } from "@letta-ai/letta-client/resources/agents/messages";
 import type { CreateBlock } from "@letta-ai/letta-client/resources/blocks/blocks";
 import type { LettaCodeCloudSandboxOptions } from "./cloud-sandbox.js";
+import type { ComputerSelector } from "./computers.js";
 export type { CreateBlock } from "@letta-ai/letta-client/resources/blocks/blocks";
 export type {
   GitHubRepositoryRef,
@@ -301,18 +302,8 @@ export type McpServers = Record<string, McpServerConfig>;
  */
 export type LettaCodeBackend = "local" | "remote" | "cloud";
 
-/**
- * Stable execution target for remote/cloud runtimes.
- *
- * Strings are treated as human-readable environment names. Object forms allow
- * callers to avoid relying on names as unique identifiers.
- */
-export type LettaCodeEnvironment =
-  | string
-  | { name: string }
-  | { id: string }
-  | { connectionId: string }
-  | { deviceId: string };
+/** @deprecated Use `ComputerSelector` from the package root. */
+export type LettaCodeEnvironment = ComputerSelector;
 
 export interface LettaCodeLocalAppServerOptions {
   /**
@@ -383,11 +374,13 @@ export interface LettaCodeCloudClientOptions {
   /** Heartbeat interval for the Cloud status websocket. Defaults to 30s. */
   pingIntervalMs?: number;
   /**
-   * Execution target for Letta Cloud sessions. If omitted, the SDK creates
-   * and owns a sandbox for the session.
+   * Computer where Letta Cloud sessions run. If omitted, the SDK creates and
+   * owns a managed sandbox for the session.
    */
+  computer?: ComputerSelector;
+  /** @deprecated Use `computer`. */
   environment?: LettaCodeEnvironment;
-  /** Options for SDK-managed sandboxes when environment is omitted. */
+  /** Options for SDK-managed sandboxes when no computer is selected. */
   sandbox?: LettaCodeCloudSandboxOptions;
 }
 
@@ -709,12 +702,14 @@ export interface CreateSessionOptions {
 /**
  * Session options accepted by LettaAgentClient methods.
  *
- * `environment` is a cloud execution-target override. It is deliberately
+ * `computer` is a Cloud execution-target override. It is deliberately
  * session-scoped rather than part of createAgent() options.
  */
 export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
+  computer?: ComputerSelector;
+  /** @deprecated Use `computer`. */
   environment?: LettaCodeEnvironment;
-  /** Per-session SDK-managed sandbox options when environment is omitted. */
+  /** Per-session SDK-managed sandbox options when no computer is selected. */
   sandbox?: LettaCodeCloudSandboxOptions;
   /**
    * Extra environment variables for the session's harness process. Each

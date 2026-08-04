@@ -173,6 +173,15 @@ export type {
 } from "./management-types.js";
 
 export { RepositoriesClient } from "./repositories.js";
+export type {
+  Computer,
+  ComputerMetadata,
+  ComputerSelector,
+  ComputersClient,
+  ListComputersOptions,
+  ListComputersResult,
+  ResolvedComputer,
+} from "./computers.js";
 export { LettaAgentClient } from "./client.js";
 export { CloudManagedSandboxExpiredError } from "./cloud-session.js";
 export { createReactNativeWebSocketConstructor } from "./websocket.js";

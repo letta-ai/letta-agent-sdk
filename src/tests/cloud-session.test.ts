@@ -1313,7 +1313,7 @@ describe("CloudEnvironmentSession", () => {
     )).toHaveLength(0);
   });
 
-  test("uses an explicit environment before using the Remote Client websocket", async () => {
+  test("uses an explicit computer before using the Remote Client websocket", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
     const client = new LettaAgentClient({
@@ -1323,7 +1323,7 @@ describe("CloudEnvironmentSession", () => {
       fetch: createCloudFetchMock(requests),
       WebSocket: FakeCloudSocket,
       requestTimeoutMs: 1_000,
-      environment: { connectionId: "conn-explicit" },
+      computer: { connectionId: "conn-explicit" },
     });
 
     const session = client.resumeSession("agent-1", {
