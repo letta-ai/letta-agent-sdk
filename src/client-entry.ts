@@ -25,6 +25,15 @@ export class LettaAgentClient extends LettaAgentClientBase {
 
 export { CloudManagedSandboxExpiredError } from "./cloud-session.js";
 export { RepositoriesClient } from "./repositories.js";
+export type {
+  Computer,
+  ComputerMetadata,
+  ComputerSelector,
+  ComputersClient,
+  ListComputersOptions,
+  ListComputersResult,
+  ResolvedComputer,
+} from "./computers.js";
 export type * from "./management-types.js";
 export { extractStreamTextDelta } from "./stream-events.js";
 export { createReactNativeWebSocketConstructor } from "./websocket.js";

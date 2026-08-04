@@ -85,7 +85,7 @@ describe("RemoteEnvironmentClient", () => {
 
     await expect(
       client.resolveEnvironment({ connectionName: "work-laptop" }),
-    ).rejects.toThrow("Remote environment name is ambiguous");
+    ).rejects.toThrow("Computer name is ambiguous");
   });
 
 });

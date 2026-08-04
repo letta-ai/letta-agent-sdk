@@ -35,6 +35,12 @@ export interface RemoteEnvironmentConnection {
   metadata?: Record<string, unknown>;
 }
 
+export interface RemoteEnvironmentListOptions {
+  limit?: number;
+  after?: string;
+  onlineOnly?: boolean;
+}
+
 export interface RemoteEnvironmentListResult {
   connections: RemoteEnvironmentConnection[];
   hasNextPage: boolean;
@@ -59,7 +65,7 @@ function ensureOnline(
           : "connectionName" in target
             ? target.connectionName
             : environment.deviceId;
-    throw new Error(`Remote environment is offline: ${label}`);
+    throw new Error(`Computer is offline: ${label}`);
   }
 
   return {
@@ -84,8 +90,16 @@ export class RemoteEnvironmentClient {
     }),
   ) {}
 
-  async listEnvironments(): Promise<RemoteEnvironmentListResult> {
-    return await this.client.environments.list() as RemoteEnvironmentListResult;
+  async listEnvironments(
+    options: RemoteEnvironmentListOptions = {},
+  ): Promise<RemoteEnvironmentListResult> {
+    return await this.client.environments.list({
+      after: options.after,
+      limit: options.limit === undefined ? undefined : String(options.limit),
+      onlineOnly: options.onlineOnly === undefined
+        ? undefined
+        : String(options.onlineOnly),
+    }) as RemoteEnvironmentListResult;
   }
 
   async getEnvironmentByDeviceId(deviceId: string): Promise<RemoteEnvironmentConnection> {
@@ -103,7 +117,15 @@ export class RemoteEnvironmentClient {
       return ensureOnline(await this.getEnvironmentByDeviceId(target.deviceId), target);
     }
 
-    const { connections } = await this.listEnvironments();
+    const connections: RemoteEnvironmentConnection[] = [];
+    let after: string | undefined;
+    do {
+      const page = await this.listEnvironments({ limit: 100, after });
+      connections.push(...page.connections);
+      if (!page.hasNextPage || page.connections.length === 0) break;
+      after = page.connections.at(-1)?.id;
+    } while (after !== undefined);
+
     if ("environmentId" in target) {
       const match = connections.find((env) => env.id === target.environmentId);
       if (!match) {
@@ -116,17 +138,24 @@ export class RemoteEnvironmentClient {
       (env) => env.connectionName === target.connectionName,
     );
     if (matches.length === 0) {
-      throw new Error(`Remote environment not found: ${target.connectionName}`);
+      throw new Error(`Computer not found: ${target.connectionName}`);
     }
-    if (matches.length > 1) {
+    const onlineMatches = matches.filter(
+      (environment) => environment.connectionId !== null,
+    );
+    if (onlineMatches.length === 0) {
+      throw new Error(`Computer is offline: ${target.connectionName}`);
+    }
+    if (onlineMatches.length > 1) {
+      const candidates = onlineMatches
+        .map((environment) =>
+          `${environment.connectionName} (${environment.deviceId}, online)`
+        )
+        .join(", ");
       throw new Error(
-        `Remote environment name is ambiguous: ${target.connectionName}`,
+        `Computer name is ambiguous: ${target.connectionName}. Matches: ${candidates}. Select one by deviceId.`,
       );
     }
-    const match = matches[0];
-    if (!match) {
-      throw new Error(`Remote environment not found: ${target.connectionName}`);
-    }
-    return ensureOnline(match, target);
+    return ensureOnline(onlineMatches[0]!, target);
   }
 }

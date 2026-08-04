@@ -171,8 +171,19 @@ function validatePositiveInteger(value: number | undefined, name: string): void 
 export function validateCloudClientOptions(options: LettaCodeCloudClientOptions): void {
   validatePositiveInteger(options.requestTimeoutMs, "requestTimeoutMs");
   validateCloudSandboxOptions(options.sandbox, "sandbox");
-  if (options.environment !== undefined && options.sandbox !== undefined) {
-    throw new Error("Letta Cloud sessions cannot specify both environment and sandbox options.");
+  if (options.computer !== undefined && options.environment !== undefined) {
+    throw new Error(
+      "Letta Cloud clients cannot specify both computer and deprecated environment.",
+    );
+  }
+  if (
+    (options.computer !== undefined || options.environment !== undefined) &&
+    options.sandbox !== undefined
+  ) {
+    const field = options.computer !== undefined ? "computer" : "environment";
+    throw new Error(
+      `Letta Cloud sessions cannot specify both ${field} and sandbox options.`,
+    );
   }
   if (
     options.webSocketAuth !== undefined &&
@@ -982,10 +993,12 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   private effectiveEnvironment(): LettaCodeEnvironment | undefined {
-    const modeEnvironment = this.mode.kind === "session"
-      ? this.mode.options.environment
+    const modeComputer = this.mode.kind === "session"
+      ? this.mode.options.computer ?? this.mode.options.environment
       : undefined;
-    return modeEnvironment ?? this.cloudOptions.environment;
+    return modeComputer ??
+      this.cloudOptions.computer ??
+      this.cloudOptions.environment;
   }
 
   private effectiveSandboxOptions(): LettaCodeCloudSandboxOptions | undefined {

@@ -9,6 +9,11 @@ import {
 import { CloudManagementTransport } from "./cloud-management.js";
 import { createCloudClient } from "./cloud-client.js";
 import {
+  ComputersClientImpl,
+  type ComputerSelector,
+  type ComputersClient,
+} from "./computers.js";
+import {
   CloudEnvironmentSession,
   assertCloudSessionOptionsSupported,
   createCloudAgent,
@@ -55,19 +60,21 @@ function isLettaCodeBackend(value: string): value is LettaCodeBackend {
   return VALID_BACKENDS.has(value as LettaCodeBackend);
 }
 
-function getOptionsEnvironment(
+function getOptionsComputer(
   options: LettaCodeClientOptions,
-): LettaCodeEnvironment | undefined {
-  if ("environment" in options) {
-    return options.environment;
+): ComputerSelector | undefined {
+  if (!("computer" in options) && !("environment" in options)) return undefined;
+  if (options.computer !== undefined && options.environment !== undefined) {
+    throw new Error('Specify either "computer" or deprecated "environment", not both.');
   }
-  return undefined;
+  return options.computer ?? options.environment;
 }
 
 function stripCloudExecutionOptions(
   options: LettaCodeClientSessionOptions,
 ): CreateSessionOptions {
   const sessionOptions = { ...options };
+  delete sessionOptions.computer;
   delete sessionOptions.environment;
   delete sessionOptions.sandbox;
   delete sessionOptions.filesystemConfinement;
@@ -102,12 +109,15 @@ type OneShotSession = LettaCodeSession & {
  */
 export class LettaAgentClientBase {
   readonly backend: LettaCodeBackend;
+  readonly computer: ComputerSelector | undefined;
+  /** @deprecated Use `computer`. */
   readonly environment: LettaCodeEnvironment | undefined;
   readonly agents: AgentsClient;
   readonly conversations: ConversationsClient;
   readonly models: ModelsClient;
   protected readonly options: LettaCodeClientOptions;
   private repositoriesClient: RepositoriesClient | null = null;
+  private computersClient: ComputersClientImpl | null = null;
   private agentRepositoriesClient: AgentRepositoriesClient | null = null;
   private cloudClient: Letta | null = null;
   private managementTransport: ManagementTransport | null = null;
@@ -121,7 +131,8 @@ export class LettaAgentClientBase {
     }
 
     this.backend = backend;
-    this.environment = getOptionsEnvironment(options);
+    this.computer = getOptionsComputer(options);
+    this.environment = this.computer;
     this.options = options;
     this.agents = createAgentsClient(
       () => this.getManagementTransport(),
@@ -132,14 +143,20 @@ export class LettaAgentClientBase {
     );
     this.models = createModelsClient(() => this.getManagementTransport());
 
-    if (this.backend === "local" && this.environment !== undefined) {
+    if (this.backend === "local" && this.computer !== undefined) {
+      const field = "computer" in options && options.computer !== undefined
+        ? "computer"
+        : "environment";
       throw new Error(
-        'LettaAgentClient environment is only valid with backend: "cloud".',
+        `LettaAgentClient ${field} is only valid with backend: "cloud".`,
       );
     }
-    if (this.backend === "remote" && this.environment !== undefined) {
+    if (this.backend === "remote" && this.computer !== undefined) {
+      const field = "computer" in options && options.computer !== undefined
+        ? "computer"
+        : "environment";
       throw new Error(
-        'LettaAgentClient environment is only valid with backend: "cloud"; remote url selects the app-server runtime.',
+        `LettaAgentClient ${field} is only valid with backend: "cloud"; remote url selects the app-server runtime.`,
       );
     }
     if (this.backend !== "cloud" && (options as { sandbox?: unknown }).sandbox !== undefined) {
@@ -194,6 +211,11 @@ export class LettaAgentClientBase {
    */
   get repositories(): RepositoriesClient {
     return this.getRepositoriesClient();
+  }
+
+  /** Discover and resolve computers registered with this Letta Cloud account. */
+  get computers(): ComputersClient {
+    return this.getComputersClient();
   }
 
   async createAgent(options: CreateAgentOptions = {}): Promise<string> {
@@ -336,6 +358,11 @@ export class LettaAgentClientBase {
     action: string,
     options: LettaCodeClientSessionOptions,
   ): void {
+    if (options.computer !== undefined && options.environment !== undefined) {
+      throw new Error(
+        `${action}() cannot specify both computer and deprecated environment.`,
+      );
+    }
     if (
       options.filesystemConfinement !== undefined &&
       options.filesystemConfinement !== "memory"
@@ -344,11 +371,13 @@ export class LettaAgentClientBase {
         `Invalid filesystemConfinement '${String(options.filesystemConfinement)}'. Valid value: memory.`,
       );
     }
-    const effectiveEnvironment = options.environment ?? this.environment;
+    const effectiveComputer =
+      options.computer ?? options.environment ?? this.computer;
     if (this.backend === "local") {
-      if (effectiveEnvironment !== undefined) {
+      if (effectiveComputer !== undefined) {
+        const field = options.computer !== undefined ? "computer" : "environment";
         throw new Error(
-          `${action}() environment overrides are only valid with backend: "cloud".`,
+          `${action}() ${field} overrides are only valid with backend: "cloud".`,
         );
       }
       if (options.sandbox !== undefined) {
@@ -374,9 +403,10 @@ export class LettaAgentClientBase {
           `${action}() filesystemConfinement requires an SDK-owned local app-server process.`,
         );
       }
-      if (options.environment !== undefined) {
+      if (options.computer !== undefined || options.environment !== undefined) {
+        const field = options.computer !== undefined ? "computer" : "environment";
         throw new Error(
-          `${action}() environment overrides are only valid with backend: "cloud"; remote url selects the app-server runtime.`,
+          `${action}() ${field} overrides are only valid with backend: "cloud"; remote url selects the app-server runtime.`,
         );
       }
       if (options.sandbox !== undefined) {
@@ -394,11 +424,20 @@ export class LettaAgentClientBase {
         );
       }
       const cloudOptions = this.cloudOptions();
-      if (cloudOptions.environment !== undefined && options.sandbox !== undefined) {
-        throw new Error(`Letta Cloud ${action}() cannot specify sandbox options when the client has a default environment.`);
+      if (this.computer !== undefined && options.sandbox !== undefined) {
+        const field = cloudOptions.computer !== undefined
+          ? "computer"
+          : "environment";
+        throw new Error(`Letta Cloud ${action}() cannot specify sandbox options when the client has a default ${field}.`);
       }
-      if (cloudOptions.sandbox !== undefined && options.environment !== undefined) {
-        throw new Error(`Letta Cloud ${action}() cannot specify an environment when the client has default sandbox options.`);
+      if (
+        cloudOptions.sandbox !== undefined &&
+        (options.computer !== undefined || options.environment !== undefined)
+      ) {
+        const field = options.computer !== undefined
+          ? "a computer"
+          : "an environment";
+        throw new Error(`Letta Cloud ${action}() cannot specify ${field} when the client has default sandbox options.`);
       }
       assertCloudSessionOptionsSupported(action, options);
       return;
@@ -445,6 +484,14 @@ export class LettaAgentClientBase {
 
   private appServerSessionOptions(): AppServerSessionOptions {
     return this.remoteOptions();
+  }
+
+  private getComputersClient(): ComputersClientImpl {
+    if (this.backend !== "cloud") {
+      throw new Error('client.computers is only available with backend: "cloud".');
+    }
+    this.computersClient ??= new ComputersClientImpl(this.getCloudClient());
+    return this.computersClient;
   }
 
   private getRepositoriesClient(): RepositoriesClient {
