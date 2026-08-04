@@ -51,7 +51,7 @@ export async function createPresenter(
   if (existingAgentId) {
     return resumeSession(existingAgentId, {
       model: config.model,
-      allowedTools: ['web_search', 'Read', 'Write'],
+      allowedTools: ['Read', 'Write'],
       permissionMode: 'unrestricted',
     });
   }
@@ -105,7 +105,7 @@ export async function createPresenter(
         description: 'Research approach refined over time',
       },
     ],
-    allowedTools: ['web_search', 'Read', 'Write'],
+    allowedTools: ['Read', 'Write'],
     permissionMode: 'unrestricted',
   });
 }

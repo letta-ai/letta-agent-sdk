@@ -208,7 +208,9 @@ const researcherAgentId = 'agent-xxx-yyy-zzz';
 
 // Teleport the trained researcher into your code
 const researcher = resumeSession(researcherAgentId, {
-  allowedTools: ['web_search', 'Read', 'Write'],
+  // Client-side tools only. web_search is server-side and stays attached
+  // to the agent from creation, so it needs no entry here.
+  allowedTools: ['Read', 'Write'],
   permissionMode: 'unrestricted',
 });
 

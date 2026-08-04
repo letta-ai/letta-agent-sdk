@@ -55,7 +55,7 @@ async function main() {
   console.log('   and which search strategies work best.\n');
 
   const researcher = resumeSession(teamState.agentIds.researcher!, {
-    allowedTools: ['web_search', 'Read', 'Write'],
+    allowedTools: ['Read', 'Write'],
     permissionMode: 'unrestricted',
   });
 
