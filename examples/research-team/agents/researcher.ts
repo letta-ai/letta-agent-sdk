@@ -120,7 +120,7 @@ export async function createResearcher(
         description: 'Accumulated knowledge of key concepts and influential works',
       },
     ],
-    allowedTools: ['web_search', 'Glob', 'Read', 'Write'],
+    allowedTools: ['Glob', 'Read', 'Write'],
     permissionMode: 'unrestricted',
   });
 }

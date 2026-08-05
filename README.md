@@ -158,6 +158,10 @@ Use `toolset` to select a request-scoped harness preset and add bundled client
 tools. `allowedTools` remains the final visibility boundary across bundled and
 custom tools.
 
+Both are scoped to locally executed client tools. Server-side tools (such as
+`web_search`) are attached to the agent itself via `baseTools` at creation and
+are unaffected by `allowedTools` — listing one there matches nothing.
+
 ```ts
 await using session = client.createSession(agentId, {
   toolset: {
