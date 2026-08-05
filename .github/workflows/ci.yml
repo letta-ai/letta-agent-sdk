@@ -72,3 +72,26 @@ jobs:
           LETTA_API_KEY: ${{ secrets.LETTA_API_KEY }}
           LETTA_LIVE_INTEGRATION: "1"
         run: bun test src/tests/cloud-transport.live.integration.test.ts
+
+      - name: Verify the Cloud regression fails before the disconnect fix
+        # One-off historical verification; removed after its result is captured.
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          LETTA_API_KEY: ${{ secrets.LETTA_API_KEY }}
+          LETTA_LIVE_INTEGRATION: "1"
+        run: |
+          git checkout d4e1dac^ -- \
+            src/app-server-session.ts \
+            src/cloud-session.ts \
+            src/remote-client-session-core.ts \
+            src/remote-turn-coordinator.ts
+          set +e
+          output=$(bun test src/tests/cloud-transport.live.integration.test.ts 2>&1)
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          if [[ $status -eq 0 ]]; then
+            echo "Pre-fix source unexpectedly passed the Cloud disconnect regression" >&2
+            exit 1
+          fi
+          grep -F "Cloud stream remained parked after relay disconnect" <<<"$output"
