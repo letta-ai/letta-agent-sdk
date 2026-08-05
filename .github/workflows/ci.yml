@@ -80,6 +80,7 @@ jobs:
           LETTA_API_KEY: ${{ secrets.LETTA_API_KEY }}
           LETTA_LIVE_INTEGRATION: "1"
         run: |
+          git fetch --depth=20 origin main
           git checkout d4e1dac^ -- \
             src/app-server-session.ts \
             src/cloud-session.ts \
