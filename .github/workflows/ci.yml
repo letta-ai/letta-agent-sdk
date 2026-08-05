@@ -81,11 +81,9 @@ jobs:
           LETTA_LIVE_INTEGRATION: "1"
         run: |
           git fetch --depth=20 origin main
-          git checkout d4e1dac^ -- \
-            src/app-server-session.ts \
-            src/cloud-session.ts \
-            src/remote-client-session-core.ts \
-            src/remote-turn-coordinator.ts
+          cp src/tests/cloud-transport.live.integration.test.ts /tmp/cloud-transport.live.integration.test.ts
+          git checkout d4e1dac^ -- src
+          cp /tmp/cloud-transport.live.integration.test.ts src/tests/cloud-transport.live.integration.test.ts
           set +e
           output=$(bun test src/tests/cloud-transport.live.integration.test.ts 2>&1)
           status=$?
