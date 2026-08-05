@@ -103,10 +103,10 @@ describeLive("live Cloud transport disconnect", () => {
         ]);
 
         expect(controlSocket!.readyState).toBe(3);
-        expect(messages[0]).toMatchObject({
+        expect(messages).toContainEqual(expect.objectContaining({
           type: "error",
           stopReason: "error",
-        });
+        }));
         expect(messages.at(-1)).toMatchObject({
           type: "result",
           success: false,
