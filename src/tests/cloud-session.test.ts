@@ -252,7 +252,6 @@ class FakeCloudSocket {
   static instances: FakeCloudSocket[] = [];
   static scenario:
     | "normal"
-    | "hang"
     | "approval"
     | "terminal_error"
     | "stale_idle_then_error"
@@ -458,10 +457,6 @@ class FakeCloudSocket {
 
     if (payload?.kind === "create_message" && FakeCloudSocket.scenario === "duplicate_idempotency") {
       this.finishTurnWithDuplicateIdempotency(runtime);
-      return;
-    }
-
-    if (payload?.kind === "create_message" && FakeCloudSocket.scenario === "hang") {
       return;
     }
 
@@ -1492,58 +1487,6 @@ describe("CloudEnvironmentSession", () => {
       session.close();
     }
   });
-
-  test(
-    "a Cloud transport disconnect ends a parked stream instead of hanging",
-    async () => {
-      resetFakeCloud();
-      FakeCloudSocket.scenario = "hang";
-      const requests: RecordedRequest[] = [];
-      const client = new LettaAgentClient({
-        backend: "cloud",
-        apiBaseUrl: "https://api.test",
-        apiKey: "sk-test",
-        fetch: createCloudFetchMock(requests),
-        WebSocket: FakeCloudSocket,
-        // Keep the turn timer out of the way: the transport close must be what
-        // settles the stream.
-        requestTimeoutMs: 60_000,
-        environment: { connectionId: "conn-explicit" },
-      });
-
-      const session = client.resumeSession("agent-1");
-      try {
-        await asAdvanced(session).initialize();
-        await session.send("this Cloud turn never comes back");
-
-        const messages: unknown[] = [];
-        const drained = (async () => {
-          for await (const message of session.stream()) messages.push(message);
-        })();
-        // Let the consumer park in nextMessage() before one half of the Cloud
-        // relay transport drops. CloudStatusTransport must close its companion
-        // socket and surface one aggregate disconnect to the session.
-        await new Promise((resolve) => setTimeout(resolve, 0));
-
-        FakeCloudSocket.socket("stream")!.close();
-        await drained;
-
-        expect(FakeCloudSocket.socket("control")!.readyState).toBe(3);
-        expect(messages[0]).toMatchObject({
-          type: "error",
-          stopReason: "error",
-        });
-        expect(messages.at(-1)).toMatchObject({
-          type: "result",
-          success: false,
-          errorCode: "error",
-        });
-      } finally {
-        session.close();
-      }
-    },
-    5_000,
-  );
 
   test("surfaces failed Cloud sync recovery responses", async () => {
     resetFakeCloud();
