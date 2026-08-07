@@ -255,7 +255,8 @@ class FakeCloudSocket {
     | "approval"
     | "terminal_error"
     | "stale_idle_then_error"
-    | "duplicate_idempotency" = "normal";
+    | "duplicate_idempotency"
+    | "hang" = "normal";
   static syncSucceeds = true;
   static deviceStatusOnSync = false;
   readyState = 0;
@@ -274,7 +275,10 @@ class FakeCloudSocket {
   }
 
   static socket(channel: "control" | "stream"): FakeCloudSocket | undefined {
-    return FakeCloudSocket.instances.find((socket) => socket.channel === channel);
+    const matching = FakeCloudSocket.instances
+      .filter((socket) => socket.channel === channel)
+      .reverse();
+    return matching.find((socket) => socket.readyState !== 3) ?? matching[0];
   }
 
   static allSent(): Array<Record<string, unknown>> {
@@ -424,6 +428,10 @@ class FakeCloudSocket {
     if (command.type !== "input") return;
     const runtime = command.runtime;
     const payload = command.payload as Record<string, unknown> | undefined;
+
+    if (payload?.kind === "create_message" && FakeCloudSocket.scenario === "hang") {
+      return;
+    }
 
     if (payload?.kind === "create_message" && FakeCloudSocket.scenario === "approval") {
       this.serverMessageTo("control", {
@@ -1427,6 +1435,107 @@ describe("CloudEnvironmentSession", () => {
     expect(streamSocket.sent).toContainEqual({ type: "ack", seq: 102 });
 
     session.close();
+  });
+
+  test("recovers an idle Cloud status transport before sending one input", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+    });
+
+    const session = client.resumeSession("agent-1");
+    try {
+      await asAdvanced(session).initialize();
+      expect(FakeCloudSocket.instances).toHaveLength(2);
+
+      // The runtime is live, but no input has been tracked or sent. A Cloud
+      // rollout closes one status socket and the paired transport follows.
+      FakeCloudSocket.socket("stream")!.close();
+      await Promise.resolve();
+
+      const result = await asAdvanced(session).sendAndWaitForResult("hello once");
+      expect(result).toMatchObject({
+        success: true,
+        result: "hello from cloud",
+      });
+
+      expect(FakeCloudSocket.instances).toHaveLength(4);
+      expect(
+        FakeCloudSocket.allSent().filter((command) => command.type === "runtime_start"),
+      ).toHaveLength(2);
+      const inputs = FakeCloudSocket.allSent().filter((command) => {
+        const payload = command.payload as { kind?: string } | undefined;
+        return command.type === "input" && payload?.kind === "create_message";
+      });
+      expect(inputs).toHaveLength(1);
+      expect(inputs[0]).toMatchObject({
+        payload: {
+          messages: [expect.objectContaining({ content: "hello once" })],
+        },
+      });
+      expect(
+        requests.filter((request) =>
+          request.method === "POST" &&
+          new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes"
+        ),
+      ).toHaveLength(1);
+    } finally {
+      session.close();
+    }
+  });
+
+  test("keeps a Cloud transport drop terminal after input may have dispatched", async () => {
+    resetFakeCloud();
+    FakeCloudSocket.scenario = "hang";
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("agent-1");
+    try {
+      await asAdvanced(session).initialize();
+      await session.send("possibly dispatched");
+      const messages: unknown[] = [];
+      const drained = (async () => {
+        for await (const message of session.stream()) messages.push(message);
+      })();
+      await Promise.resolve();
+
+      FakeCloudSocket.socket("stream")!.close();
+      await drained;
+
+      expect(messages[0]).toMatchObject({
+        type: "error",
+        stopReason: "error",
+      });
+      expect(messages.at(-1)).toMatchObject({
+        type: "result",
+        success: false,
+        errorCode: "error",
+      });
+      await expect(session.send("do not replay")).rejects.toThrow("Session is closed");
+      const inputs = FakeCloudSocket.allSent().filter((command) => {
+        const payload = command.payload as { kind?: string } | undefined;
+        return command.type === "input" && payload?.kind === "create_message";
+      });
+      expect(inputs).toHaveLength(1);
+    } finally {
+      FakeCloudSocket.scenario = "normal";
+      session.close();
+    }
   });
 
   test("attaches to an explicit environment without creating a sandbox", async () => {
