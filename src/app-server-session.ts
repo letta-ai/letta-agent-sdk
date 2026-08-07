@@ -13,6 +13,7 @@ import type {
 } from "@letta-ai/letta-code/app-server-protocol";
 import { createAgentBody } from "./agent-creation.js";
 import { normalizeAppServerModels } from "./app-server-models.js";
+import { resolveClientToolset } from "./client-toolset.js";
 import {
   buildCanUseToolContext,
   isHeadlessAutoAllowTool,
@@ -636,11 +637,14 @@ export class AppServerSession extends RemoteClientSessionCore {
 
       const tools = agentToolNames(response.agent);
       const skillSources = options.skillSources;
-      const clientToolset = "toolset" in options ? options.toolset : undefined;
       const mcpToolNames = this.mcpBridge?.tools.map((tool) => tool.name) ?? [];
       const allowedTools = expandMcpToolWildcards(
         options.allowedTools,
         mcpToolNames,
+      );
+      const clientToolset = resolveClientToolset(
+        "toolset" in options ? options.toolset : undefined,
+        allowedTools,
       );
       const availableTools =
         tools === undefined && mcpToolNames.length === 0

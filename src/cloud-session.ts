@@ -13,6 +13,7 @@ import {
   externalToolGroups,
   registerAppServerControlRequestHandler,
 } from "./app-server-session.js";
+import { resolveClientToolset } from "./client-toolset.js";
 import { createCloudStatusTransportConstructor } from "./cloud-status-transport.js";
 import {
   connectMcpServers,
@@ -413,11 +414,14 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
 
       const tools = agentToolNames(response.agent);
       const skillSources = options.skillSources;
-      const clientToolset = "toolset" in options ? options.toolset : undefined;
       const mcpToolNames = this.mcpBridge?.tools.map((tool) => tool.name) ?? [];
       const allowedTools = expandMcpToolWildcards(
         options.allowedTools,
         mcpToolNames,
+      );
+      const clientToolset = resolveClientToolset(
+        "toolset" in options ? options.toolset : undefined,
+        allowedTools,
       );
       const availableTools =
         tools === undefined && mcpToolNames.length === 0

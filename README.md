@@ -156,7 +156,9 @@ Local execution (embedded Letta Code harness / app server) requires Node.js 22.1
 
 Use `toolset` to select a request-scoped harness preset and add bundled client
 tools. `allowedTools` remains the final visibility boundary across bundled and
-custom tools.
+custom tools, and a bundled client tool named there is also loaded, so a
+session that just needs a few tools can pass `allowedTools` on its own. Pass
+`toolset` when the base itself matters — it takes precedence.
 
 Both are scoped to locally executed client tools. Server-side tools (such as
 `web_search`) are attached to the agent itself via `baseTools` at creation and

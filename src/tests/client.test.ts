@@ -1056,6 +1056,96 @@ describe("LettaAgentClient", () => {
     }
   });
 
+  test("allowedTools loads the bundled client tools it names", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123", {
+      allowedTools: ["Read", "LS", "Glob", "Grep", "mcp__files__read", "MyCustomTool"],
+    });
+    try {
+      await asAdvanced(session).initialize();
+      await asAdvanced(session).sendAndWaitForResult("hello");
+
+      const inputCommand = fakeControlSocket().sent.find(
+        (command): command is Record<string, unknown> =>
+          typeof command === "object" && command !== null && "type" in command && command.type === "input",
+      );
+      const payload = inputCommand?.payload as Record<string, unknown> | undefined;
+      // The base stays the harness preference; only the named bundled tools
+      // are added. MCP and custom tool names are never forwarded — the
+      // harness fails the turn on an unrecognized include.
+      expect(payload?.client_toolset).toEqual({ include: ["Read", "LS", "Glob", "Grep"] });
+      expect(payload?.client_tool_allowlist).toEqual([
+        "Read",
+        "LS",
+        "Glob",
+        "Grep",
+        "mcp__files__read",
+        "MyCustomTool",
+      ]);
+    } finally {
+      session.close();
+    }
+  });
+
+  test("an explicit toolset wins over allowedTools", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123", {
+      toolset: { base: "none", include: ["Read"] },
+      allowedTools: ["Read", "Bash"],
+    });
+    try {
+      await asAdvanced(session).initialize();
+      await asAdvanced(session).sendAndWaitForResult("hello");
+
+      const inputCommand = fakeControlSocket().sent.find(
+        (command): command is Record<string, unknown> =>
+          typeof command === "object" && command !== null && "type" in command && command.type === "input",
+      );
+      const payload = inputCommand?.payload as Record<string, unknown> | undefined;
+      expect(payload?.client_toolset).toEqual({ base: "none", include: ["Read"] });
+    } finally {
+      session.close();
+    }
+  });
+
+  test("an allowlist of only non-bundled tools sends no toolset", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123", {
+      allowedTools: ["mcp__files__read"],
+    });
+    try {
+      await asAdvanced(session).initialize();
+      await asAdvanced(session).sendAndWaitForResult("hello");
+
+      const inputCommand = fakeControlSocket().sent.find(
+        (command): command is Record<string, unknown> =>
+          typeof command === "object" && command !== null && "type" in command && command.type === "input",
+      );
+      const payload = inputCommand?.payload as Record<string, unknown> | undefined;
+      expect(payload).not.toHaveProperty("client_toolset");
+    } finally {
+      session.close();
+    }
+  });
+
   test("websocket protocol sessions respond to can_use_tool control requests through the shared approval bridge", async () => {
     FakeAppServerSocket.instances = [];
     const approvals: Array<{ toolName: string; input: Record<string, unknown> }> = [];
