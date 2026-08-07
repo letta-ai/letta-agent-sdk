@@ -15,8 +15,10 @@
 
 import { LettaAgentClient } from '../../src/index.js';
 import type {
+  CanUseToolCallback,
   LettaCodeClientSessionOptions,
   LettaCodeCloudSandboxOptions,
+  PermissionMode,
 } from '../../src/index.js';
 
 const DEFAULT_MODEL = process.env.LETTA_WORKFLOW_MODEL ?? 'haiku';
@@ -43,6 +45,10 @@ export interface AgentOptions {
   /** Per-worker managed sandbox (cloud backend only). */
   sandbox?: LettaCodeCloudSandboxOptions;
   cwd?: string;
+  /** Defaults to 'unrestricted'. Use 'strict' to route every call through canUseTool. */
+  permissionMode?: PermissionMode;
+  /** Approval callback, required for a stage that runs under 'strict'. */
+  canUseTool?: CanUseToolCallback;
 }
 
 export const stats = { agents: 0, failures: 0, costUsd: 0 };
@@ -148,7 +154,8 @@ export async function agent<T = string>(
       // instead of the harness default plus an allowlist on top of it.
       toolset: { base: 'none', include: tools },
       allowedTools: tools,
-      permissionMode: 'unrestricted',
+      permissionMode: opts.permissionMode ?? 'unrestricted',
+      canUseTool: opts.canUseTool,
       cwd: opts.cwd,
       sandbox: opts.sandbox,
     };

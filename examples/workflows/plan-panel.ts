@@ -21,6 +21,7 @@
  */
 
 import { agent, parallel, phase, log, printSummary, setWorkflowClient, sandboxRepo } from './runtime.js';
+import type { AgentOptions } from './runtime.js';
 import { LettaAgentClient } from '../../src/index.js';
 
 const task = process.argv[2];
@@ -31,6 +32,24 @@ if (!task) {
 
 const READ_TOOLS = ['Read', 'Grep', 'Glob', 'LS'];
 
+// A planner must not modify the repository it is planning against. There is no
+// read-only permission mode, so say it with the two options that do express it:
+// 'strict' routes every call through canUseTool, which allows reads only. The
+// allowlist above still narrows what a drafter is offered; this is what stops
+// it, whatever it ends up holding.
+const readOnly = {
+  permissionMode: 'strict' as const,
+  // Allow without updatedInput: supplying one *replaces* the tool's arguments,
+  // so returning {} silently strips every call's parameters.
+  canUseTool: (toolName: string) =>
+    READ_TOOLS.includes(toolName)
+      ? { behavior: 'allow' as const }
+      : {
+          behavior: 'deny' as const,
+          message: `${toolName} is not available: a planner may read the repository but never change it.`,
+        },
+};
+
 // On cloud, drafters read the repository from a managed sandbox clone;
 // locally they read the working directory directly.
 const repoArg = process.env.PANEL_REPO;
@@ -38,15 +57,18 @@ const onCloud = Boolean(process.env.LETTA_API_KEY);
 if (onCloud) {
   setWorkflowClient(new LettaAgentClient({ backend: 'cloud', apiKey: process.env.LETTA_API_KEY }));
 }
-const context = onCloud
-  ? repoArg && repoArg.includes('/')
-    ? { ...sandboxRepo(repoArg), allowedTools: READ_TOOLS }
-    : {}
-  : { allowedTools: READ_TOOLS, cwd: process.cwd() };
+const hasRepository = onCloud ? Boolean(repoArg?.includes('/')) : true;
+const context: Partial<AgentOptions> = !hasRepository
+  ? {}
+  : {
+      allowedTools: READ_TOOLS,
+      ...readOnly,
+      ...(onCloud ? sandboxRepo(repoArg!) : { cwd: process.cwd() }),
+    };
 
 // Without repository access, say so — otherwise drafters "explore" an empty
 // sandbox and pad the plan with invented file paths.
-const grounding = context.allowedTools
+const grounding = hasRepository
   ? 'Explore the repository first and ground the plan in the files you actually find.'
   : 'You have no repository access. Plan from the description alone and state your assumptions instead of inventing file paths.';
 

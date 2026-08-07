@@ -27,6 +27,7 @@ Gotchas the runtime handles for you:
 - Managed sandboxes clone into `/root/workspace/<repo>`, and a worker left in `/root` has the agent state tree below it, so the harness's cross-agent memory guard denies every recursive path tool. `sandboxRepo()` returns the sandbox and the `cwd` that avoids this.
 - A cloud worker with no sandbox repository starts in an empty home directory. Tell it so; otherwise it "explores" nothing and invents file paths.
 - Turns fail transiently, so `agent()` retries a failed turn once. Anything still failing resolves to `null` and the fan-out continues without it.
+- A stage that must not modify anything says so with `permissionMode: 'strict'` plus a `canUseTool` that allows reads only — there is no read-only mode, and a tool allowlist decides what a worker is offered, not what it may do. When allowing a call, return `{ behavior: 'allow' }` with no `updatedInput`: supplying one *replaces* the tool's arguments, so `{}` strips every call's parameters and the worker flails against tools that suddenly take no input.
 - Don't route a whole file back through a worker's return value. It truncates silently, and inlining a large file into a follow-up prompt fails the turn outright. `migrate-files` returns a `git diff` instead: compact enough to review, and a truncated patch fails to apply rather than corrupting a file.
 
 ## Examples
