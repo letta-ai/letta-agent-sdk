@@ -50,6 +50,23 @@ describe("validation", () => {
     ).toThrow("Invalid toolset.include");
   });
 
+  test("validates stateless session options", () => {
+    expect(() =>
+      validateCreateSessionOptions({ stateless: "yes" } as never),
+    ).toThrow("Invalid stateless");
+
+    for (const options of [
+      { stateless: true, model: "openai/gpt-5.2" },
+      { stateless: true, reasoningEffort: "high" },
+      { stateless: true, dreaming: { trigger: "step-count" } },
+      { stateless: true, resources: [] },
+    ]) {
+      expect(() => validateCreateSessionOptions(options as never)).toThrow(
+        "changes persisted agent configuration",
+      );
+    }
+  });
+
   test("rejects invalid session reasoning effort", () => {
     expect(() =>
       validateCreateSessionOptions({

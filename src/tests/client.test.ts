@@ -781,7 +781,10 @@ describe("LettaAgentClient", () => {
       appServer: { url: "ws://127.0.0.1:4500/ws", WebSocket: FakeAppServerSocket },
     });
 
-    const session = client.createSession("agent-123", { cwd: "/tmp/project" });
+    const session = client.createSession("agent-123", {
+      cwd: "/tmp/project",
+      stateless: true,
+    });
     try {
       const init = await asAdvanced(session).initialize();
       expect(init.agentId).toBe("agent-123");
@@ -792,7 +795,11 @@ describe("LettaAgentClient", () => {
         agent_id: "agent-123",
         create_conversation: { body: {} },
         cwd: "/tmp/project",
+        stateless: true,
       });
+      await expect(session.updateModel("openai/gpt-5.2")).rejects.toThrow(
+        "unavailable in a stateless session",
+      );
     } finally {
       session.close();
     }
