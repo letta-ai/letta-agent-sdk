@@ -357,12 +357,44 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     );
     this.connectionId = connection.connectionId;
 
+    const options = this.currentOptions();
+    this.mcpBridge = await connectMcpServers(
+      "mcpServers" in options ? options.mcpServers : undefined,
+      {
+        cwd: options.cwd,
+        reservedToolNames: this.externalTools.keys(),
+      },
+    );
+    for (const tool of this.mcpBridge.tools) {
+      this.externalTools.set(tool.name, tool);
+    }
+
+    try {
+      return await this.openCloudTransport(
+        resolved.runtime,
+        connection.connectionId,
+      );
+    } catch (error) {
+      await this.closeMcpBridge();
+      await this.cleanupManagedSandbox();
+      await this.cleanupSessionRepositories(
+        resolved.runtime.agent_id,
+        resolved.runtime.conversation_id,
+      );
+      throw error;
+    }
+  }
+
+  private async openCloudTransport(
+    runtime: RuntimeScope,
+    connectionId: string,
+  ): Promise<RuntimeSessionInit> {
     const apiKey = getCloudApiKey(this.cloudOptions);
     const url = buildCloudStatusWebSocketUrl({
       apiBaseUrl: this.cloudOptions.apiBaseUrl,
-      connectionId: connection.connectionId,
-      agentId: resolved.runtime.agent_id,
-      conversationId: resolved.runtime.conversation_id,
+      connectionId,
+      agentId: runtime.agent_id,
+      conversationId: runtime.conversation_id,
       apiKey,
       authMode: this.cloudOptions.webSocketAuth ?? "header",
     });
@@ -376,40 +408,21 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
           : {}),
         pingIntervalMs:
           this.cloudOptions.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS,
-        runtime: resolved.runtime,
+        runtime,
       }),
       requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
     }));
     const options = this.currentOptions();
-    this.mcpBridge = await connectMcpServers(
-      "mcpServers" in options ? options.mcpServers : undefined,
-      {
-        cwd: options.cwd,
-        reservedToolNames: this.externalTools.keys(),
-      },
-    );
-    for (const tool of this.mcpBridge.tools) {
-      this.externalTools.set(tool.name, tool);
-    }
-    this.removeControlRequestHandler = registerAppServerControlRequestHandler({
-      client,
-      getRuntime: () => this.runtime,
-      getOptions: () => this.currentOptions(),
-    });
-    if (this.externalTools.size > 0) {
-      this.removeExternalToolHandler = client.onExternalToolCall(
-        createExternalToolCallHandler(this.externalTools),
-      );
-    }
+    this.installTransportHandlers(client);
 
     try {
       await client.connect();
-      const response = await this.startCloudRuntime(client, resolved.runtime);
+      const response = await this.startCloudRuntime(client, runtime);
       if (!response.success || !response.runtime) {
         throw new Error(response.error ?? "Failed to start Cloud status runtime");
       }
 
-      this.watchTransportDisconnect(client);
+      this.watchTransportDisconnect(client, { recoverWhenIdle: true });
 
       const tools = agentToolNames(response.agent);
       const skillSources = options.skillSources;
@@ -439,19 +452,62 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
         ...(skillSources !== undefined ? { skillSources: [...skillSources] } : {}),
       };
     } catch (error) {
-      this.removeExternalToolHandler?.();
-      this.removeExternalToolHandler = null;
-      this.removeControlRequestHandler?.();
-      this.removeControlRequestHandler = null;
-      await this.closeMcpBridge();
+      this.cleanupTransportHandlers();
       client.close();
-      await this.cleanupManagedSandbox();
-      await this.cleanupSessionRepositories(
-        resolved.runtime.agent_id,
-        resolved.runtime.conversation_id,
-      );
       throw error;
     }
+  }
+
+  private installTransportHandlers(client: AppServerClient): void {
+    this.cleanupTransportHandlers();
+    this.removeControlRequestHandler = registerAppServerControlRequestHandler({
+      client,
+      getRuntime: () => this.runtime,
+      getOptions: () => this.currentOptions(),
+    });
+    if (this.externalTools.size > 0) {
+      this.removeExternalToolHandler = client.onExternalToolCall(
+        createExternalToolCallHandler(this.externalTools),
+      );
+    }
+  }
+
+  private cleanupTransportHandlers(): void {
+    this.removeExternalToolHandler?.();
+    this.removeExternalToolHandler = null;
+    this.removeControlRequestHandler?.();
+    this.removeControlRequestHandler = null;
+  }
+
+  protected override async recoverIdleTransport(
+    runtime: RuntimeScope,
+  ): Promise<RuntimeSessionInit> {
+    const connection = await this.resolveRecoveryConnection(runtime);
+    this.connectionId = connection.connectionId;
+    return this.openCloudTransport(runtime, connection.connectionId);
+  }
+
+  private async resolveRecoveryConnection(
+    runtime: RuntimeScope,
+  ): Promise<ResolvedCloudConnection> {
+    const sandbox = this.managedSandbox;
+    if (sandbox) {
+      await this.refreshManagedSandbox(sandbox);
+      return this.waitForManagedSandboxConnection(sandbox);
+    }
+    const environment = this.effectiveEnvironment();
+    if (!environment) {
+      throw new Error("Cloud idle transport recovery lost its execution target");
+    }
+    return this.resolveExplicitConnection(environment);
+  }
+
+  protected override onIdleTransportDisconnect(): void {
+    this.cleanupTransportHandlers();
+  }
+
+  protected override onRecoveredTransportDiscarded(): void {
+    this.cleanupTransportHandlers();
   }
 
   private async startCloudRuntime(
@@ -501,10 +557,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   protected override onCoreClose(): void {
-    this.removeExternalToolHandler?.();
-    this.removeExternalToolHandler = null;
-    this.removeControlRequestHandler?.();
-    this.removeControlRequestHandler = null;
+    this.cleanupTransportHandlers();
     this.mcpCleanup = this.closeMcpBridge();
     void this.cleanupManagedSandbox();
     if (this.runtime?.agent_id) {

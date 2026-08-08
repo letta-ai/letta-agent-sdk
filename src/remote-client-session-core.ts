@@ -78,6 +78,9 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   private initializePromise: Promise<SDKInitMessage> | null = null;
   private removeMessageHandler: (() => void) | null = null;
   private detachTransportDisconnect: (() => void) | null = null;
+  private idleTransportDisconnected = false;
+  private transportRecoveryPromise: Promise<void> | null = null;
+  private transportDisconnectGeneration = 0;
   private readonly turns: RemoteTurnCoordinator;
   private toolNames: string[] | undefined;
   private deviceStatusListeners = new Set<(status: SessionDeviceStatus) => void>();
@@ -207,18 +210,25 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   }
 
   async send(message: SendMessage): Promise<void> {
+    if (this.closed) throw new Error("Session is closed");
     if (!this.initialized) {
       await this.initialize();
     }
+    await this.recoverIdleTransportIfNeeded();
     if (!this.controller || !this.runtime) {
       throw new Error("Session is not initialized");
     }
 
     await this.beforeTurn();
 
-    const turn = this.turns.trackSentTurn(this.runtime);
+    const controller = this.controller;
+    const runtime = this.runtime;
+    if (!controller || !runtime) {
+      throw new Error("Session transport disconnected before the turn was sent");
+    }
+    const turn = this.turns.trackSentTurn(runtime);
     try {
-      this.controller.sendTurnMessage(this.runtime, message, {
+      controller.sendTurnMessage(runtime, message, {
         clientMessageId: turn.clientMessageId,
       });
     } catch (error) {
@@ -556,6 +566,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     this.deviceStatusListeners.clear();
     this.controller?.close();
     this.controller = null;
+    this.idleTransportDisconnected = false;
     this.onCoreClose();
   }
 
@@ -625,32 +636,92 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   protected abstract initializeRuntimeController(): Promise<RuntimeSessionInit>;
 
   /**
-   * Fail the session when its transport drops unexpectedly.
-   *
-   * Without this an in-flight turn parks forever: nextMessage() only settles
-   * through the coordinator, and the socket's own pending-request rejection
-   * covers request/response commands, not streaming turns.
-   *
-   * The session is not revived — the runtime lived on the dead socket. The
-   * caller observes the error and rebuilds via resumeSession().
-   *
-   * Subclasses call this only once their runtime is live: a drop before that
-   * already surfaces as a rejected connect or runtime-start, and failing the
-   * session there would defeat initialize()'s retry path. Explicit closes do
-   * not notify, so this fires for faults only. Detaching stays here so every
-   * teardown path — clean close and failed initialize alike — covers it.
+   * Active turns fail because the input may have reached the listener. Cloud
+   * sessions may recover an idle connection before the next turn is tracked.
    */
-  protected watchTransportDisconnect(client: {
-    onDisconnect(handler: () => void): () => void;
-  }): void {
+  protected watchTransportDisconnect(
+    client: { onDisconnect(handler: () => void): () => void },
+    options: { recoverWhenIdle?: boolean } = {},
+  ): void {
     this.detachTransportDisconnect?.();
     this.detachTransportDisconnect = client.onDisconnect(() => {
       if (this.closed) return;
+      this.transportDisconnectGeneration += 1;
+      if (options.recoverWhenIdle && !this.turns.hasInFlightTurn()) {
+        this.detachTransportDisconnect?.();
+        this.detachTransportDisconnect = null;
+        this.removeMessageHandler?.();
+        this.removeMessageHandler = null;
+        this.controller?.close();
+        this.controller = null;
+        const error = new Error(`${this.label} connection closed before send`);
+        for (const cancel of [...this.deviceStatusRefreshCancels]) cancel(error);
+        this.deviceStatusRefreshCancels.clear();
+        this.onIdleTransportDisconnect();
+        this.idleTransportDisconnected = true;
+        return;
+      }
       this.turns.closeWithError(
         `The ${this.label} connection closed unexpectedly; resume the conversation to continue.`,
       );
       this.close();
     });
+  }
+
+  private async recoverIdleTransportIfNeeded(): Promise<void> {
+    if (!this.idleTransportDisconnected) return;
+    if (this.transportRecoveryPromise) {
+      await this.transportRecoveryPromise;
+      return;
+    }
+    const runtime = this.runtime;
+    if (!runtime) throw new Error("Session transport disconnected without a runtime");
+    const generation = this.transportDisconnectGeneration;
+    const recovery = this.recoverIdleTransport(runtime)
+      .then(async (init) => {
+        if (this.closed || generation !== this.transportDisconnectGeneration) {
+          init.controller.close();
+          this.onRecoveredTransportDiscarded();
+          throw new Error(`${this.label} connection closed during recovery`);
+        }
+        if (
+          init.runtime.agent_id !== runtime.agent_id ||
+          init.runtime.conversation_id !== runtime.conversation_id
+        ) {
+          init.controller.close();
+          this.onRecoveredTransportDiscarded();
+          throw new Error(`${this.label} transport recovered a different runtime`);
+        }
+        this.controller = init.controller;
+        this.runtime = init.runtime;
+        this._modelSettings = init.modelSettings ?? this._modelSettings;
+        if (typeof init.model === "string" && init.model) this._model = init.model;
+        if (init.tools !== undefined) this.toolNames = init.tools;
+        this.removeMessageHandler = this.controller.onMessage((message) => {
+          if (this.runtime) this.turns.handleProtocolMessage(message, this.runtime);
+        });
+        this.idleTransportDisconnected = false;
+        await this.afterRuntimeInitialized();
+      })
+      .finally(() => {
+        if (this.transportRecoveryPromise === recovery) this.transportRecoveryPromise = null;
+      });
+    this.transportRecoveryPromise = recovery;
+    await recovery;
+  }
+
+  protected async recoverIdleTransport(
+    _runtime: RuntimeScope,
+  ): Promise<RuntimeSessionInit> {
+    throw new Error(`${this.label} sessions do not support idle transport recovery`);
+  }
+
+  protected onIdleTransportDisconnect(): void {
+    // Optional hook for transport-specific handler cleanup before recovery.
+  }
+
+  protected onRecoveredTransportDiscarded(): void {
+    // Optional hook when a recovery finishes after the session closed or dropped again.
   }
 
   protected async afterRuntimeInitialized(): Promise<void> {
