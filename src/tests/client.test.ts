@@ -675,7 +675,9 @@ describe("LettaAgentClient", () => {
     expect(client.environment).toBeUndefined();
   });
 
-  test("does not export the removed stdio Session implementation", () => {
+  test("exports query instead of the removed prompt API", () => {
+    expect("query" in sdk).toBe(true);
+    expect("prompt" in sdk).toBe(false);
     expect("Session" in sdk).toBe(false);
   });
 
@@ -1006,6 +1008,144 @@ describe("LettaAgentClient", () => {
     } finally {
       session.close();
     }
+  });
+
+  test("query streams a new conversation on an existing agent", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const messages = [];
+    for await (const message of client.query({
+      prompt: "hello",
+      agentId: "agent-123",
+      options: { cwd: "/tmp/project" },
+    })) {
+      messages.push(message);
+    }
+
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "result",
+        success: true,
+        result: "hello from app-server",
+      }),
+    );
+    expect(fakeControlSocket().sent[0]).toMatchObject({
+      type: "runtime_start",
+      agent_id: "agent-123",
+      create_conversation: { body: {} },
+      cwd: "/tmp/project",
+    });
+    expect(FakeAppServerSocket.instances.every((socket) => socket.readyState === 3)).toBe(
+      true,
+    );
+  });
+
+  test("query accepts an async prompt stream for multiple turns", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+    async function* promptStream() {
+      yield "first";
+      yield "second";
+    }
+
+    const results = [];
+    for await (const message of client.query({
+      prompt: promptStream(),
+      agentId: "agent-123",
+    })) {
+      if (message.type === "result") results.push(message);
+    }
+
+    expect(results).toHaveLength(2);
+    const inputs = fakeControlSocket().sent.filter(
+      (command) =>
+        typeof command === "object" &&
+        command !== null &&
+        (command as { type?: string }).type === "input",
+    );
+    expect(inputs).toHaveLength(2);
+  });
+
+  test("query creates a hidden stateless agent when agentId is omitted", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const messages = [];
+    for await (const message of client.query({
+      prompt: "hello",
+      options: {
+        model: "anthropic/claude-sonnet-4",
+        cwd: "/tmp/project",
+      },
+    })) {
+      messages.push(message);
+    }
+
+    const runtimeStarts = FakeAppServerSocket.instances.flatMap((socket) =>
+      socket.sent.filter(
+        (command): command is Record<string, unknown> =>
+          typeof command === "object" &&
+          command !== null &&
+          (command as { type?: string }).type === "runtime_start",
+      ),
+    );
+    expect(runtimeStarts).toHaveLength(2);
+    expect(runtimeStarts[0]).toMatchObject({
+      create_agent: {
+        memfs: false,
+        pin_global: false,
+        body: {
+          hidden: true,
+          model: "anthropic/claude-sonnet-4",
+        },
+      },
+    });
+    expect(runtimeStarts[1]).toMatchObject({
+      agent_id: "agent-created",
+      create_conversation: { body: {} },
+      cwd: "/tmp/project",
+      stateless: true,
+    });
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "result",
+        success: true,
+        result: "hello from app-server",
+      }),
+    );
+  });
+
+  test("query rejects stateful anonymous sessions before creating an agent", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const run = async () => {
+      for await (const _message of client.query({
+        prompt: "hello",
+        options: { stateless: false },
+      })) {
+        // Query fails before yielding.
+      }
+    };
+    await expect(run()).rejects.toThrow("stateless cannot be false");
+    expect(FakeAppServerSocket.instances).toHaveLength(0);
   });
 
   test("excludes interactive tools by default without pinning an allowlist", async () => {

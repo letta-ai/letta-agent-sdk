@@ -35,9 +35,9 @@ import type {
   CreateSessionOptions,
   CreateAgentOptions,
   LettaCodeSession,
+  Query,
+  QueryParams,
   SDKInitMessage,
-  SDKResultMessage,
-  SendMessage,
 } from "./types.js";
 import { validateCreateSessionOptions, validateCreateAgentOptions } from "./validation.js";
 
@@ -57,6 +57,10 @@ export type {
   LettaCodeClientOptions,
   LettaCodeClientSessionOptions,
   LettaCodeSession,
+  Query,
+  QueryParams,
+  QueryPrompt,
+  LettaAgentClientQueryParams,
   LettaCodeSocketLike,
   LettaCodeSocketConstructor,
   LettaCodeReactNativeSocketConstructor,
@@ -271,39 +275,29 @@ export function resumeSession(
 }
 
 /**
- * One-shot convenience for scripts, smoke tests, and evals.
+ * Run one or more prompts and stream SDK messages.
  *
- * Creates a short-lived conversation, waits for the final result, and closes
- * the session. Applications that need streaming, approvals, cancellation,
- * queueing, or continued interaction should use createSession() with send()
- * and stream() instead.
+ * The call shape matches Claude Agent SDK's query({ prompt, options }) and
+ * adds an optional agentId. Passing agentId creates a new conversation on that
+ * agent. Omitting it creates a hidden stateless agent under the hood.
  *
  * @example
  * ```typescript
- * const result = await prompt('What is the capital of France?', agentId);  // specific agent
+ * for await (const message of query({
+ *   prompt: 'What is the capital of France?',
+ *   agentId,
+ * })) {
+ *   if (message.type === 'result') console.log(message.result);
+ * }
  * ```
  */
-type OneShotSession = LettaCodeSession & {
-  sendAndWaitForResult(message: SendMessage): Promise<SDKResultMessage>;
-};
+export function query(params: QueryParams): Query {
+  return new LettaAgentClient().query(params);
+}
 
 type InitializableSession = LettaCodeSession & {
   initialize(): Promise<SDKInitMessage>;
 };
-
-export async function prompt(
-  message: SendMessage,
-  agentId: string,
-  options: CreateSessionOptions = {},
-): Promise<SDKResultMessage> {
-  const session = createSession(agentId, options);
-
-  try {
-    return await (session as OneShotSession).sendAndWaitForResult(message);
-  } finally {
-    session.close();
-  }
-}
 
 // ═══════════════════════════════════════════════════════════════
 // SESSIONLESS APIs

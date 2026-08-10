@@ -8,7 +8,7 @@
  * Run with: bun examples/v2-examples.ts [example]
  */
 
-import { createAgent, createSession, resumeSession, prompt } from '../src/index.js';
+import { createAgent, createSession, resumeSession, query } from '../src/index.js';
 
 async function main() {
   const example = process.argv[2] || 'basic';
@@ -135,15 +135,17 @@ async function multiTurn() {
 async function oneShot() {
   console.log('=== One-Shot Prompt ===\n');
 
-  // One-shot creates new agent
-  const agentId = await createAgent();
-  const result = await prompt('What is the capital of France? One word.', agentId);
-
-  if (result.success) {
-    console.log(`Answer: ${result.result}`);
-    console.log(`Duration: ${result.durationMs}ms`);
-  } else {
-    console.log(`Error: ${result.error}`);
+  // Omitting agentId creates a hidden stateless agent.
+  for await (const message of query({
+    prompt: 'What is the capital of France? One word.',
+  })) {
+    if (message.type !== 'result') continue;
+    if (message.success) {
+      console.log(`Answer: ${message.result}`);
+      console.log(`Duration: ${message.durationMs}ms`);
+    } else {
+      console.log(`Error: ${message.error}`);
+    }
   }
   console.log();
 }
@@ -209,8 +211,18 @@ async function testOptions() {
   // Test basic session
   console.log('Testing basic session...');
   const agentId = await createAgent();
-  const modelResult = await prompt('Say "model test ok"', agentId);
-  console.log(`  basic: ${modelResult.success ? 'PASS' : 'FAIL'} - ${modelResult.result?.slice(0, 50)}`);
+  let modelResult = '';
+  let modelSucceeded = false;
+  for await (const message of query({
+    prompt: 'Say "model test ok"',
+    agentId,
+  })) {
+    if (message.type === 'result') {
+      modelSucceeded = message.success;
+      modelResult = message.result ?? '';
+    }
+  }
+  console.log(`  basic: ${modelSucceeded ? 'PASS' : 'FAIL'} - ${modelResult.slice(0, 50)}`);
 
   // Test systemPrompt preset via createSession (only presets allowed)
   console.log('Testing systemPrompt preset...');

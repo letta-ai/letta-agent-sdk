@@ -736,6 +736,25 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
   filesystemConfinement?: "memory";
 }
 
+/** A single prompt or a stream of prompts for a multi-turn query. */
+export type QueryPrompt = SendMessage | AsyncIterable<SendMessage>;
+
+/** Claude Agent SDK-shaped input for query(). */
+export interface QueryParams<
+  TOptions extends CreateSessionOptions = CreateSessionOptions,
+> {
+  prompt: QueryPrompt;
+  /** Existing Letta agent to use. Omit to create a hidden stateless agent. */
+  agentId?: string;
+  options?: TOptions;
+}
+
+/** Query input accepted by a configured LettaAgentClient. */
+export type LettaAgentClientQueryParams = QueryParams<LettaCodeClientSessionOptions>;
+
+/** Stream returned by query(). */
+export interface Query extends AsyncGenerator<SDKMessage, void, unknown> {}
+
 export interface LettaCodeSession extends AsyncDisposable {
   send(message: SendMessage): Promise<void>;
   stream(): AsyncGenerator<SDKMessage>;

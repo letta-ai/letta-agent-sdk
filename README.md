@@ -54,6 +54,32 @@ An agent is the persistent entity with memory. A conversation is a thread on tha
 - `resumeSession(conversationId)` resumes a saved conversation.
 - `resumeSession(agentId)` resumes the agent's default conversation.
 
+## Query
+
+`query()` provides the same `query({ prompt, options })` call shape as the
+Claude Agent SDK and streams `SDKMessage` values. Letta additionally accepts an
+optional `agentId`:
+
+```ts
+for await (const message of client.query({
+  prompt: "Review the current changes.",
+  agentId,
+  options: {
+    allowedTools: ["Read", "Glob", "Grep"],
+  },
+})) {
+  if (message.type === "assistant") console.log(message.content);
+  if (message.type === "result") console.log(message.success, message.result);
+}
+```
+
+When `agentId` is supplied, the query creates a new conversation on that
+persistent agent. When it is omitted, the SDK creates a hidden non-MemFS agent
+and forces the conversation into stateless mode. The hidden agent and
+conversation remain server-side resources, but the query does not load or
+change agent memory. A prompt can also be an `AsyncIterable<SendMessage>` for
+multi-turn input on the same conversation.
+
 Pass `stateless: true` when a session should use an existing agent without
 loading or changing its MemFS:
 
