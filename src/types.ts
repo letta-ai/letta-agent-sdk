@@ -752,8 +752,13 @@ export interface QueryParams<
 /** Query input accepted by a configured LettaAgentClient. */
 export type LettaAgentClientQueryParams = QueryParams<LettaCodeClientSessionOptions>;
 
-/** Stream returned by query(). */
-export interface Query extends AsyncGenerator<SDKMessage, void, unknown> {}
+/** Stream returned by query(), with controls for long-running execution. */
+export interface Query extends AsyncGenerator<SDKMessage, void, unknown> {
+  /** Interrupt the active turn without closing the query session. */
+  interrupt(): Promise<void>;
+  /** Close the query and release its underlying session. */
+  close(): void;
+}
 
 export interface LettaCodeSession extends AsyncDisposable {
   send(message: SendMessage): Promise<void>;

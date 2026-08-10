@@ -1045,34 +1045,93 @@ describe("LettaAgentClient", () => {
     );
   });
 
-  test("query accepts an async prompt stream for multiple turns", async () => {
+  test("query exposes interrupt and close controls", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({
       backend: "remote",
       url: "http://127.0.0.1:4500",
       WebSocket: FakeAppServerSocket,
     });
+    const runningQuery = client.query({
+      prompt: "hello",
+      agentId: "agent-123",
+    });
+
+    const first = await runningQuery.next();
+    expect(first.value).toMatchObject({ type: "assistant" });
+    await runningQuery.interrupt();
+    expect(fakeControlSocket().sent.at(-1)).toMatchObject({
+      type: "abort_message",
+      runtime: { agent_id: "agent-123", conversation_id: "conv-created" },
+    });
+
+    runningQuery.close();
+    expect(FakeAppServerSocket.instances.every((socket) => socket.readyState === 3)).toBe(
+      true,
+    );
+  });
+
+  test("query rejects model selection on a persistent agent", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const run = async () => {
+      for await (const _message of client.query({
+        prompt: "hello",
+        agentId: "agent-123",
+        options: { model: "anthropic/claude-sonnet-4" },
+      })) {
+        // Query fails before creating a session.
+      }
+    };
+    await expect(run()).rejects.toThrow("model selection requires omitting agentId");
+    expect(FakeAppServerSocket.instances).toHaveLength(0);
+  });
+
+  test("query accepts mid-turn input from an async prompt stream", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+    let injectSecondPrompt!: () => void;
+    const secondPromptReady = new Promise<void>((resolve) => {
+      injectSecondPrompt = resolve;
+    });
     async function* promptStream() {
       yield "first";
+      await secondPromptReady;
       yield "second";
     }
 
     const results = [];
+    let verifiedMidTurnInjection = false;
     for await (const message of client.query({
       prompt: promptStream(),
       agentId: "agent-123",
     })) {
+      if (message.type === "assistant" && !verifiedMidTurnInjection) {
+        injectSecondPrompt();
+        await Bun.sleep(0);
+        const inputs = fakeControlSocket().sent.filter(
+          (command) =>
+            typeof command === "object" &&
+            command !== null &&
+            (command as { type?: string }).type === "input",
+        );
+        expect(inputs).toHaveLength(2);
+        verifiedMidTurnInjection = true;
+      }
       if (message.type === "result") results.push(message);
     }
 
+    expect(verifiedMidTurnInjection).toBe(true);
     expect(results).toHaveLength(2);
-    const inputs = fakeControlSocket().sent.filter(
-      (command) =>
-        typeof command === "object" &&
-        command !== null &&
-        (command as { type?: string }).type === "input",
-    );
-    expect(inputs).toHaveLength(2);
   });
 
   test("query creates a hidden stateless agent when agentId is omitted", async () => {

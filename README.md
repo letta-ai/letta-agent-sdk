@@ -74,11 +74,15 @@ for await (const message of client.query({
 ```
 
 When `agentId` is supplied, the query creates a new conversation on that
-persistent agent. When it is omitted, the SDK creates a hidden non-MemFS agent
-and forces the conversation into stateless mode. The hidden agent and
-conversation remain server-side resources, but the query does not load or
-change agent memory. A prompt can also be an `AsyncIterable<SendMessage>` for
-multi-turn input on the same conversation.
+persistent agent. Omit `agentId` and pass `options.model` to create a hidden
+non-MemFS agent with that model and force the conversation into stateless mode.
+The query does not load or change agent memory. Model selection is unavailable
+with `agentId` because session model updates would mutate the persistent agent.
+
+A prompt can also be an `AsyncIterable<SendMessage>`. The SDK consumes that
+iterable concurrently with the output stream, so additional messages can be
+injected or queued while the current turn is running. Long-running queries can
+be controlled directly with `await query.interrupt()` and `query.close()`.
 
 Pass `stateless: true` when a session should use an existing agent without
 loading or changing its MemFS:
