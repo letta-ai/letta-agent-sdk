@@ -664,6 +664,13 @@ export interface CreateSessionOptions {
   cwd?: string;
 
   /**
+   * Run without loading or changing the agent's MemFS. The agent and
+   * conversation remain persistent; this only changes the session's local
+   * memory, agent-skill, agent-mod, transcript, and reflection behavior.
+   */
+  stateless?: boolean;
+
+  /**
    * Restrict available skills by source.
    * Empty array disables all skills (`--no-skills`).
    */

@@ -327,6 +327,11 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   }
 
   async updateModel(update: string | UpdateModelOptions): Promise<UpdateModelResult> {
+    if (this.mode.kind === "session" && this.mode.options.stateless === true) {
+      throw new Error(
+        "updateModel() is unavailable in a stateless session because it changes persisted agent configuration.",
+      );
+    }
     if (!this.initialized) {
       await this.initialize();
     }
@@ -850,7 +855,9 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     }
 
     const dreamingSettings = resolveDreamingSettings(options.dreaming);
-    if (dreamingSettings) {
+    const isStatelessSession =
+      this.mode.kind === "session" && this.mode.options.stateless === true;
+    if (dreamingSettings && !isStatelessSession) {
       const response = await this.controller.request(
         "set_reflection_settings",
         {

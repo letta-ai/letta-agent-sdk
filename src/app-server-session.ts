@@ -727,6 +727,12 @@ export class AppServerSession extends RemoteClientSessionCore {
     const mode = mapPermissionMode(options.permissionMode);
     if (mode) command.mode = mode;
     if (options.cwd !== undefined) command.cwd = options.cwd;
+    if (
+      this.mode.kind === "session" &&
+      this.mode.options.stateless === true
+    ) {
+      command.stateless = true;
+    }
     // Keep the distinction between omitted (use harness defaults) and []
     // (disable bundled/global/agent/project skills). The app-server runtime is
     // session-scoped, so this must be sent on creation and every resume.

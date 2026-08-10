@@ -54,6 +54,21 @@ An agent is the persistent entity with memory. A conversation is a thread on tha
 - `resumeSession(conversationId)` resumes a saved conversation.
 - `resumeSession(agentId)` resumes the agent's default conversation.
 
+Pass `stateless: true` when a session should use an existing agent without
+loading or changing its MemFS:
+
+```ts
+await using session = client.createSession(agentId, { stateless: true });
+```
+
+The agent and conversation still persist. Stateless sessions preserve the
+agent's model, prompt, tools, tags, and sampling settings, but skip MemFS sync,
+agent-scoped skills and mods, memory transcript writes, and reflection for that
+session. Options that mutate persisted configuration (`model`,
+`reasoningEffort`, `dreaming`, and `resources`) are rejected, as is
+`session.updateModel()`. The option works with local, remote App Server, and
+Cloud backends.
+
 Portable sessions also expose the stateful controls needed by interactive
 clients:
 

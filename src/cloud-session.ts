@@ -529,6 +529,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     const mode = mapPermissionMode(options.permissionMode);
     if (mode) command.mode = mode;
     if (options.cwd !== undefined) command.cwd = options.cwd;
+    if (this.cloudMode.options.stateless === true) command.stateless = true;
     if (options.skillSources !== undefined) {
       command.skill_sources = [...new Set(options.skillSources)];
     }

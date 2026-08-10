@@ -2232,6 +2232,7 @@ describe("CloudEnvironmentSession", () => {
     });
 
     const session = client.resumeSession("agent-1", {
+      stateless: true,
       tools: [
         {
           name: "lookup_ticket",
@@ -2267,6 +2268,7 @@ describe("CloudEnvironmentSession", () => {
       const controlSocket = FakeCloudSocket.socket("control")!;
       const runtimeStart = controlSocket.sent.find((command) => command.type === "runtime_start")!;
       expect(runtimeStart).toMatchObject({
+        stateless: true,
         external_tools: [
           {
             tools: expect.arrayContaining([
