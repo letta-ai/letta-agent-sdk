@@ -636,7 +636,7 @@ export interface ClientToolsetConfig {
  * For creating new agents with custom memory/persona, use createAgent().
  */
 export interface CreateSessionOptions {
-  /** Model to use (e.g., "claude-sonnet-4-20250514") - updates the agent's LLM config */
+  /** Model override for this conversation (e.g., "openai/gpt-5.6-luna"). */
   model?: string;
 
   /** Reasoning effort tier to use with the selected/current model on websocket protocol sessions. */
@@ -734,6 +734,30 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
    * management calls, and remote/Cloud runtimes.
    */
   filesystemConfinement?: "memory";
+}
+
+/** A single prompt or a stream of prompts for a multi-turn query. */
+export type QueryPrompt = SendMessage | AsyncIterable<SendMessage>;
+
+/** Input accepted by query(). */
+export interface QueryParams<
+  TOptions extends CreateSessionOptions = CreateSessionOptions,
+> {
+  prompt: QueryPrompt;
+  /** Existing Letta agent to use. Omit to create a hidden stateless agent. */
+  agentId?: string;
+  options?: TOptions;
+}
+
+/** Query input accepted by a configured LettaAgentClient. */
+export type LettaAgentClientQueryParams = QueryParams<LettaCodeClientSessionOptions>;
+
+/** Stream returned by query(), with controls for long-running execution. */
+export interface Query extends AsyncGenerator<SDKMessage, void, unknown> {
+  /** Interrupt the active turn without closing the query session. */
+  interrupt(): Promise<void>;
+  /** Close the query and release its underlying session. */
+  close(): void;
 }
 
 export interface LettaCodeSession extends AsyncDisposable {

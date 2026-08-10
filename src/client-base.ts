@@ -31,9 +31,11 @@ import type {
   ConversationsClient,
   ModelsClient,
 } from "./management-types.js";
+import { createQuery } from "./query.js";
 import type {
   CreateAgentOptions,
   CreateSessionOptions,
+  LettaAgentClientQueryParams,
   LettaCodeBackend,
   LettaCodeClientOptions,
   LettaCodeClientSessionOptions,
@@ -42,8 +44,7 @@ import type {
   LettaCodeLocalClientOptions,
   LettaCodeCloudClientOptions,
   LettaCodeSession,
-  SDKResultMessage,
-  SendMessage,
+  Query,
 } from "./types.js";
 import {
   validateCreateAgentOptions,
@@ -92,10 +93,6 @@ function hasCreateAgentEnvironment(options: CreateAgentOptions): boolean {
 function looksLikeConversationId(id: string): boolean {
   return id.startsWith("conv-") || id.startsWith("local-conv-");
 }
-
-type OneShotSession = LettaCodeSession & {
-  sendAndWaitForResult(message: SendMessage): Promise<SDKResultMessage>;
-};
 
 /**
  * Top-level Letta Agent SDK client.
@@ -337,21 +334,13 @@ export class LettaAgentClientBase {
   }
 
   /**
-   * One-shot convenience for scripts, smoke tests, and evals.
-   * Applications should use a session when they need interactive turn state.
+   * Stream one or more prompts through a fresh conversation.
+   *
+   * Passing agentId starts a new conversation on that agent. Omitting it
+   * creates a hidden stateless agent for this query.
    */
-  async prompt(
-    message: SendMessage,
-    agentId: string,
-    options: LettaCodeClientSessionOptions = {},
-  ): Promise<SDKResultMessage> {
-    const session = this.createSession(agentId, options);
-
-    try {
-      return await (session as OneShotSession).sendAndWaitForResult(message);
-    } finally {
-      session.close();
-    }
+  query(params: LettaAgentClientQueryParams): Query {
+    return createQuery(this, params);
   }
 
   private assertSessionBackend(

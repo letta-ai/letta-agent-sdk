@@ -54,6 +54,24 @@ An agent is the persistent entity with memory. A conversation is a thread on tha
 - `resumeSession(conversationId)` resumes a saved conversation.
 - `resumeSession(agentId)` resumes the agent's default conversation.
 
+## Query
+
+`query()` runs a prompt and streams `SDKMessage` values:
+
+```ts
+const run = client.query({
+  prompt: "Review the current changes.",
+  options: { model: "openai/gpt-5.6-luna" },
+});
+for await (const message of run) {
+  if (message.type === "assistant") console.log(message.content);
+}
+```
+
+Pass `agentId` to create a new conversation on an existing agent. Without one,
+`query()` creates a hidden stateless agent. Async prompt iterables support
+mid-turn injection; long-running queries expose `interrupt()` and `close()`.
+
 Pass `stateless: true` when a session should use an existing agent without
 loading or changing its MemFS:
 
@@ -222,9 +240,9 @@ await using session = client.createSession(agentId, {
 ```
 
 Connections start concurrently during session initialization. A failed server
-is skipped without dropping healthy servers. OAuth is host-managed, matching
-the Claude Agent SDK: complete OAuth in your application and provide the access
-token through `headers`. The SDK does not open an interactive browser flow.
+is skipped without dropping healthy servers. OAuth is host-managed: complete
+OAuth in your application and provide the access token through `headers`. The
+SDK does not open an interactive browser flow.
 
 MCP connections run in the Node SDK process and close with the session. This
 includes MCP used by remote and Cloud sessions: stdio servers see the SDK host
