@@ -636,7 +636,7 @@ export interface ClientToolsetConfig {
  * For creating new agents with custom memory/persona, use createAgent().
  */
 export interface CreateSessionOptions {
-  /** Model to use (e.g., "claude-sonnet-4-20250514") - updates the agent's LLM config */
+  /** Model override for this conversation (e.g., "openai/gpt-5.6-luna"). */
   model?: string;
 
   /** Reasoning effort tier to use with the selected/current model on websocket protocol sessions. */
@@ -739,7 +739,7 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
 /** A single prompt or a stream of prompts for a multi-turn query. */
 export type QueryPrompt = SendMessage | AsyncIterable<SendMessage>;
 
-/** Claude Agent SDK-shaped input for query(). */
+/** Input accepted by query(). */
 export interface QueryParams<
   TOptions extends CreateSessionOptions = CreateSessionOptions,
 > {

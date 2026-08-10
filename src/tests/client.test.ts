@@ -1071,7 +1071,7 @@ describe("LettaAgentClient", () => {
     );
   });
 
-  test("query rejects model selection on a persistent agent", async () => {
+  test("query applies model selection to the new conversation", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({
       backend: "remote",
@@ -1079,17 +1079,22 @@ describe("LettaAgentClient", () => {
       WebSocket: FakeAppServerSocket,
     });
 
-    const run = async () => {
-      for await (const _message of client.query({
-        prompt: "hello",
-        agentId: "agent-123",
-        options: { model: "anthropic/claude-sonnet-4" },
-      })) {
-        // Query fails before creating a session.
-      }
-    };
-    await expect(run()).rejects.toThrow("model selection requires omitting agentId");
-    expect(FakeAppServerSocket.instances).toHaveLength(0);
+    for await (const _message of client.query({
+      prompt: "hello",
+      agentId: "agent-123",
+      options: { model: "anthropic/claude-sonnet-4" },
+    })) {
+      // Drain the query.
+    }
+
+    expect(fakeControlSocket().sent).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "update_model",
+          runtime: { agent_id: "agent-123", conversation_id: "conv-created" },
+        }),
+      ]),
+    );
   });
 
   test("query accepts mid-turn input from an async prompt stream", async () => {

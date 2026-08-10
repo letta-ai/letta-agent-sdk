@@ -277,9 +277,8 @@ export function resumeSession(
 /**
  * Run one or more prompts and stream SDK messages.
  *
- * The call shape matches Claude Agent SDK's query({ prompt, options }) and
- * adds an optional agentId. Passing agentId creates a new conversation on that
- * agent. Omitting it creates a hidden stateless agent under the hood.
+ * Passing agentId creates a new conversation on that agent. Omitting it
+ * creates a hidden stateless agent under the hood.
  *
  * @example
  * ```typescript

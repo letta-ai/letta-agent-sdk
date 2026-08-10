@@ -56,33 +56,21 @@ An agent is the persistent entity with memory. A conversation is a thread on tha
 
 ## Query
 
-`query()` provides the same `query({ prompt, options })` call shape as the
-Claude Agent SDK and streams `SDKMessage` values. Letta additionally accepts an
-optional `agentId`:
+`query()` runs a prompt and streams `SDKMessage` values:
 
 ```ts
-for await (const message of client.query({
+const run = client.query({
   prompt: "Review the current changes.",
-  agentId,
-  options: {
-    allowedTools: ["Read", "Glob", "Grep"],
-  },
-})) {
+  options: { model: "openai/gpt-5.6-luna" },
+});
+for await (const message of run) {
   if (message.type === "assistant") console.log(message.content);
-  if (message.type === "result") console.log(message.success, message.result);
 }
 ```
 
-When `agentId` is supplied, the query creates a new conversation on that
-persistent agent. Omit `agentId` and pass `options.model` to create a hidden
-non-MemFS agent with that model and force the conversation into stateless mode.
-The query does not load or change agent memory. Model selection is unavailable
-with `agentId` because session model updates would mutate the persistent agent.
-
-A prompt can also be an `AsyncIterable<SendMessage>`. The SDK consumes that
-iterable concurrently with the output stream, so additional messages can be
-injected or queued while the current turn is running. Long-running queries can
-be controlled directly with `await query.interrupt()` and `query.close()`.
+Pass `agentId` to create a new conversation on an existing agent. Without one,
+`query()` creates a hidden stateless agent. Async prompt iterables support
+mid-turn injection; long-running queries expose `interrupt()` and `close()`.
 
 Pass `stateless: true` when a session should use an existing agent without
 loading or changing its MemFS:
@@ -252,9 +240,9 @@ await using session = client.createSession(agentId, {
 ```
 
 Connections start concurrently during session initialization. A failed server
-is skipped without dropping healthy servers. OAuth is host-managed, matching
-the Claude Agent SDK: complete OAuth in your application and provide the access
-token through `headers`. The SDK does not open an interactive browser flow.
+is skipped without dropping healthy servers. OAuth is host-managed: complete
+OAuth in your application and provide the access token through `headers`. The
+SDK does not open an interactive browser flow.
 
 MCP connections run in the Node SDK process and close with the session. This
 includes MCP used by remote and Cloud sessions: stdio servers see the SDK host

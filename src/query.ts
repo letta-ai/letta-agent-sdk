@@ -154,10 +154,6 @@ export function createQuery(
         const anonymous = anonymousQueryOptions(sessionOptions);
         agentId = await client.createAgent(anonymous.agentOptions);
         sessionOptions = anonymous.sessionOptions;
-      } else if (sessionOptions.model !== undefined) {
-        throw new Error(
-          "query() model selection requires omitting agentId so the SDK can create a stateless agent with that model.",
-        );
       }
 
       if (closed) return;

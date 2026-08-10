@@ -334,7 +334,7 @@ export class LettaAgentClientBase {
   }
 
   /**
-   * Claude Agent SDK-shaped query interface.
+   * Stream one or more prompts through a fresh conversation.
    *
    * Passing agentId starts a new conversation on that agent. Omitting it
    * creates a hidden stateless agent for this query.
