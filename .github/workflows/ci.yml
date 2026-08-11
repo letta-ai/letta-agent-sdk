@@ -51,6 +51,15 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Install React chat example
+        run: |
+          SDK_TARBALL=$(npm pack --silent --pack-destination "$RUNNER_TEMP" | tail -1)
+          npm --prefix examples/react-chat ci
+          npm --prefix examples/react-chat install --no-save "$RUNNER_TEMP/$SDK_TARBALL"
+
+      - name: Test React chat example
+        run: npm --prefix examples/react-chat run verify
+
       - name: SDK smoke test
         # Only run with API key on push or same-repo PRs
         if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}

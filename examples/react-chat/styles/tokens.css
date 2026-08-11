@@ -1,0 +1,16 @@
+:root {
+  /* Change these values before changing component CSS. */
+  --chat-background: #fff;
+  --chat-text: #212121;
+  --chat-muted: #777;
+  --chat-subtle: #8a8a8a;
+  --chat-activity: #858585;
+  --chat-code-background: #f4f4f4;
+  --chat-border: #dedede;
+  --chat-sidebar-border: #f0f0f0;
+  --chat-error: #9b3434;
+  --chat-content-width: 720px;
+  --chat-sidebar-width: 200px;
+  --chat-composer-radius: 28px;
+  --chat-user-radius: 20px;
+}
