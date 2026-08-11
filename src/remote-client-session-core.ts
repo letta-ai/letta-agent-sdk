@@ -125,8 +125,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     const attempt = this.performInitialize();
     const memo = attempt
       .catch((error: unknown) => {
-        // Tear down only this attempt's partial state. Never close() the
-        // session here: a failed remote attempt is retryable.
+        // Tear down only this attempt's partial state. A failed remote attempt is retryable.
         this.cleanupFailedInitialize();
         throw error;
       })
@@ -167,8 +166,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       throw new Error("Session is closed");
     }
 
-    // This is the lifecycle commit point. Lazy entry points must continue to
-    // await initializePromise until every post-initialize option is applied.
+    // Lazy entry points must await this lifecycle commit after all post-initialize options.
     this.initialized = true;
 
     const initMessage: SDKInitMessage = {

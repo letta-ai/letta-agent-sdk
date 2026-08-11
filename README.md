@@ -325,6 +325,7 @@ remains changed; retrying is safe. See [Cloud repositories](https://docs.letta.c
 - [Quickstart](https://docs.letta.com/letta-agent-sdk/quickstart)
 - [Deployment](https://docs.letta.com/letta-agent-sdk/deployment)
 - [SDK reference](https://docs.letta.com/letta-agent-sdk/reference)
+- [React chat template](https://github.com/letta-ai/letta-agent-sdk-react-chat)
 - [Examples](./examples)
 
 ---
