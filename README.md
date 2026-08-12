@@ -128,6 +128,41 @@ cached before the app was backgrounded. Pending approval request IDs are for
 correlation; decisions continue through `recoverPendingApprovals()` and the
 session's `canUseTool` callback.
 
+## Rendering a transcript
+
+`session.stream()` emits message slices, not rows. Reconciling them into a
+conversation view means merging text fragments by message family and `otid`,
+dropping replayed `seqId` positions per run, and merging tool arguments and
+results by `toolCallId`. `createTranscriptAccumulator()` does that for you and
+is available from the package root and `/client`:
+
+```ts
+import { createTranscriptAccumulator } from "@letta-ai/letta-agent-sdk";
+
+const transcript = createTranscriptAccumulator();
+
+await session.send("Summarize the repo");
+for await (const message of session.stream()) {
+  const rows = transcript.apply(message);
+  render(rows); // TranscriptRow[]: user | assistant | reasoning | tool_call
+}
+
+// Safe mid-run: merge older history without duplicating in-flight rows.
+transcript.rebase(await session.listMessages({ limit: 50 }));
+```
+
+Each row carries a stable `key` for list rendering, plus the identifiers it was
+reconciled from (`uuid`, `otid`, `runId`, `seqId`). Tool rows expose the payload
+identity (`toolCallId`) separately from the envelopes that produced them, along
+with `argumentsComplete` and a `status` of `streaming`, `ready`, or `complete`,
+so a partially streamed argument object is never rendered as final input.
+
+`apply()` returns the same array reference when a message changed nothing (a
+replayed position, or a turn-level message such as `result`), so memoized
+renderers can skip the update. Turn-level messages (`init`, `result`, `error`,
+`retry`, `queue_update`, `loop_status`) are not transcript rows; handle them
+directly.
+
 ## Deployment options
 
 | Backend | Agent state | Tool execution |
