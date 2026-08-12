@@ -55,6 +55,8 @@ export type RuntimeTurnResult = {
 
 export type RuntimeSendTurnOptions = {
   clientMessageId: string;
+  /** Caller-supplied OTID for the user message, when one was provided. */
+  otid?: string;
 };
 
 export type RuntimeRequestOptions = {
@@ -128,6 +130,8 @@ export type TurnTracker = {
   id: number;
   runtime: RuntimeScope;
   clientMessageId: string;
+  /** Caller-supplied OTID for this turn's user message, when one was provided. */
+  otid?: string;
   queuedAt: number;
   startedAt: number;
   assistantText: string;
@@ -676,4 +680,24 @@ export function toSessionDeviceStatus(
 
 export function normalizeSendMessage(message: SendMessage): string | MessageContentItem[] {
   return message;
+}
+
+/**
+ * Validate a caller-supplied OTID. Empty/whitespace-only values would silently
+ * defeat correlation, so they are rejected instead of being dropped.
+ */
+export function normalizeCallerOtid(otid: string | undefined): string | undefined {
+  if (otid === undefined) return undefined;
+  if (typeof otid !== "string" || otid.trim() === "") {
+    throw new Error("send() otid must be a non-empty string");
+  }
+  return otid;
+}
+
+/** Wire correlation options for a tracked turn. */
+export function turnSendOptions(turn: TurnTracker): RuntimeSendTurnOptions {
+  return {
+    clientMessageId: turn.clientMessageId,
+    ...(turn.otid !== undefined ? { otid: turn.otid } : {}),
+  };
 }

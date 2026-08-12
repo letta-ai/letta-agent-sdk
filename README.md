@@ -54,6 +54,19 @@ An agent is the persistent entity with memory. A conversation is a thread on tha
 - `resumeSession(conversationId)` resumes a saved conversation.
 - `resumeSession(agentId)` resumes the agent's default conversation.
 
+Pass your own OTID when you render the user message optimistically, so you can
+match the row you drew with the persisted one:
+
+```ts
+const otid = crypto.randomUUID();
+await session.send("Summarize today's changes.", { otid });
+```
+
+The OTID is stored on the persisted user message (visible via `listMessages()`)
+and doubles as the turn's `clientMessageId`, so it also identifies the message
+in `queue_update` events while it is queued. The SDK generates one when the
+option is omitted.
+
 Pass `stateless: true` when a session should use an existing agent without
 loading or changing its MemFS:
 

@@ -407,6 +407,9 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
           role: "user",
           content: normalizeSendMessage(message),
           client_message_id: options.clientMessageId,
+          // The runtime stamps an OTID from client_message_id when the caller
+          // omits one; sending it explicitly keeps the caller's value canonical.
+          ...(options.otid !== undefined ? { otid: options.otid } : {}),
         },
       ],
     };

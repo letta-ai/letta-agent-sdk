@@ -111,6 +111,7 @@ export type {
   ImageContent,
   MessageContentItem,
   SendMessage,
+  SendOptions,
   // List messages API
   ListMessagesOptions,
   ListMessagesResult,
