@@ -1,4 +1,5 @@
 import type {
+  SDKErrorCode,
   SDKLoopStatusMessage,
   SDKMessage,
   SDKQueueUpdateMessage,
@@ -27,6 +28,7 @@ import {
   toSdkErrorCode,
   toSessionDeviceStatus,
   toolInputFromArguments,
+  turnFinishedRecord,
   type ProtocolMessage,
   type RuntimeScope,
   type RuntimeTurnResult,
@@ -146,6 +148,12 @@ export class RemoteTurnCoordinator {
       return;
     }
 
+    const finished = turnFinishedRecord(message);
+    if (finished) {
+      this.handleTurnFinished(finished);
+      return;
+    }
+
     const delta = streamDeltaRecord(message);
     if (!delta) return;
     const active = this.activateNextTurnFromProtocol();
@@ -182,15 +190,18 @@ export class RemoteTurnCoordinator {
     if (this.closed) return;
     const active = this.activeTurn;
     if (active) {
-      this.failTurn(active, detail);
+      this.failTurn(active, detail, {
+        errorCode: "stream_closed",
+        recoverable: true,
+      });
     } else {
       this.enqueue({
         type: "error",
         message: detail,
-        errorCode: "error",
-        stopReason: "error",
+        errorCode: "stream_closed",
+        stopReason: "stream_closed",
         errorDetail: detail,
-        recoverable: false,
+        recoverable: true,
       });
     }
     this.close();
@@ -228,23 +239,29 @@ export class RemoteTurnCoordinator {
     return next;
   }
 
-  private failTurn(turn: TurnTracker, detail: string): void {
+  private failTurn(
+    turn: TurnTracker,
+    detail: string,
+    options: { errorCode?: SDKErrorCode; recoverable?: boolean } = {},
+  ): void {
     if (this.activeTurn !== turn) return;
+    const errorCode = options.errorCode ?? "error";
     this.enqueue({
       type: "error",
       message: detail,
-      errorCode: "error",
-      stopReason: "error",
+      errorCode,
+      stopReason: errorCode,
       errorDetail: detail,
-      recoverable: false,
+      recoverable: options.recoverable ?? false,
     });
     this.completeActiveTurn({
       runtime: turn.runtime,
-      stopReason: "error",
+      stopReason: errorCode,
       runIds: [...turn.runIds],
       success: false,
       detail,
-      errorCode: "error",
+      errorCode,
+      recoverable: options.recoverable,
     });
   }
 
@@ -306,6 +323,36 @@ export class RemoteTurnCoordinator {
         runIds: [...active.runIds],
       });
     }
+  }
+
+  private handleTurnFinished(finished: {
+    runId?: string;
+    stopReason: string;
+    error?: string;
+  }): void {
+    const active = this.activeTurn;
+    if (!active || !finished.runId) return;
+    if (
+      active.runIds.size > 0 &&
+      !active.runIds.has(finished.runId)
+    ) {
+      return;
+    }
+    active.runIds.add(finished.runId);
+    if (finished.stopReason === "requires_approval") {
+      active.observedRequiresApprovalStop = true;
+      return;
+    }
+    const errorCode = toSdkErrorCode(finished.stopReason);
+    const success = !FAILURE_STOP_REASONS.has(finished.stopReason);
+    this.completeActiveTurn({
+      runtime: active.runtime,
+      stopReason: finished.stopReason,
+      runIds: [...active.runIds],
+      success,
+      ...(success ? {} : { errorCode: errorCode ?? "error" }),
+      ...(finished.error ? { detail: finished.error } : {}),
+    });
   }
 
   private handleTurnTerminalDelta(
@@ -538,7 +585,11 @@ export class RemoteTurnCoordinator {
       error: success ? undefined : (errorCode ?? stopReason ?? "error"),
       errorCode: success ? undefined : (errorCode ?? "error"),
       approvalConflict: approvalConflict || undefined,
-      recoverable: approvalConflict ? true : success ? undefined : false,
+      recoverable: approvalConflict
+        ? true
+        : success
+          ? undefined
+          : (turn.recoverable ?? false),
       errorDetail: success ? undefined : turn.detail,
       stopReason,
       durationMs:

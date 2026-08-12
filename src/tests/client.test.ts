@@ -1195,12 +1195,15 @@ describe("LettaAgentClient", () => {
 
         expect(messages[0]).toMatchObject({
           type: "error",
-          stopReason: "error",
+          stopReason: "stream_closed",
+          errorCode: "stream_closed",
+          recoverable: true,
         });
         expect(messages.at(-1)).toMatchObject({
           type: "result",
           success: false,
-          errorCode: "error",
+          errorCode: "stream_closed",
+          recoverable: true,
         });
       } finally {
         FakeAppServerSocket.inputScenario = "normal";

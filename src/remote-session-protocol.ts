@@ -51,6 +51,7 @@ export type RuntimeTurnResult = {
   success?: boolean;
   detail?: string;
   errorCode?: SDKErrorCode;
+  recoverable?: boolean;
 };
 
 export type RuntimeSendTurnOptions = {
@@ -491,6 +492,21 @@ export function loopStatusRunIds(message: ProtocolMessage): string[] {
   return Array.isArray(activeRunIds)
     ? activeRunIds.filter((runId): runId is string => typeof runId === "string")
     : [];
+}
+
+export function turnFinishedRecord(message: ProtocolMessage): {
+  runId?: string;
+  stopReason: string;
+  error?: string;
+} | null {
+  if (message.type !== "turn_finished" || typeof message.stop_reason !== "string") {
+    return null;
+  }
+  return {
+    ...(typeof message.run_id === "string" ? { runId: message.run_id } : {}),
+    stopReason: message.stop_reason,
+    ...(typeof message.error === "string" ? { error: message.error } : {}),
+  };
 }
 
 export function queueItems(message: ProtocolMessage): SDKQueueItem[] {

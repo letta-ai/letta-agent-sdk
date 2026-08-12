@@ -91,6 +91,148 @@ describe("cooked stream message identity", () => {
   });
 });
 
+describe("remote turn terminal receipts", () => {
+  const runtime: RuntimeScope = {
+    agent_id: "agent-1",
+    conversation_id: "conv-1",
+  };
+
+  test("uses turn_finished as the authoritative successful terminal", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "done",
+        run_id: "run-1",
+        id: "message-1",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-1",
+        run_id: "run-1",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "assistant",
+      content: "done",
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      result: "done",
+      stopReason: "end_turn",
+      runIds: ["run-1"],
+    });
+    coordinator.close();
+  });
+
+  test("ignores a turn_finished receipt for a different active run", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "running",
+        run_id: "run-1",
+        id: "message-1",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        run_id: "run-other",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+    expect(coordinator.hasInFlightTurn()).toBe(true);
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        run_id: "run-1",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      runIds: ["run-1"],
+    });
+    coordinator.close();
+  });
+
+  test("ignores an uncorrelated turn_finished without a run id", () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+
+    expect(coordinator.hasInFlightTurn()).toBe(true);
+    coordinator.close();
+  });
+
+  test("reports active transport loss as a recoverable unknown outcome", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "partial",
+        run_id: "run-1",
+        id: "message-1",
+      }),
+      runtime,
+    );
+    coordinator.closeWithError("connection dropped");
+
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "error",
+      errorCode: "stream_closed",
+      recoverable: true,
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: false,
+      errorCode: "stream_closed",
+      recoverable: true,
+      runIds: ["run-1"],
+    });
+  });
+});
+
 function streamDelta(
   runtime: RuntimeScope,
   delta: Record<string, unknown>,
