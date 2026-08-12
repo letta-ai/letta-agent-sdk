@@ -33,6 +33,48 @@ the selected transport adapter.
 Those methods operate at different layers and should not be combined merely
 because they share a name.
 
+## Stream identifiers
+
+Streamed `SDKMessage` values carry several identifiers, and each one answers a
+different question. Most duplicate or missing message bugs in consumers come
+from using one to answer another's question.
+
+- `seqId` answers "have I already processed this stream position?" It is a
+  per-run replay cursor: use it to suppress replayed events after a resume or
+  reconnect, compare it only within the same `runId`, and reset the threshold
+  when a new run starts. It is not row identity.
+- `otid` answers "which typed message slice is this?" Use it to reassemble the
+  fragments of one slice. It is not a universal key across message types.
+- `uuid` answers "which message object is this?" Use it for message identity
+  and for history cursoring and backfill. It is the top-level message ID when
+  the stream provides one and an SDK-generated identifier otherwise, so it is
+  neither a guaranteed server ID nor a replay cursor.
+- `toolCallId` answers "which tool call is this about?" Use it to join a
+  `tool_call` with its `tool_result`. It is not identity for assistant or
+  reasoning messages.
+
+Only `assistant` and `reasoning` carry `otid` and `seqId`; `tool_call` and
+`tool_result` carry `toolCallId` and `uuid`. Identity therefore has to be
+decided per message family. A single generic `seqId → otid → uuid` fallback
+chain applied to every message will merge unrelated rows.
+
+- Key `assistant` and `reasoning` accumulators on the message type together
+  with `otid`, not on `otid` alone. A provider can reuse an `otid` across
+  kinds, which collapses assistant text into reasoning. Fall back to `uuid`
+  only within the same family — `src/tests/stream-message-identity.test.ts`
+  pins the case where two slices share a `uuid` and differ only by type and
+  `otid`.
+- Merge tool arguments and results by `toolCallId`, but do not flatten every
+  tool-family message onto it. Envelope identity and tool-payload identity are
+  distinct.
+- Do not merge persisted history into a transcript while a turn is streaming.
+  When backfill after a reconnect is unavoidable, rebase the in-progress
+  accumulators onto the fetched rows; otherwise later fragments append to a
+  stale baseline and the row renders twice.
+- Mid-stream, `tool_call.toolInput` is `{ raw: "<chunk>" }` until the argument
+  fragments parse as JSON. Accumulate `rawArguments` and parse once at the end
+  rather than overwriting parsed arguments with a partial wrapper.
+
 ## Cloud API ownership
 
 - `@letta-ai/letta-code` owns the agent harness, app-server protocol, runtime
