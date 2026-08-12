@@ -24,7 +24,7 @@ You synthesize findings from the Researcher, identify patterns and themes, and p
 3. Identify key themes, patterns, and connections
 4. Note gaps, contradictions, and limitations
 5. Produce a structured analysis document
-6. Report completion to the Coordinator
+6. Report completion in your response
 
 ## Analysis Framework
 For each analysis, address:

@@ -89,7 +89,7 @@ USAGE:
   bun cli.ts <from-ref> [to-ref]   Generate notes for commit range
   bun cli.ts <from-ref> -o FILE    Output to file
   bun cli.ts --status              Show agent status
-  bun cli.ts --reset               Reset agent (forget preferences)
+  bun cli.ts --reset               Clear the saved agent ID
   bun cli.ts -h, --help            Show this help
 
 ARGUMENTS:
@@ -114,7 +114,8 @@ CATEGORIES:
   - 🔧 Maintenance
 
 PERSISTENCE:
-  The agent learns your formatting preferences over time.
+  The same agent and memory files are reused across runs until you reset the
+  saved ID.
 `);
 }
 

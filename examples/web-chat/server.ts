@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession, createExampleClient, resumeExampleSession } from '../create-agent-session.js';
+import { createExampleAgent, createExampleClient, resumeExampleSession } from '../create-agent-session.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -119,7 +119,7 @@ async function getSession(): Promise<LettaCodeSession> {
     }, client);
   } else {
     console.log('Creating new agent...');
-    session = await createAgentSession({
+    const agentId = await createExampleAgent({
       model: 'haiku',
       systemPrompt: `You are a helpful assistant accessible through a web interface.
 
@@ -135,12 +135,14 @@ You have memory that persists across conversations. ${isCloud
       memfs: true,
       permissionMode: 'unrestricted',
     }, client);
-    if (session.agentId) {
-      state.agentId = session.agentId;
-      state.backend = backend;
-      await saveState();
-      await ensureMemoryRepository(session.agentId);
-    }
+    state.agentId = agentId;
+    state.backend = backend;
+    await saveState();
+    await ensureMemoryRepository(agentId);
+    session = resumeExampleSession(agentId, {
+      model: 'haiku',
+      permissionMode: 'unrestricted',
+    }, client);
   }
 
   return session;
@@ -196,13 +198,6 @@ Bun.serve({
       
       const sess = await getSession();
       
-      // Save agent ID after first message
-      if (!state.agentId && sess.agentId) {
-        state.agentId = sess.agentId;
-        await saveState();
-        console.log(`Agent created: ${state.agentId}`);
-      }
-      
       // Stream response
       const encoder = new TextEncoder();
       const stream = new ReadableStream({
@@ -219,12 +214,6 @@ Bun.serve({
                 send({ type: 'text', content: msg.content });
               } else if (msg.type === 'tool_call' && 'toolName' in msg) {
                 send({ type: 'tool', name: msg.toolName });
-              } else if (msg.type === 'result') {
-                // Update agent ID if we got it
-                if (!state.agentId && sess.agentId) {
-                  state.agentId = sess.agentId;
-                  await saveState();
-                }
               }
             }
             

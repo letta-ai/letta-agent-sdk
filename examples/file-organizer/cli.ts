@@ -87,7 +87,7 @@ USAGE:
   bun cli.ts [directory]           Organize a directory
   bun cli.ts                       Interactive mode
   bun cli.ts --status              Show agent status
-  bun cli.ts --reset               Reset agent (forget preferences)
+  bun cli.ts --reset               Clear the saved agent ID
   bun cli.ts -h, --help            Show this help
 
 OPTIONS:
@@ -107,12 +107,13 @@ STRATEGIES:
   (none)    AI decides best approach
 
 SAFETY:
-  - Always previews changes before executing
-  - Never deletes files (only moves)
-  - Creates directories as needed
+  - Use --dry-run for a non-mutating preview
+  - Without --dry-run, the prompt asks for confirmation before moves
+  - The unrestricted permission mode does not enforce that confirmation
 
 PERSISTENCE:
-  The agent learns your organizational preferences over time.
+  The same agent and memory files are reused across runs until you reset the
+  saved ID.
 `);
 }
 

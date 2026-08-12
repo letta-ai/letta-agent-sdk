@@ -212,5 +212,5 @@ export async function reset(): Promise<void> {
     const fs = await import('node:fs/promises');
     await fs.unlink(STATE_FILE);
   }
-  console.log('\n🗑️  Release notes generator reset. Agent forgotten.\n');
+  console.log('\nSaved agent ID cleared. The agent still exists in the local backend.\n');
 }

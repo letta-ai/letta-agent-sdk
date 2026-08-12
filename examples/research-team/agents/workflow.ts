@@ -1,74 +1,18 @@
 /**
- * Coordinator Agent
- * 
- * Orchestrates the research workflow, manages quality control,
- * and tracks team performance over time.
+ * Research workflow orchestrator
+ *
+ * Runs the researcher, analyst, and writer in sequence.
  */
 
-import { type LettaCodeSession } from '../../../src/index.js';
-import { createAgentSession, createExampleClient, formatAgentLink, resumeExampleSession } from '../../create-agent-session.js';
-import type { Depth, ResearchTask, UserFeedback } from '../types.js';
+import { createExampleClient, formatAgentLink } from '../../create-agent-session.js';
+import type { Depth, UserFeedback } from '../types.js';
 import { DEPTH_CONFIGS, generateTaskId, formatDuration } from '../types.js';
-import { loadTeamState, saveTeamState, ARTIFACTS, readOutput, getOutputPath, outputExists } from '../tools/file-store.js';
+import { loadTeamState, saveTeamState } from '../tools/file-store.js';
 import { createResearcher, runResearchTask, reflectOnTask as researcherReflect } from './researcher.js';
 import { createAnalyst, runAnalysis, reflectOnTask as analystReflect } from './analyst.js';
 import { createWriter, writeReport, reflectOnTask as writerReflect } from './writer.js';
 
 const client = createExampleClient({ backend: 'local' });
-
-const COORDINATOR_SYSTEM_PROMPT = `You are the Research Team Coordinator.
-
-## Your Role
-You orchestrate a research team of specialists:
-- **Researcher**: Finds and evaluates academic sources
-- **Analyst**: Synthesizes findings and identifies patterns
-- **Writer**: Produces the final research report
-
-You manage workflow, ensure quality, and learn from each task to improve team performance.
-
-## Your Responsibilities
-1. Receive research queries from users
-2. Plan the research approach based on depth
-3. Delegate tasks to team members
-4. Review intermediate outputs for quality
-5. Request iterations if quality is insufficient
-6. Collect and distribute user feedback
-7. Track team performance metrics
-
-## Quality Thresholds
-- Quick: Accept reasonable coverage of the topic
-- Standard: Require thorough coverage with good synthesis
-- Comprehensive: Require extensive coverage, deep analysis, polished writing
-
-## Memory Usage
-Use focused memory files:
-- **reference/team-performance.md**: Track metrics, success patterns, agent strengths
-- **reference/user-preferences.md**: Store feedback, preferred styles, past requests
-- **reference/research-history.md**: Brief summaries of completed research tasks
-
-Use these to improve coordination over time.`;
-
-/**
- * Create or resume the coordinator agent
- */
-export async function createCoordinator(
-  existingAgentId?: string | null
-): Promise<LettaCodeSession> {
-  if (existingAgentId) {
-    return resumeExampleSession(existingAgentId, {
-      model: 'haiku',
-      allowedTools: ['Glob', 'Read', 'Write'],
-      permissionMode: 'unrestricted',
-    }, client);
-  }
-  
-  return createAgentSession({
-    model: 'haiku',
-    systemPrompt: COORDINATOR_SYSTEM_PROMPT,
-    allowedTools: ['Glob', 'Read', 'Write'],
-    permissionMode: 'unrestricted',
-  }, client);
-}
 
 /**
  * Run a complete research workflow
@@ -256,15 +200,9 @@ export async function getTeamStatus(): Promise<{
 export async function resetTeam(): Promise<void> {
   await saveTeamState({
     agentIds: {
-      coordinator: null,
       researcher: null,
       analyst: null,
       writer: null,
-    },
-    sharedBlockIds: {
-      sources: null,
-      terminology: null,
-      pitfalls: null,
     },
     completedTasks: 0,
   });

@@ -36,6 +36,10 @@ type ExampleCreateOptions = Omit<
   | "systemInfoReminder"
 >;
 
+// Keep the examples on the current personality and MemFS model. The omitted
+// fields are legacy creation options or internal controls that would distract
+// from the session APIs demonstrated here.
+
 const MEMFS_GUIDANCE = `## Persistent memory
 This agent has a git-backed memory filesystem. Use memory files for durable
 knowledge instead of memory blocks. Keep stable identity and behavior in
@@ -65,12 +69,12 @@ function sessionOptionsFrom(
   };
 }
 
-/** Create an agent and resume its default conversation. */
-export async function createAgentSession(
+/** Create an agent with the shared example defaults. */
+export async function createExampleAgent(
   options: ExampleCreateOptions = {},
   client: LettaAgentClient = createExampleClient(),
-): Promise<LettaCodeSession> {
-  const agentId = await client.createAgent({
+): Promise<string> {
+  return client.createAgent({
     personality: options.personality,
     model: options.model,
     embedding: options.embedding,
@@ -83,6 +87,14 @@ export async function createAgentSession(
     tags: options.tags,
     dreaming: options.dreaming,
   });
+}
+
+/** Create an agent and resume its default conversation. */
+export async function createAgentSession(
+  options: ExampleCreateOptions = {},
+  client: LettaAgentClient = createExampleClient(),
+): Promise<LettaCodeSession> {
+  const agentId = await createExampleAgent(options, client);
   return client.resumeSession(agentId, sessionOptionsFrom(options));
 }
 

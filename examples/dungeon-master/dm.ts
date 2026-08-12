@@ -390,5 +390,5 @@ export async function resetAll(): Promise<void> {
     await mkdir(CAMPAIGNS_DIR);
   }
   
-  console.log('\n🗑️  Reset complete. DM and all campaigns deleted.\n');
+  console.log('\nLocal state and campaign files deleted. The agent still exists in the local backend.\n');
 }

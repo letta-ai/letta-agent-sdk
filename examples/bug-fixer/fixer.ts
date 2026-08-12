@@ -226,17 +226,10 @@ export async function showStatus(state: BugFixerState): Promise<void> {
 }
 
 /**
- * Say hello
- */
-export function sayHello(): void {
-  console.log('Hello');
-}
-
-/**
- * List files in src/ directory
+ * List files in this SDK checkout's src/ directory.
  */
 export async function listFilesInSrc(): Promise<void> {
-  const srcPath = '../../src';
+  const srcPath = join(__dirname, '../../src');
   const fs = await import('node:fs/promises');
   
   try {
@@ -259,5 +252,5 @@ export async function reset(): Promise<void> {
     const fs = await import('node:fs/promises');
     await fs.unlink(STATE_FILE);
   }
-  console.log('\n🗑️  Bug fixer reset. Agent forgotten.\n');
+  console.log('\nSaved agent ID cleared. The agent still exists in the local backend.\n');
 }

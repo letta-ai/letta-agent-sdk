@@ -21,7 +21,6 @@ import {
   interactiveMode,
   showStatus,
   reset,
-  sayHello,
   listFilesInSrc,
 } from './fixer.js';
 
@@ -91,8 +90,8 @@ USAGE:
   bun cli.ts [bug description]     Fix a specific bug
   bun cli.ts                       Interactive mode
   bun cli.ts --status              Show agent status
-  bun cli.ts --reset               Reset agent (forget everything)
-  bun cli.ts --list                List files in src/
+  bun cli.ts --reset               Clear the saved agent ID
+  bun cli.ts --list                List files in this SDK checkout's src/
   bun cli.ts -h, --help            Show this help
 
 EXAMPLES:
@@ -107,8 +106,8 @@ HOW IT WORKS:
   4. It runs tests or commands to verify
 
 PERSISTENCE:
-  The agent remembers your codebase across sessions. The more you use it,
-  the better it knows where things are and what patterns to look for.
+  The same agent and memory files are reused across runs until you reset the
+  saved ID. Inspect its output to see what context it retained.
 `);
 }
 

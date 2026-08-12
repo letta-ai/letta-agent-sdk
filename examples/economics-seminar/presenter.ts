@@ -12,6 +12,9 @@ import type { SeminarConfig } from './types.js';
 // File-editing demo: pin the local backend so agent state stays consistent.
 const client = createExampleClient({ backend: 'local' });
 
+// web_search is a server-side base tool. It does not belong in allowedTools,
+// which controls the client-side tools for this SDK session.
+
 const PRESENTER_SYSTEM_PROMPT = `You are an economics researcher presenting at an academic seminar.
 
 ## Your Role

@@ -243,5 +243,5 @@ export async function reset(): Promise<void> {
     const fs = await import('node:fs/promises');
     await fs.unlink(STATE_FILE);
   }
-  console.log('\n🗑️  File organizer reset. Agent forgotten.\n');
+  console.log('\nSaved agent ID cleared. The agent still exists in the local backend.\n');
 }

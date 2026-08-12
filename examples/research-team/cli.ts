@@ -3,8 +3,7 @@
 /**
  * Research Team CLI
  * 
- * A multi-agent academic research system that improves over time.
- * Demonstrates Letta's persistent memory capabilities.
+ * A multi-agent academic research system with persistent memory.
  * 
  * Usage:
  *   bun examples/research-team/cli.ts "your research query" [options]
@@ -25,10 +24,8 @@ import {
   processFeedback, 
   getTeamStatus, 
   resetTeam 
-} from './agents/coordinator.js';
+} from './agents/workflow.js';
 import { readOutput, getOutputPath, outputExists, ARTIFACTS } from './tools/file-store.js';
-
-// LETTA_CLI_PATH is optional if `letta` is in PATH
 
 async function main() {
   const { values, positionals } = parseArgs({
@@ -93,7 +90,7 @@ function printHelp() {
 🔬 Research Team CLI
 
 A multi-agent academic research system with persistent memory.
-Each agent learns and improves over time based on experience and feedback.
+TypeScript runs a researcher, analyst, and writer in sequence.
 
 USAGE:
   bun examples/research-team/cli.ts "your research query" [options]
@@ -130,7 +127,7 @@ THE TEAM:
   🔍 Analyst - Synthesizes findings, identifies patterns
   ✍️  Writer - Produces polished research reports
   
-  Each agent has persistent memory that improves with use!
+  Each agent can reuse memory from earlier tasks and feedback.
 `);
 }
 
@@ -148,8 +145,7 @@ async function showStatus() {
   }
   
   if (status.completedTasks > 0) {
-    console.log('\n💡 Tip: Agents have learned from past tasks!');
-    console.log('   Run another query to see improved results.');
+    console.log('\n💡 Tip: Run another query to observe what the agents retained.');
   }
   
   console.log('');
@@ -169,9 +165,7 @@ async function runResearch(query: string, depth: Depth) {
   const startTime = Date.now();
   
   try {
-    const result = await runResearchWorkflow(query, depth, (phase, message) => {
-      // Progress is already logged by coordinator
-    });
+    const result = await runResearchWorkflow(query, depth);
     
     if (result.success) {
       console.log('\n' + '═'.repeat(60));
@@ -191,7 +185,7 @@ async function runResearch(query: string, depth: Depth) {
         console.log('─'.repeat(40));
       }
       
-      console.log('\n💬 To provide feedback and help the team learn:');
+      console.log('\n💬 To ask each agent to reflect on this result:');
       console.log(`   bun cli.ts --feedback=${result.taskId}`);
       console.log('');
     } else {
@@ -245,7 +239,7 @@ async function collectFeedback(taskId: string) {
   
   await processFeedback(taskId, feedback);
   
-  console.log('\n✅ Feedback recorded! The team will apply these lessons to future tasks.');
+  console.log('\n✅ Feedback sent. Each agent was asked to store useful lessons.');
   console.log('');
 }
 

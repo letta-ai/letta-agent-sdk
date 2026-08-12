@@ -1,14 +1,16 @@
 #!/usr/bin/env bun
 
 /**
- * Letta Agent SDK V2 Examples
+ * Letta Agent SDK tour
  * 
- * Comprehensive tests for all SDK features.
+ * Run one focused example at a time to see how agents, conversations, tools,
+ * permissions, and memory fit together. This is a learning aid, not a test
+ * suite. Automated coverage lives under src/tests/.
  * 
- * Run with: bun examples/v2-examples.ts [example]
+ * Run with: bun examples/sdk-tour.ts [example]
  */
 
-import { LettaAgentClient, prompt } from '../src/index.js';
+import { LettaAgentClient } from '../src/index.js';
 
 const client = new LettaAgentClient({ backend: 'local' });
 
@@ -69,10 +71,10 @@ async function main() {
       await testMemfs();
       await testAgentOptions();
       await testConversations();
-      console.log('\n✅ All examples passed');
+      console.log('\nSDK tour complete');
       break;
     default:
-      console.log('Usage: bun v2-examples.ts [basic|multi-turn|one-shot|resume|options|message-types|session-properties|tool-execution|permission-callback|system-prompt|memfs|agent-options|conversations|all]');
+      console.log('Usage: bun examples/sdk-tour.ts [basic|multi-turn|one-shot|resume|options|message-types|session-properties|tool-execution|permission-callback|system-prompt|memfs|agent-options|conversations|all]');
   }
 }
 
@@ -139,7 +141,7 @@ async function oneShot() {
 
   // One-shot creates new agent
   const agentId = await client.createAgent();
-  const result = await prompt('What is the capital of France? One word.', agentId);
+  const result = await client.prompt('What is the capital of France? One word.', agentId);
 
   if (result.success) {
     console.log(`Answer: ${result.result}`);
@@ -202,19 +204,19 @@ async function sessionResume() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// OPTIONS TESTS
+// SESSION OPTIONS
 // ═══════════════════════════════════════════════════════════════
 
 async function testOptions() {
-  console.log('=== Testing Options ===\n');
+  console.log('=== Session Options ===\n');
 
   // Test basic session
   console.log('Testing basic session...');
   const agentId = await client.createAgent();
-  const modelResult = await prompt('Say "model test ok"', agentId);
+  const modelResult = await client.prompt('Say "model test ok"', agentId);
   console.log(`  basic: ${modelResult.success ? 'PASS' : 'FAIL'} - ${modelResult.result?.slice(0, 50)}`);
 
-  // Test systemPrompt preset via createSession (only presets allowed)
+  // Set a system prompt preset when you create the agent.
   console.log('Testing systemPrompt preset...');
   const systemPromptAgentId = await client.createAgent({ systemPrompt: 'letta-claude' });
   const sysPromptSession = client.createSession(systemPromptAgentId, {
@@ -278,11 +280,11 @@ async function testOptions() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MESSAGE TYPES TESTS
+// STREAMED MESSAGE TYPES
 // ═══════════════════════════════════════════════════════════════
 
 async function testMessageTypes() {
-  console.log('=== Testing Message Types ===\n');
+  console.log('=== Streamed Message Types ===\n');
 
   const agentId = await client.createAgent();
   const session = client.resumeSession(agentId, {
@@ -323,11 +325,11 @@ async function testMessageTypes() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SESSION PROPERTIES TESTS
+// SESSION LIFECYCLE
 // ═══════════════════════════════════════════════════════════════
 
 async function testSessionProperties() {
-  console.log('=== Testing Session Properties ===\n');
+  console.log('=== Session Lifecycle ===\n');
 
   // Create new agent + new conversation
   const session = client.createSession(await client.createAgent(), {
@@ -358,11 +360,11 @@ async function testSessionProperties() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// TOOL EXECUTION TESTS
+// TOOL EXECUTION
 // ═══════════════════════════════════════════════════════════════
 
 async function testToolExecution() {
-  console.log('=== Testing Tool Execution ===\n');
+  console.log('=== Tool Execution ===\n');
 
   // Create a shared agent for tool tests
   const agentId = await client.createAgent();
@@ -409,11 +411,11 @@ async function testToolExecution() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// PERMISSION CALLBACK TESTS
+// PERMISSION CALLBACKS
 // ═══════════════════════════════════════════════════════════════
 
 async function testPermissionCallback() {
-  console.log('=== Testing Permission Callback ===\n');
+  console.log('=== Permission Callback ===\n');
 
   // Note: permissionMode 'standard' with NO allowedTools triggers callback
   // allowedTools auto-allows tools, bypassing the callback
@@ -467,11 +469,11 @@ async function testPermissionCallback() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SYSTEM PROMPT TESTS
+// SYSTEM PROMPTS
 // ═══════════════════════════════════════════════════════════════
 
 async function testSystemPrompt() {
-  console.log('=== Testing System Prompt Configuration ===\n');
+  console.log('=== System Prompts ===\n');
 
   async function runWithSystemPrompt(msg: string, systemPrompt: any): Promise<string> {
     const agentId = await client.createAgent({ systemPrompt });
@@ -528,11 +530,11 @@ async function testSystemPrompt() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MEMORY FILESYSTEM TEST
+// MEMORY FILESYSTEM
 // ═══════════════════════════════════════════════════════════════
 
 async function testMemfs() {
-  console.log('=== Testing Memory Filesystem ===\n');
+  console.log('=== Memory Filesystem ===\n');
 
   const agentId = await client.createAgent({
     memfs: true,
@@ -554,7 +556,7 @@ knowledge. Never store secrets in memory.`,
 // ═══════════════════════════════════════════════════════════════
 
 async function testAgentOptions() {
-  console.log('=== Testing Agent Creation Options ===\n');
+  console.log('=== Agent Creation Options ===\n');
 
   const agentId = await client.createAgent({
     personality: 'blank',
@@ -569,11 +571,11 @@ async function testAgentOptions() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// CONVERSATION TESTS
+// CONVERSATIONS
 // ═══════════════════════════════════════════════════════════════
 
 async function testConversations() {
-  console.log('=== Testing Conversation Support ===\n');
+  console.log('=== Conversations ===\n');
 
   let conversationId1: string | null = null;
   let conversationId2: string | null = null;
