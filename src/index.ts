@@ -298,10 +298,6 @@ export function resumeSession(
  * const result = await prompt('What is the capital of France?', agentId);  // specific agent
  * ```
  */
-type OneShotSession = LettaCodeSession & {
-  sendAndWaitForResult(message: SendMessage): Promise<SDKResultMessage>;
-};
-
 type InitializableSession = LettaCodeSession & {
   initialize(): Promise<SDKInitMessage>;
 };
@@ -314,7 +310,7 @@ export async function prompt(
   const session = createSession(agentId, options);
 
   try {
-    return await (session as OneShotSession).sendAndWaitForResult(message);
+    return await session.sendAndWaitForResult(message);
   } finally {
     session.close();
   }

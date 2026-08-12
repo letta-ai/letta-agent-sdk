@@ -973,7 +973,7 @@ describe("LettaAgentClient", () => {
       expect(init.agentId).toBe("agent-123");
       expect(init.conversationId).toBe("conv-created");
 
-      const result = await asAdvanced(session).sendAndWaitForResult("hello");
+      const result = await session.sendAndWaitForResult("hello");
       expect(result.success).toBe(true);
       expect(result.result).toBe("hello from app-server");
       expect(result.runIds).toEqual(["run-1"]);
@@ -1008,6 +1008,28 @@ describe("LettaAgentClient", () => {
     }
   });
 
+  test("sendAndWaitForResult rejects while another turn is in flight", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.inputScenario = "hang";
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.resumeSession("conv-existing");
+    try {
+      await session.send("first message");
+
+      await expect(
+        session.sendAndWaitForResult("second message"),
+      ).rejects.toThrow("A turn is already in flight");
+    } finally {
+      FakeAppServerSocket.inputScenario = "normal";
+      session.close();
+    }
+  });
+
   test("excludes interactive tools by default without pinning an allowlist", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({
@@ -1019,7 +1041,7 @@ describe("LettaAgentClient", () => {
     const session = client.createSession("agent-123");
     try {
       await asAdvanced(session).initialize();
-      await asAdvanced(session).sendAndWaitForResult("hello");
+      await session.sendAndWaitForResult("hello");
 
       const inputCommand = fakeControlSocket().sent.find(
         (command): command is Record<string, unknown> =>
@@ -1049,7 +1071,7 @@ describe("LettaAgentClient", () => {
     });
     try {
       await asAdvanced(session).initialize();
-      await asAdvanced(session).sendAndWaitForResult("hello");
+      await session.sendAndWaitForResult("hello");
 
       const inputCommand = fakeControlSocket().sent.find(
         (command): command is Record<string, unknown> =>
@@ -1269,7 +1291,7 @@ describe("LettaAgentClient", () => {
     });
     try {
       await asAdvanced(session).initialize();
-      const result = await asAdvanced(session).sendAndWaitForResult("read a file");
+      const result = await session.sendAndWaitForResult("read a file");
 
       expect(result).toMatchObject({
         type: "result",
@@ -1306,7 +1328,7 @@ describe("LettaAgentClient", () => {
     const session = client.createSession("agent-123");
     try {
       await asAdvanced(session).initialize();
-      const result = await asAdvanced(session).sendAndWaitForResult("use a tool");
+      const result = await session.sendAndWaitForResult("use a tool");
 
       expect(result).toMatchObject({
         type: "result",
@@ -1715,7 +1737,7 @@ describe("LettaAgentClient", () => {
     const session = client.createSession(agentId);
     try {
       await asAdvanced(session).initialize();
-      await asAdvanced(session).sendAndWaitForResult("hello");
+      await session.sendAndWaitForResult("hello");
 
       const inputCommand = fakeControlSocket().sent.find(
         (command): command is Record<string, unknown> =>
@@ -2175,7 +2197,7 @@ describe("LettaAgentClient", () => {
 
       // No default allowlist is sent, so the custom tool is never filtered
       // by the harness; interactive tools are excluded via the flag instead.
-      await asAdvanced(session).sendAndWaitForResult("hello");
+      await session.sendAndWaitForResult("hello");
       const inputCommand = fakeControlSocket().sent.find(
         (command): command is Record<string, unknown> =>
           typeof command === "object" && command !== null && "type" in command && command.type === "input",
@@ -2250,7 +2272,7 @@ describe("LettaAgentClient", () => {
         ],
       });
 
-      await asAdvanced(session).sendAndWaitForResult("hello");
+      await session.sendAndWaitForResult("hello");
       const inputCommand = fakeControlSocket().sent.find(
         (command): command is Record<string, unknown> =>
           typeof command === "object" && command !== null && "type" in command && command.type === "input",

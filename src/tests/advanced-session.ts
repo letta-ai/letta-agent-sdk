@@ -1,13 +1,7 @@
-import type {
-  LettaCodeSession,
-  SDKInitMessage,
-  SDKResultMessage,
-  SendMessage,
-} from "../types.js";
+import type { LettaCodeSession, SDKInitMessage } from "../types.js";
 
 export type AdvancedSession = LettaCodeSession & {
   initialize(): Promise<SDKInitMessage>;
-  sendAndWaitForResult(message: SendMessage): Promise<SDKResultMessage>;
   updateToolset(toolsetPreference: string): Promise<void>;
 };
 

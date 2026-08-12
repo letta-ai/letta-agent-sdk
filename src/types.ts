@@ -761,6 +761,16 @@ export interface LettaCodeSession extends AsyncDisposable {
    * optimistic reconciliation; the SDK generates one when omitted.
    */
   send(message: SendMessage, options?: SendOptions): Promise<void>;
+  /**
+   * Send one user message and resolve with its terminal result.
+   *
+   * This method consumes the session stream internally. Use `send()` and
+   * `stream()` when the caller needs intermediate events or wants the runtime
+   * to queue another message behind an active turn.
+   *
+   * Rejects if this session already has a turn in flight.
+   */
+  sendAndWaitForResult(message: SendMessage): Promise<SDKResultMessage>;
   stream(): AsyncGenerator<SDKMessage>;
   abort(): Promise<void>;
   sendCommand(command: SDKProtocolCommand): Promise<void>;

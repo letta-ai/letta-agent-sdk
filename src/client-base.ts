@@ -93,10 +93,6 @@ function looksLikeConversationId(id: string): boolean {
   return id.startsWith("conv-") || id.startsWith("local-conv-");
 }
 
-type OneShotSession = LettaCodeSession & {
-  sendAndWaitForResult(message: SendMessage): Promise<SDKResultMessage>;
-};
-
 /**
  * Top-level Letta Agent SDK client.
  *
@@ -348,7 +344,7 @@ export class LettaAgentClientBase {
     const session = this.createSession(agentId, options);
 
     try {
-      return await (session as OneShotSession).sendAndWaitForResult(message);
+      return await session.sendAndWaitForResult(message);
     } finally {
       session.close();
     }
