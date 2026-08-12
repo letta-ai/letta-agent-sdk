@@ -56,11 +56,11 @@ jobs:
         if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
         env:
           LETTA_API_KEY: ${{ secrets.LETTA_API_KEY }}
-        run: bun examples/v2-examples.ts basic
+        run: bun examples/sdk-tour.ts basic
 
       - name: SDK full test
         # Only run with API key on push or same-repo PRs
         if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
         env:
           LETTA_API_KEY: ${{ secrets.LETTA_API_KEY }}
-        run: bun examples/v2-examples.ts all
+        run: bun examples/sdk-tour.ts all
