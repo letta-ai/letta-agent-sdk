@@ -15,6 +15,7 @@ import {
   isApprovalConflictSignal,
   loopStatusRunIds,
   loopStatusValue,
+  normalizeCallerOtid,
   queueItems,
   sameRuntime,
   streamDeltaMessageType,
@@ -76,11 +77,19 @@ export class RemoteTurnCoordinator {
     return this.activeTurn !== null || this.pendingTurns.length > 0;
   }
 
-  trackSentTurn(runtime: RuntimeScope): TurnTracker {
+  /**
+   * Start tracking a turn. A caller-supplied OTID doubles as the turn's
+   * `clientMessageId` so queue updates carry the same correlation id the
+   * persisted message will; otherwise the SDK mints one.
+   */
+  trackSentTurn(runtime: RuntimeScope, callerOtid?: string): TurnTracker {
+    const otid = normalizeCallerOtid(callerOtid);
     const turn: TurnTracker = {
       id: ++this.nextTurnId,
       runtime,
-      clientMessageId: `sdk-message-${Date.now()}-${++this.clientMessageCounter}`,
+      ...(otid !== undefined ? { otid } : {}),
+      clientMessageId:
+        otid ?? `sdk-message-${Date.now()}-${++this.clientMessageCounter}`,
       queuedAt: Date.now(),
       startedAt: 0,
       assistantText: "",

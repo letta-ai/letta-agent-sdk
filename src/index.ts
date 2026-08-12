@@ -111,6 +111,7 @@ export type {
   ImageContent,
   MessageContentItem,
   SendMessage,
+  SendOptions,
   // List messages API
   ListMessagesOptions,
   ListMessagesResult,
@@ -187,6 +188,20 @@ export { CloudManagedSandboxExpiredError } from "./cloud-session.js";
 export { createReactNativeWebSocketConstructor } from "./websocket.js";
 
 export { extractStreamTextDelta } from "./stream-events.js";
+export { createTranscriptAccumulator } from "./transcript-accumulator.js";
+export type {
+  TranscriptAccumulator,
+  TranscriptHistoryPage,
+  TranscriptRebaseOptions,
+  TranscriptRow,
+  TranscriptRowIdentity,
+  TranscriptRowKind,
+  TranscriptTextKind,
+  TranscriptTextRow,
+  TranscriptToolCallRow,
+  TranscriptToolCallStatus,
+  TranscriptToolResult,
+} from "./transcript-accumulator.js";
 
 // Tool helpers
 export {
@@ -203,12 +218,11 @@ export {
  *
  * @example
  * ```typescript
- * // Create a generic agent with custom memory.
+ * // Create an agent with a git-backed memory filesystem.
  * const agentId = await createAgent({
- *   memory: [
- *     { label: 'persona', value: 'You are a helpful coding assistant' },
- *     { label: 'project', value: 'Use Bun for JavaScript projects' },
- *   ],
+ *   memfs: true,
+ *   systemPrompt: `You are a helpful coding assistant. Keep durable project
+ *     notes in focused Markdown files under reference/.`,
  *   model: 'claude-sonnet-4',
  *   tags: ['project:docs']
  * });

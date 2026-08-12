@@ -223,6 +223,22 @@ function validateMcpServers(servers: McpServers | undefined): void {
  * Validate CreateSessionOptions (used by createSession and resumeSession).
  */
 export function validateCreateSessionOptions(options: CreateSessionOptions): void {
+  if (options.stateless !== undefined && typeof options.stateless !== "boolean") {
+    throw new Error("Invalid stateless. Expected a boolean.");
+  }
+  if (options.stateless) {
+    const persistedOption = [
+      ["model", options.model],
+      ["reasoningEffort", options.reasoningEffort],
+      ["dreaming", options.dreaming],
+      ["resources", options.resources],
+    ].find(([, value]) => value !== undefined);
+    if (persistedOption) {
+      throw new Error(
+        `stateless sessions cannot set ${persistedOption[0]} because it changes persisted agent configuration.`,
+      );
+    }
+  }
   validateClientToolset(options.toolset);
   validateSkillSources(options.skillSources);
   validateMcpServers(options.mcpServers);

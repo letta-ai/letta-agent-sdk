@@ -12,7 +12,7 @@
  *   bun cli.ts --list             # List all campaigns
  *   bun cli.ts --status           # Show DM and campaign status
  *   bun cli.ts --rulebook         # Display the DM's rulebook
- *   bun cli.ts --reset            # Delete everything and start fresh
+ *   bun cli.ts --reset            # Delete local campaign state and start fresh
  */
 
 import { parseArgs } from 'node:util';
@@ -183,7 +183,7 @@ OPTIONS:
   --list             List all campaigns
   --status           Show DM and campaign status
   --rulebook         Display the DM's custom rulebook
-  --reset            Delete everything and start fresh
+  --reset            Delete local campaign state and start fresh
   -h, --help         Show this help
 
 EXAMPLES:
@@ -207,8 +207,8 @@ GAMEPLAY:
     quit  - End session (auto-saves)
 
 Each campaign is stored in campaigns/{name}/ with files for world, character,
-NPCs, quests, and session history. The DM reads and writes these to maintain
-perfect memory across sessions.
+NPCs, quests, and session history. The DM reads and writes these files to keep
+campaign context across sessions.
 `);
 }
 

@@ -98,36 +98,39 @@ But doesn't your model assume...
 
 ## Agent Persistence
 
-Each agent maintains memory blocks that persist across seminars:
+Each agent maintains memory files that persist across seminars:
 
-**Presenter memories:**
-- `research-notes`: Findings and sources from research
-- `past-seminars`: Feedback received from faculty
-- `methodology`: Research approach refined over time
+**Presenter memory files:**
+- `reference/research-notes.md`: Findings and sources from research
+- `reference/past-seminars.md`: Feedback received from faculty
+- `reference/methodology.md`: Research approach refined over time
 
-**Faculty memories:**
-- `seminar-notes`: Key points from presentations attended
-- `presenter-patterns`: Strengths/weaknesses observed
-- `good-questions`: Questions that generated useful discussion
+**Faculty memory files:**
+- `reference/seminar-notes.md`: Key points from presentations attended
+- `reference/presenter-patterns.md`: Strengths and weaknesses observed
+- `reference/good-questions.md`: Questions that generated useful discussion
 
 ## Agent Teleportation
 
 After running a seminar, the agents can be "teleported" into other contexts:
 
 ```typescript
-import { resumeSession } from '@letta-ai/letta-agent-sdk';
+import { LettaAgentClient } from '@letta-ai/letta-agent-sdk';
+
+const client = new LettaAgentClient({ backend: 'local' });
 
 // Get agent ID from --status
-const drChen = resumeSession('agent-xxx', { permissionMode: 'unrestricted' });
+const drChen = client.resumeSession('agent-xxx', { permissionMode: 'unrestricted' });
 
 // Dr. Chen remembers all past seminars!
 await drChen.send('What patterns have you noticed in economics presentations?');
 ```
 
-View any agent in the browser:
+Agents created with `backend: 'cloud'` can be viewed in the hosted UI:
 ```
-https://app.letta.com/agents/<agent-id>
+https://chat.letta.com/agents/<agent-id>
 ```
+(Local-backend agents are not visible in hosted chat.)
 
 ## Learning Demonstration
 

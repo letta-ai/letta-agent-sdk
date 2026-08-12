@@ -407,6 +407,9 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
           role: "user",
           content: normalizeSendMessage(message),
           client_message_id: options.clientMessageId,
+          // The runtime stamps an OTID from client_message_id when the caller
+          // omits one; sending it explicitly keeps the caller's value canonical.
+          ...(options.otid !== undefined ? { otid: options.otid } : {}),
         },
       ],
     };
@@ -727,6 +730,12 @@ export class AppServerSession extends RemoteClientSessionCore {
     const mode = mapPermissionMode(options.permissionMode);
     if (mode) command.mode = mode;
     if (options.cwd !== undefined) command.cwd = options.cwd;
+    if (
+      this.mode.kind === "session" &&
+      this.mode.options.stateless === true
+    ) {
+      command.stateless = true;
+    }
     // Keep the distinction between omitted (use harness defaults) and []
     // (disable bundled/global/agent/project skills). The app-server runtime is
     // session-scoped, so this must be sent on creation and every resume.

@@ -93,7 +93,7 @@ export const SAMPLE_PERSONAS: VoterPersona[] = [
 
 1. **Agent Persistence** - All agents remember previous sessions
 2. **Multi-Agent Coordination** - Candidate, voters, and analyst interact
-3. **Persona Memory** - Each voter maintains their identity in memory blocks
+3. **Persona Memory** - Each voter keeps durable preferences in a memory file
 4. **Streaming Responses** - See responses as they're generated
 
 ## Expanding to More Voters

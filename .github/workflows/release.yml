@@ -228,7 +228,7 @@ jobs:
       - name: SDK smoke test
         env:
           LETTA_API_KEY: ${{ secrets.LETTA_API_KEY }}
-        run: bun examples/v2-examples.ts basic
+        run: bun examples/sdk-tour.ts basic
 
       - name: Commit and push release changes
         id: commit

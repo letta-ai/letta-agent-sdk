@@ -1,136 +1,18 @@
 /**
- * Coordinator Agent
- * 
- * Orchestrates the research workflow, manages quality control,
- * and tracks team performance over time.
+ * Research workflow orchestrator
+ *
+ * Runs the researcher, analyst, and writer in sequence.
  */
 
-import { resumeSession, type LettaCodeSession } from '../../../src/index.js';
-import { createAgentSession } from '../../create-agent-session.js';
-import type { Depth, ResearchTask, UserFeedback } from '../types.js';
+import { createExampleClient, formatAgentLink } from '../../create-agent-session.js';
+import type { Depth, UserFeedback } from '../types.js';
 import { DEPTH_CONFIGS, generateTaskId, formatDuration } from '../types.js';
-import { loadTeamState, saveTeamState, ARTIFACTS, readOutput, getOutputPath, outputExists } from '../tools/file-store.js';
+import { loadTeamState, saveTeamState } from '../tools/file-store.js';
 import { createResearcher, runResearchTask, reflectOnTask as researcherReflect } from './researcher.js';
 import { createAnalyst, runAnalysis, reflectOnTask as analystReflect } from './analyst.js';
 import { createWriter, writeReport, reflectOnTask as writerReflect } from './writer.js';
 
-const COORDINATOR_SYSTEM_PROMPT = `You are the Research Team Coordinator.
-
-## Your Role
-You orchestrate a research team of specialists:
-- **Researcher**: Finds and evaluates academic sources
-- **Analyst**: Synthesizes findings and identifies patterns
-- **Writer**: Produces the final research report
-
-You manage workflow, ensure quality, and learn from each task to improve team performance.
-
-## Your Responsibilities
-1. Receive research queries from users
-2. Plan the research approach based on depth
-3. Delegate tasks to team members
-4. Review intermediate outputs for quality
-5. Request iterations if quality is insufficient
-6. Collect and distribute user feedback
-7. Track team performance metrics
-
-## Quality Thresholds
-- Quick: Accept reasonable coverage of the topic
-- Standard: Require thorough coverage with good synthesis
-- Comprehensive: Require extensive coverage, deep analysis, polished writing
-
-## Memory Usage
-Your memory blocks:
-- **team-performance**: Track metrics, success patterns, agent strengths
-- **user-preferences**: Store feedback, preferred styles, past requests
-- **research-history**: Brief summaries of completed research tasks
-
-Use these to improve coordination over time.`;
-
-/**
- * Create or resume the coordinator agent
- */
-export async function createCoordinator(
-  existingAgentId?: string | null
-): Promise<LettaCodeSession> {
-  if (existingAgentId) {
-    return resumeSession(existingAgentId, {
-      model: 'haiku',
-      allowedTools: ['Glob', 'Read', 'Write'],
-      permissionMode: 'unrestricted',
-    });
-  }
-  
-  return createAgentSession({
-    model: 'haiku',
-    systemPrompt: COORDINATOR_SYSTEM_PROMPT,
-    memory: [
-      {
-        label: 'team-performance',
-        value: `# Team Performance Metrics
-
-## Overall Stats
-- Tasks Completed: 0
-- Average Rating: N/A
-- Success Rate: N/A
-
-## Agent Performance
-### Researcher
-- Strengths: [To be discovered]
-- Areas to Improve: [To be discovered]
-
-### Analyst  
-- Strengths: [To be discovered]
-- Areas to Improve: [To be discovered]
-
-### Writer
-- Strengths: [To be discovered]
-- Areas to Improve: [To be discovered]
-
-## Successful Patterns
-[Record what works well]
-
-## Lessons Learned
-[Record mistakes and improvements]
-`,
-        description: 'Track team metrics, success patterns, and agent strengths/weaknesses',
-      },
-      {
-        label: 'user-preferences',
-        value: `# User Preferences
-
-## Feedback History
-[Track user ratings and comments]
-
-## Style Preferences
-- Preferred depth: Unknown
-- Citation style: Standard (Author, Year)
-- Tone: Professional but accessible
-
-## Common Requests
-[Track recurring research topics or requirements]
-`,
-        description: 'Store user feedback, preferences, and past requests',
-      },
-      {
-        label: 'research-history',
-        value: `# Research History
-
-## Completed Tasks
-[Brief summaries of past research]
-
-## Topics Covered
-[Track domains and topics researched]
-
-## Notable Insights
-[Key learnings that might help future research]
-`,
-        description: 'Brief summaries of completed research tasks',
-      },
-    ],
-    allowedTools: ['Glob', 'Read', 'Write'],
-    permissionMode: 'unrestricted',
-  });
-}
+const client = createExampleClient({ backend: 'local' });
 
 /**
  * Run a complete research workflow
@@ -177,7 +59,7 @@ export async function runResearchWorkflow(
   } else if (researcher.agentId) {
     log('Research', `Resumed researcher agent: ${researcher.agentId}`);
   }
-  log('Research', `  → https://app.letta.com/agents/${researcher.agentId}`);
+  log('Research', `  → ${formatAgentLink(researcher.agentId, client)}`);
   
   if (!researchResult.success) {
     researcher.close();
@@ -204,7 +86,7 @@ export async function runResearchWorkflow(
   } else if (analyst.agentId) {
     log('Analysis', `Resumed analyst agent: ${analyst.agentId}`);
   }
-  log('Analysis', `  → https://app.letta.com/agents/${analyst.agentId}`);
+  log('Analysis', `  → ${formatAgentLink(analyst.agentId, client)}`);
   
   if (!analysisResult.success) {
     analyst.close();
@@ -230,7 +112,7 @@ export async function runResearchWorkflow(
   } else if (writer.agentId) {
     log('Writing', `Resumed writer agent: ${writer.agentId}`);
   }
-  log('Writing', `  → https://app.letta.com/agents/${writer.agentId}`);
+  log('Writing', `  → ${formatAgentLink(writer.agentId, client)}`);
   
   if (!writeResult.success) {
     writer.close();
@@ -318,15 +200,9 @@ export async function getTeamStatus(): Promise<{
 export async function resetTeam(): Promise<void> {
   await saveTeamState({
     agentIds: {
-      coordinator: null,
       researcher: null,
       analyst: null,
       writer: null,
-    },
-    sharedBlockIds: {
-      sources: null,
-      terminology: null,
-      pitfalls: null,
     },
     completedTasks: 0,
   });

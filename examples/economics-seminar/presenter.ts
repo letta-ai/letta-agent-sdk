@@ -5,9 +5,15 @@
  * Defends their work against faculty questions.
  */
 
-import { resumeSession, type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession } from '../create-agent-session.js';
+import { type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession, createExampleClient, resumeExampleSession } from '../create-agent-session.js';
 import type { SeminarConfig } from './types.js';
+
+// File-editing demo: pin the local backend so agent state stays consistent.
+const client = createExampleClient({ backend: 'local' });
+
+// web_search is a server-side base tool. It does not belong in allowedTools,
+// which controls the client-side tools for this SDK session.
 
 const PRESENTER_SYSTEM_PROMPT = `You are an economics researcher presenting at an academic seminar.
 
@@ -34,10 +40,10 @@ You conduct original research on economic topics and present your findings to a 
 - Connect back to your main thesis
 
 ## Memory Usage
-You have memory blocks that persist:
-- **research-notes**: Track your research findings and sources
-- **past-seminars**: Remember feedback from previous presentations
-- **methodology**: Refine your research approach based on experience
+Use focused memory files that persist:
+- **reference/research-notes.md**: Track your research findings and sources
+- **reference/past-seminars.md**: Remember feedback from previous presentations
+- **reference/methodology.md**: Refine your research approach based on experience
 
 Update these as you learn from faculty feedback.`;
 
@@ -49,65 +55,19 @@ export async function createPresenter(
   config: SeminarConfig
 ): Promise<LettaCodeSession> {
   if (existingAgentId) {
-    return resumeSession(existingAgentId, {
+    return resumeExampleSession(existingAgentId, {
       model: config.model,
-      allowedTools: ['web_search', 'Read', 'Write'],
+      allowedTools: ['Read', 'Write'],
       permissionMode: 'unrestricted',
-    });
+    }, client);
   }
   
   return createAgentSession({
     model: config.model,
     systemPrompt: PRESENTER_SYSTEM_PROMPT,
-    memory: [
-      {
-        label: 'research-notes',
-        value: `# Research Notes
-
-## Current Research
-[Will be populated during research phase]
-
-## Key Sources
-[Track reliable sources found]
-
-## Data Points
-[Important statistics and findings]
-`,
-        description: 'Track research findings, sources, and data',
-      },
-      {
-        label: 'past-seminars',
-        value: `# Past Seminar Feedback
-
-## Recurring Critiques
-[Track common challenges from faculty]
-
-## Successful Defenses
-[Note arguments that worked well]
-
-## Areas to Improve
-[Based on faculty feedback]
-`,
-        description: 'Remember feedback from previous presentations',
-      },
-      {
-        label: 'methodology',
-        value: `# Research Methodology
-
-## Preferred Approaches
-- Start with recent empirical studies
-- Look for natural experiments
-- Consider multiple theoretical frameworks
-
-## Lessons Learned
-[Refine based on experience]
-`,
-        description: 'Research approach refined over time',
-      },
-    ],
-    allowedTools: ['web_search', 'Read', 'Write'],
+    allowedTools: ['Read', 'Write'],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 /**
@@ -229,10 +189,10 @@ function extractTopic(response: string): string {
                      response.match(/present(?:ing)?[:\s]+["']?([^"'\n.]+)/i);
   
   if (topicMatch) {
-    return topicMatch[1].trim();
+    return topicMatch[1]?.trim() ?? 'Untitled topic';
   }
   
   // Fallback: first sentence
-  const firstSentence = response.split(/[.!?]/)[0];
-  return firstSentence.slice(0, 100);
+  const firstSentence = response.split(/[.!?]/)[0] ?? '';
+  return firstSentence.slice(0, 100) || 'Untitled topic';
 }

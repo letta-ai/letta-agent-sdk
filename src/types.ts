@@ -109,6 +109,25 @@ export type MessageContentItem = TextContent | ImageContent;
  */
 export type SendMessage = string | MessageContentItem[];
 
+/**
+ * Per-turn options accepted by `send()`.
+ */
+export interface SendOptions {
+  /**
+   * Caller-supplied offline threading id (OTID) for this user message.
+   *
+   * The OTID is the canonical optimistic-input-matching key: stamp the row you
+   * render optimistically with the same value and you can correlate it with the
+   * persisted user message that comes back from the stream or from
+   * `listMessages()`. It is also used as the turn's `clientMessageId`, so it
+   * shows up on `SDKQueueItem.clientMessageId` while the message is queued.
+   *
+   * When omitted the SDK generates one. Must be a non-empty string; reuse the
+   * same value when retrying a send so the runtime can deduplicate it.
+   */
+  otid?: string;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // SKILLS / REMINDER / DREAMING TYPES
 // ═══════════════════════════════════════════════════════════════
@@ -664,6 +683,13 @@ export interface CreateSessionOptions {
   cwd?: string;
 
   /**
+   * Run without loading or changing the agent's MemFS. The agent and
+   * conversation remain persistent; this only changes the session's local
+   * memory, agent-skill, agent-mod, transcript, and reflection behavior.
+   */
+  stateless?: boolean;
+
+  /**
    * Restrict available skills by source.
    * Empty array disables all skills (`--no-skills`).
    */
@@ -730,7 +756,11 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
 }
 
 export interface LettaCodeSession extends AsyncDisposable {
-  send(message: SendMessage): Promise<void>;
+  /**
+   * Send a user message. Pass `{ otid }` to supply your own correlation id for
+   * optimistic reconciliation; the SDK generates one when omitted.
+   */
+  send(message: SendMessage, options?: SendOptions): Promise<void>;
   stream(): AsyncGenerator<SDKMessage>;
   abort(): Promise<void>;
   sendCommand(command: SDKProtocolCommand): Promise<void>;
@@ -865,8 +895,8 @@ export interface SessionDeviceStatus {
 export interface CreateAgentOptions {
   /**
    * Optional Letta Code personality preset. Presets are explicit: when this is
-   * omitted, createAgent() uses the supplied memory blocks directly without
-   * adding personality-derived identity, name, or description fields.
+   * omitted, createAgent() does not add personality-derived identity, name, or
+   * description fields.
    */
   personality?: LettaCodePersonalityId;
 
@@ -885,17 +915,19 @@ export interface CreateAgentOptions {
   systemPrompt?: string | SystemPromptPreset | SystemPromptPresetConfigSDK;
 
   /**
-   * Memory block configuration. Each item can be:
+   * Legacy memory block configuration. New agents should use the git-backed
+   * memory filesystem instead. Each item can be:
    * - string: Preset block name ("persona", "human", "skills", "loaded_skills")
    * - CreateBlock: Custom block definition (e.g., { label: "project", value: "..." })
    * - { blockId: string }: Reference to existing shared block
+   * @deprecated Prefer `memfs` and let the agent maintain memory files.
    */
   memory?: MemoryItem[];
 
-  /** Convenience: Set persona block value directly */
+  /** @deprecated Prefer a personality preset or a system memory file. */
   persona?: string;
 
-  /** Convenience: Set human block value directly */
+  /** @deprecated Prefer a focused memory file for user preferences. */
   human?: string;
 
   /**

@@ -781,7 +781,10 @@ describe("LettaAgentClient", () => {
       appServer: { url: "ws://127.0.0.1:4500/ws", WebSocket: FakeAppServerSocket },
     });
 
-    const session = client.createSession("agent-123", { cwd: "/tmp/project" });
+    const session = client.createSession("agent-123", {
+      cwd: "/tmp/project",
+      stateless: true,
+    });
     try {
       const init = await asAdvanced(session).initialize();
       expect(init.agentId).toBe("agent-123");
@@ -792,7 +795,11 @@ describe("LettaAgentClient", () => {
         agent_id: "agent-123",
         create_conversation: { body: {} },
         cwd: "/tmp/project",
+        stateless: true,
       });
+      await expect(session.updateModel("openai/gpt-5.2")).rejects.toThrow(
+        "unavailable in a stateless session",
+      );
     } finally {
       session.close();
     }
@@ -1410,6 +1417,113 @@ describe("LettaAgentClient", () => {
         type: "result",
         success: true,
         result: "second response",
+      });
+    } finally {
+      FakeAppServerSocket.inputScenario = "normal";
+      session.close();
+    }
+  });
+
+  test("send() forwards a caller-supplied otid as the wire otid and client_message_id", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.inputScenario = "normal";
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123");
+    try {
+      await asAdvanced(session).initialize();
+      await session.send("hello", { otid: "otid-from-caller" });
+
+      const inputCommand = fakeControlSocket().sent.find(
+        (sent) => (sent as { type?: string }).type === "input",
+      ) as { payload: { messages: Array<Record<string, unknown>> } } | undefined;
+      expect(inputCommand?.payload.messages[0]).toMatchObject({
+        role: "user",
+        content: "hello",
+        otid: "otid-from-caller",
+        client_message_id: "otid-from-caller",
+      });
+    } finally {
+      session.close();
+    }
+  });
+
+  test("send() generates a client message id and omits otid when the caller supplies none", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.inputScenario = "normal";
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123");
+    try {
+      await asAdvanced(session).initialize();
+      await session.send("hello");
+
+      const inputCommand = fakeControlSocket().sent.find(
+        (sent) => (sent as { type?: string }).type === "input",
+      ) as { payload: { messages: Array<Record<string, unknown>> } } | undefined;
+      const message = inputCommand?.payload.messages[0];
+      expect(typeof message?.client_message_id).toBe("string");
+      expect(message?.client_message_id as string).toMatch(/^sdk-message-/);
+      expect(message).not.toHaveProperty("otid");
+    } finally {
+      session.close();
+    }
+  });
+
+  test("send() rejects an empty caller-supplied otid", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.inputScenario = "normal";
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123");
+    try {
+      await asAdvanced(session).initialize();
+      await expect(session.send("hello", { otid: "   " })).rejects.toThrow(
+        "send() otid must be a non-empty string",
+      );
+      expect(
+        fakeControlSocket().sent.some((sent) => (sent as { type?: string }).type === "input"),
+      ).toBe(false);
+    } finally {
+      session.close();
+    }
+  });
+
+  test("a caller-supplied otid is the correlation id on queued message updates", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.inputScenario = "queuedSecond";
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123");
+    try {
+      await asAdvanced(session).initialize();
+      await session.send("first message");
+      await session.send("second message", { otid: "otid-queued" });
+
+      const iterator = session.stream();
+      expect((await iterator.next()).value).toMatchObject({
+        type: "assistant",
+        content: "first response",
+      });
+      expect((await iterator.next()).value).toMatchObject({
+        type: "queue_update",
+        queue: [expect.objectContaining({ clientMessageId: "otid-queued" })],
       });
     } finally {
       FakeAppServerSocket.inputScenario = "normal";

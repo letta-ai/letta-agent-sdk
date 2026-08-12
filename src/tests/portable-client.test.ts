@@ -2,8 +2,11 @@ import { describe, expect, test } from "bun:test";
 import {
   LettaAgentClient,
   createReactNativeWebSocketConstructor,
+  createTranscriptAccumulator,
+  extractStreamTextDelta,
   type LettaCodeReactNativeSocketConstructor,
   type LettaCodeSocketOptions,
+  type TranscriptRow,
 } from "../client-entry.js";
 
 describe("portable client entry", () => {
@@ -82,5 +85,22 @@ describe("portable client entry", () => {
       protocols: undefined,
       options: { headers: { Authorization: "Bearer token" } },
     });
+  });
+
+  test("exports the streaming helpers browser consumers need", () => {
+    expect(typeof extractStreamTextDelta).toBe("function");
+
+    const accumulator = createTranscriptAccumulator();
+    const rows: readonly TranscriptRow[] = accumulator.apply({
+      type: "assistant",
+      content: "hello",
+      uuid: "m1",
+      otid: "o1",
+      seqId: 1,
+      runId: "r1",
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "assistant", text: "hello" });
   });
 });

@@ -7,9 +7,12 @@
  * 3. Analyst - provides focus group analysis
  */
 
-import { resumeSession, type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession } from '../create-agent-session.js';
-import { VoterPersona, CONFIG } from './types.js';
+import { type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession, createExampleClient, resumeExampleSession } from '../create-agent-session.js';
+import { CONFIG, type VoterPersona } from './types.js';
+
+// File-editing demo: pin the local backend so agent state stays consistent.
+const client = createExampleClient({ backend: 'local' });
 
 // ============================================================================
 // CANDIDATE AGENT
@@ -31,33 +34,23 @@ When presenting a position:
 When asking follow-ups:
 - Probe deeper into concerns raised
 - Ask about trade-offs they'd accept
-- Keep questions focused and open-ended`;
+- Keep questions focused and open-ended
+
+Keep durable messaging lessons in reference/candidate-lessons.md.`;
 
 export async function createCandidateAgent(): Promise<LettaCodeSession> {
   return createAgentSession({
     model: CONFIG.model,
     systemPrompt: CANDIDATE_PROMPT,
-    memory: [
-      {
-        label: 'positions',
-        value: '# My Positions\n\n(Positions I\'ve presented)',
-        description: 'Policy positions I have presented to focus groups',
-      },
-      {
-        label: 'voter-insights',
-        value: '# Voter Insights\n\n(What I\'ve learned about voter concerns)',
-        description: 'Insights gathered from voter feedback',
-      },
-    ],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 export async function resumeCandidateAgent(agentId: string): Promise<LettaCodeSession> {
-  return resumeSession(agentId, {
+  return resumeExampleSession(agentId, {
     model: CONFIG.model,
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 // ============================================================================
@@ -88,41 +81,24 @@ RESPONSE STYLE:
 - Speak naturally, as yourself (first person)
 - Keep responses to 2-4 sentences
 - Show emotional reactions when appropriate
-- Reference your personal situation when relevant`;
+- Reference your personal situation when relevant
+
+Keep durable changes to your preferences in reference/voter-profile.md.`;
 }
 
 export async function createVoterAgent(persona: VoterPersona): Promise<LettaCodeSession> {
   return createAgentSession({
     model: CONFIG.model,
     systemPrompt: buildVoterPrompt(persona),
-    memory: [
-      {
-        label: 'my-identity',
-        value: `# Who I Am
-
-Name: ${persona.name}
-Age: ${persona.age}
-Location: ${persona.location}
-Party: ${persona.party} (${persona.leaningStrength})
-Top Issues: ${persona.topIssues.join(', ')}
-Background: ${persona.background}`,
-        description: 'My demographic information and political identity',
-      },
-      {
-        label: 'my-reactions',
-        value: '# My Reactions\n\n(How I\'ve felt about positions presented)',
-        description: 'My emotional reactions to political positions',
-      },
-    ],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 export async function resumeVoterAgent(agentId: string): Promise<LettaCodeSession> {
-  return resumeSession(agentId, {
+  return resumeExampleSession(agentId, {
     model: CONFIG.model,
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 // ============================================================================
@@ -142,33 +118,23 @@ Analysis style:
 - Identify emotional triggers
 - Note differences between voter segments
 - Keep analysis concise but substantive (4-6 sentences)
-- End with 1-2 tactical recommendations`;
+- End with 1-2 tactical recommendations
+
+Keep durable response patterns in reference/focus-group-patterns.md.`;
 
 export async function createAnalystAgent(): Promise<LettaCodeSession> {
   return createAgentSession({
     model: CONFIG.model,
     systemPrompt: ANALYST_PROMPT,
-    memory: [
-      {
-        label: 'session-notes',
-        value: '# Focus Group Notes\n\n(Observations from sessions)',
-        description: 'Running notes on voter reactions and patterns',
-      },
-      {
-        label: 'recommendations',
-        value: '# Strategic Recommendations\n\n(Messaging recommendations)',
-        description: 'Tactical recommendations based on focus group insights',
-      },
-    ],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 export async function resumeAnalystAgent(agentId: string): Promise<LettaCodeSession> {
-  return resumeSession(agentId, {
+  return resumeExampleSession(agentId, {
     model: CONFIG.model,
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 // ============================================================================
