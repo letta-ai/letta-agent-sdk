@@ -143,13 +143,10 @@ export type TurnTracker = {
   timeout: ReturnType<typeof setTimeout> | null;
 };
 
-export const FAILURE_STOP_REASONS = new Set([
-  "error",
-  "llm_api_error",
-  "max_steps",
-  "interrupted",
-  "cancelled",
-  "canceled",
+const SUCCESS_STOP_REASONS = new Set([
+  "end_turn",
+  "tool_rule",
+  "requires_approval",
 ]);
 const REASONING_EFFORTS = new Set<ReasoningEffort>([
   "none",
@@ -224,6 +221,10 @@ export function toSdkErrorCode(value: string | null | undefined): SDKErrorCode |
   return KNOWN_SDK_ERROR_CODES.has(value as SDKErrorCode)
     ? (value as SDKErrorCode)
     : undefined;
+}
+
+export function isFailureStopReason(value: string | null | undefined): boolean {
+  return value != null && !SUCCESS_STOP_REASONS.has(value);
 }
 
 function isReasoningEffort(value: unknown): value is ReasoningEffort {

@@ -97,7 +97,7 @@ describe("remote turn terminal receipts", () => {
     conversation_id: "conv-1",
   };
 
-  test("uses turn_finished as the authoritative successful terminal", async () => {
+  test("uses a correlated turn_finished receipt as a successful terminal", async () => {
     const coordinator = new RemoteTurnCoordinator({
       label: "test",
       onDeviceStatus: () => {},
@@ -133,6 +133,80 @@ describe("remote turn terminal receipts", () => {
       result: "done",
       stopReason: "end_turn",
       runIds: ["run-1"],
+    });
+    coordinator.close();
+  });
+
+  test("does not apply a settled run receipt to the next tracked turn", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "first",
+        run_id: "run-1",
+        id: "message-1",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-1",
+      }),
+      runtime,
+    );
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      runIds: ["run-1"],
+    });
+
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-1",
+        run_id: "run-1",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+
+    expect(coordinator.hasInFlightTurn()).toBe(true);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "second",
+        run_id: "run-2",
+        id: "message-2",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-2",
+        run_id: "run-2",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "assistant",
+      content: "second",
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      result: "second",
+      runIds: ["run-2"],
     });
     coordinator.close();
   });
@@ -198,6 +272,45 @@ describe("remote turn terminal receipts", () => {
 
     expect(coordinator.hasInFlightTurn()).toBe(true);
     coordinator.close();
+  });
+
+  test("classifies terminal failure receipts as failed results", async () => {
+    const stopReasons = [
+      "invalid_llm_response",
+      "invalid_tool_call",
+      "max_tokens_exceeded",
+      "no_tool_call",
+      "insufficient_credits",
+      "context_window_overflow_in_system_prompt",
+    ];
+
+    for (const stopReason of stopReasons) {
+      const coordinator = new RemoteTurnCoordinator({
+        label: "test",
+        onDeviceStatus: () => {},
+      });
+      coordinator.trackSentTurn(runtime);
+      coordinator.handleProtocolMessage(
+        {
+          type: "turn_finished",
+          runtime,
+          turn_id: `turn-${stopReason}`,
+          run_id: `run-${stopReason}`,
+          stop_reason: stopReason,
+          error: "terminal failure",
+        },
+        runtime,
+      );
+
+      expect(await coordinator.nextMessage()).toMatchObject({
+        type: "result",
+        success: false,
+        errorCode: "error",
+        errorDetail: "terminal failure",
+        stopReason,
+      });
+      coordinator.close();
+    }
   });
 
   test("reports active transport loss as a recoverable unknown outcome", async () => {

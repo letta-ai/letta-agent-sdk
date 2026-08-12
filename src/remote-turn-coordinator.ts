@@ -8,12 +8,12 @@ import type {
   SessionDeviceStatus,
 } from "./types.js";
 import {
-  FAILURE_STOP_REASONS,
   deviceStatusRecord,
   extractTextFromContent,
   firstToolCall,
   firstToolReturn,
   isApprovalConflictSignal,
+  isFailureStopReason,
   loopStatusRunIds,
   loopStatusValue,
   normalizeCallerOtid,
@@ -42,6 +42,8 @@ type RemoteTurnCoordinatorConfig = {
   onDeviceStatus(status: SessionDeviceStatus): void;
 };
 
+const MAX_RECENTLY_SETTLED_RUN_IDS = 256;
+
 /**
  * Owns the portable session's turn correlation and stream queue.
  *
@@ -58,6 +60,7 @@ export class RemoteTurnCoordinator {
   private streamResolvers: Array<(message: SDKMessage | null) => void> = [];
   private activeTurn: TurnTracker | null = null;
   private pendingTurns: TurnTracker[] = [];
+  private settledRunIds = new Set<string>();
   private nextTurnId = 0;
   private messageCounter = 0;
   private clientMessageCounter = 0;
@@ -272,8 +275,20 @@ export class RemoteTurnCoordinator {
       clearTimeout(active.timeout);
       active.timeout = null;
     }
+    this.rememberSettledRunIds(active.runIds);
     this.enqueue(this.resultFromTurn(turn, active));
     this.activeTurn = null;
+  }
+
+  private rememberSettledRunIds(runIds: Iterable<string>): void {
+    for (const runId of runIds) {
+      if (!runId || this.settledRunIds.has(runId)) continue;
+      this.settledRunIds.add(runId);
+      if (this.settledRunIds.size > MAX_RECENTLY_SETTLED_RUN_IDS) {
+        const expired = this.settledRunIds.values().next().value;
+        if (expired) this.settledRunIds.delete(expired);
+      }
+    }
   }
 
   private handleLoopStatusMessage(message: ProtocolMessage): void {
@@ -332,6 +347,7 @@ export class RemoteTurnCoordinator {
   }): void {
     const active = this.activeTurn;
     if (!active || !finished.runId) return;
+    if (this.settledRunIds.has(finished.runId)) return;
     if (
       active.runIds.size > 0 &&
       !active.runIds.has(finished.runId)
@@ -344,7 +360,7 @@ export class RemoteTurnCoordinator {
       return;
     }
     const errorCode = toSdkErrorCode(finished.stopReason);
-    const success = !FAILURE_STOP_REASONS.has(finished.stopReason);
+    const success = !isFailureStopReason(finished.stopReason);
     this.completeActiveTurn({
       runtime: active.runtime,
       stopReason: finished.stopReason,
@@ -572,8 +588,8 @@ export class RemoteTurnCoordinator {
       turn.success !== undefined
         ? turn.success &&
           !approvalConflict &&
-          !FAILURE_STOP_REASONS.has(stopReason ?? "")
-        : !approvalConflict && !FAILURE_STOP_REASONS.has(stopReason ?? "");
+          !isFailureStopReason(stopReason)
+        : !approvalConflict && !isFailureStopReason(stopReason);
     const errorCode = approvalConflict
       ? "approval_conflict"
       : (turn.errorCode ?? toSdkErrorCode(stopReason));
