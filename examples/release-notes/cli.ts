@@ -73,8 +73,7 @@ async function main() {
   if (!state.agentId && agent.agentId) {
     state.agentId = agent.agentId;
     await saveState(state);
-    console.log(`\x1b[90m[Agent saved: ${agent.agentId}]\x1b[0m`);
-    console.log(`\x1b[90m[→ https://chat.letta.com/agents/${agent.agentId}]\x1b[0m\n`);
+    console.log(`\x1b[90m[Agent saved: ${agent.agentId}]\x1b[0m\n`);
   }
 
   agent.close();
