@@ -6,16 +6,6 @@ The SDK for [stateful agents](https://docs.letta.com/concepts/stateful-agents): 
 
 Read the [documentation](https://docs.letta.com/agent-sdk) for guides and the full API reference.
 
-## The agent outlives the process
-
-Most SDKs give you a call. This one gives you an agent that is still there tomorrow:
-
-- An **agent** is the durable object — it owns memory and identity.
-- A **conversation** is a thread on that agent. One agent can have many.
-- A **session** is the connection you use to send messages and stream events.
-
-So the common path is not "create an agent", it is "resume the one that already knows something".
-
 ## Quick start
 
 ```bash
@@ -50,14 +40,16 @@ One interface, three backends:
 | Backend    | Agent state         | Tools execute                          |
 | ---------- | ------------------- | -------------------------------------- |
 | `"cloud"`  | Hosted by Letta     | A managed sandbox, or a computer you connect |
-| `"local"`  | On this machine     | On this machine                        |
+| `"local"`  | On this machine*    | On this machine*                       |
 | `"remote"` | Your App Server     | On your App Server machine             |
 
-Browser, Expo, and React Native applications import from `@letta-ai/letta-agent-sdk/client`, which supports the cloud and remote backends. See [Deployment](https://docs.letta.com/agent-sdk/deployment).
+\* *"this machine" refers to the machine that the SDK code itself is running on*
+
+Browser, Expo, and React Native applications import from `@letta-ai/letta-agent-sdk/client`, which does not require Node and supports the cloud and remote backends. See [Deployment](https://docs.letta.com/agent-sdk/deployment).
 
 ## Examples
 
-Runnable applications live in [`examples/`](./examples) — including a web chat UI, client tools, and multi-agent systems. There is also a [React chat template](https://github.com/letta-ai/letta-agent-sdk-react-chat).
+Runnable applications live in [`examples/`](./examples) — including a web chat UI, client tools, and multi-agent systems. See the [React chat template](https://github.com/letta-ai/letta-agent-sdk-react-chat) for a more complete example of a custom UI running on the Letta Agent SDK.
 
 ## Contributing
 
