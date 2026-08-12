@@ -188,6 +188,81 @@ describe("remote turn terminal receipts", () => {
     coordinator.close();
   });
 
+  test("terminalizes a manual approval when turn_finished follows loop status", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      {
+        type: "update_loop_status",
+        runtime,
+        loop_status: {
+          status: "WAITING_ON_APPROVAL",
+          active_run_ids: ["run-approval"],
+        },
+      },
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-approval",
+        run_id: "run-approval",
+        stop_reason: "requires_approval",
+      },
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "loop_status",
+      status: "WAITING_ON_APPROVAL",
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: false,
+      approvalConflict: true,
+      stopReason: "requires_approval",
+      runIds: ["run-approval"],
+    });
+    coordinator.close();
+  });
+
+  test("keeps an auto-handled approval open when turn_finished follows loop status", () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      autoHandlesToolApprovals: true,
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      {
+        type: "update_loop_status",
+        runtime,
+        loop_status: {
+          status: "WAITING_ON_APPROVAL",
+          active_run_ids: ["run-approval"],
+        },
+      },
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-approval",
+        run_id: "run-approval",
+        stop_reason: "requires_approval",
+      },
+      runtime,
+    );
+
+    expect(coordinator.hasInFlightTurn()).toBe(true);
+    coordinator.close();
+  });
+
   test("does not apply a settled run receipt to the next tracked turn", async () => {
     const coordinator = new RemoteTurnCoordinator({
       label: "test",

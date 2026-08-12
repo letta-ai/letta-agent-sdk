@@ -357,6 +357,13 @@ export class RemoteTurnCoordinator {
     active.runIds.add(finished.runId);
     if (finished.stopReason === "requires_approval") {
       active.observedRequiresApprovalStop = true;
+      if (!this.autoHandlesToolApprovals) {
+        this.completeActiveTurn({
+          runtime: active.runtime,
+          stopReason: finished.stopReason,
+          runIds: [...active.runIds],
+        });
+      }
       return;
     }
     const errorCode = toSdkErrorCode(finished.stopReason);
