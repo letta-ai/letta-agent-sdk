@@ -12,11 +12,11 @@ The research team consists of four specialized agents:
 - ✍️ **Writer** - Produces polished research reports
 - 🎯 **Coordinator** - Orchestrates workflow, manages quality
 
-Each agent maintains memory blocks that persist across sessions, allowing them to:
+Each agent maintains git-backed memory files across sessions. The files let agents:
 - Remember which sources are reliable
 - Apply effective search and analysis strategies
 - Adapt writing style based on user feedback
-- Build a shared knowledge base over time
+- Build role-specific knowledge over time
 
 ## Quick Start
 
@@ -85,11 +85,9 @@ When you provide feedback, each agent reflects on the task:
 
 These reflections are stored in memory and applied to future tasks.
 
-### 4. Shared Knowledge Base
-Agents share knowledge through memory blocks:
-- High-quality sources added to shared source list
-- Effective patterns documented for team reference
-- Common pitfalls recorded to avoid repeated mistakes
+### 4. Shared artifacts
+Agents exchange task results through files in `output/`. Each agent keeps its
+own durable lessons in focused files under `reference/` in its memory checkout.
 
 ## File Structure
 
@@ -266,7 +264,7 @@ https://chat.letta.com/agents/<agent-id>
 ```
 
 This demo pins `backend: 'local'`, so its agents are not visible in hosted chat. To use these links, switch the demo to `backend: 'cloud'` first. Then check `--status` for agent IDs, and click the links to:
-- Inspect memory blocks
+- Inspect memory files
 - View conversation history
 - Chat with agents directly
 - Edit agent configuration
@@ -313,10 +311,10 @@ Agent IDs are stored in `output/team-state.json`. Running `--reset` clears this 
 - Testing the "first run" experience
 - Debugging agent behavior
 
-### Memory Block Contents
-Each agent's memory blocks are stored on the Letta server. To inspect them:
-1. Get the agent ID from `--status` or check the ADE links printed during execution
-2. Visit `https://chat.letta.com/agents/<agent-id>` to view memory contents (Cloud backend only)
+### Memory files
+Each agent has a git-backed memory checkout. During a turn, the agent can read
+and update that checkout through `$MEMORY_DIR`. The role prompts in `agents/`
+name the `reference/*.md` files that each agent maintains.
 
 ## Extending the Demo
 

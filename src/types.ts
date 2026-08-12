@@ -895,8 +895,8 @@ export interface SessionDeviceStatus {
 export interface CreateAgentOptions {
   /**
    * Optional Letta Code personality preset. Presets are explicit: when this is
-   * omitted, createAgent() uses the supplied memory blocks directly without
-   * adding personality-derived identity, name, or description fields.
+   * omitted, createAgent() does not add personality-derived identity, name, or
+   * description fields.
    */
   personality?: LettaCodePersonalityId;
 
@@ -915,17 +915,19 @@ export interface CreateAgentOptions {
   systemPrompt?: string | SystemPromptPreset | SystemPromptPresetConfigSDK;
 
   /**
-   * Memory block configuration. Each item can be:
+   * Legacy memory block configuration. New agents should use the git-backed
+   * memory filesystem instead. Each item can be:
    * - string: Preset block name ("persona", "human", "skills", "loaded_skills")
    * - CreateBlock: Custom block definition (e.g., { label: "project", value: "..." })
    * - { blockId: string }: Reference to existing shared block
+   * @deprecated Prefer `memfs` and let the agent maintain memory files.
    */
   memory?: MemoryItem[];
 
-  /** Convenience: Set persona block value directly */
+  /** @deprecated Prefer a personality preset or a system memory file. */
   persona?: string;
 
-  /** Convenience: Set human block value directly */
+  /** @deprecated Prefer a focused memory file for user preferences. */
   human?: string;
 
   /**

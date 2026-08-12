@@ -61,7 +61,7 @@ async function main() {
     return;
   }
 
-  const fromRef = positionals[0];
+  const fromRef = positionals[0]!;
   const toRef = positionals[1] || 'HEAD';
 
   // Get or create the agent

@@ -40,13 +40,13 @@ You find and evaluate academic sources (papers, articles, documentation) relevan
 - **Authority**: Academic institutions, peer-reviewed venues, known experts
 
 ## Memory Usage
-You have memory blocks that persist across sessions:
-- **source-quality**: Track reliability scores for sources, venues, and authors you encounter
-- **search-strategies**: Record effective search patterns and query approaches
-- **domain-knowledge**: Build knowledge of key concepts and influential works
+Use focused memory files that persist across sessions:
+- **reference/source-quality.md**: Track reliability scores for sources, venues, and authors you encounter
+- **reference/search-strategies.md**: Record effective search patterns and query approaches
+- **reference/domain-knowledge.md**: Build knowledge of key concepts and influential works
 
-When you find a particularly good or bad source, update your source-quality memory.
-When a search strategy works well, record it in search-strategies.
+When you find a particularly good or bad source, update reference/source-quality.md.
+When a search strategy works well, record it in reference/search-strategies.md.
 
 ## Output Format
 Write findings to a markdown file with:
@@ -77,51 +77,6 @@ export async function createResearcher(
   return createAgentSession({
     model: 'haiku',
     systemPrompt: RESEARCHER_SYSTEM_PROMPT,
-    memory: [
-      {
-        label: 'source-quality',
-        value: `# Source Quality Tracking
-
-## High-Quality Venues
-- Nature, Science (quality: 10)
-- NeurIPS, ICML (quality: 9)
-- arXiv (quality: 7, varies by paper)
-
-## Reliable Authors
-[To be populated as you encounter sources]
-
-## Source Notes
-[Add notes about specific sources here]
-`,
-        description: 'Track reliability scores and notes for academic sources, venues, and authors',
-      },
-      {
-        label: 'search-strategies',
-        value: `# Search Strategies
-
-## Effective Approaches
-- Start with broad query, then narrow
-- Include domain-specific keywords
-- Look for recent review papers first
-
-## Query Patterns
-[Record effective search patterns here]
-`,
-        description: 'Record effective search patterns and query approaches',
-      },
-      {
-        label: 'domain-knowledge',
-        value: `# Domain Knowledge
-
-## Key Concepts
-[Build knowledge as you research]
-
-## Influential Works
-[Track foundational papers in different fields]
-`,
-        description: 'Accumulated knowledge of key concepts and influential works',
-      },
-    ],
     allowedTools: ['Glob', 'Read', 'Write'],
     permissionMode: 'unrestricted',
   }, client);
@@ -227,7 +182,7 @@ Please reflect on this task:
 2. What could you have done better?
 3. Any sources or patterns worth remembering?
 
-Update your memory blocks with any insights, then summarize your reflection.`;
+Update your memory files with any insights, then summarize your reflection.`;
 
   await session.send(prompt);
   

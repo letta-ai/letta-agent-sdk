@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 import { type LettaCodeSession } from '../../src/index.js';
 import { createAgentSession, createExampleClient, formatAgentLink, resumeExampleSession } from '../create-agent-session.js';
-import { FileOrganizerState, DEFAULT_CONFIG } from './types.js';
+import { DEFAULT_CONFIG, type FileOrganizerState } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -49,8 +49,8 @@ const SYSTEM_PROMPT = `You are a file organizer. Your job is to help organize fi
 - By project (project-a/, project-b/)
 - By status (inbox/, processed/, archive/)
 
-## Memory
-You remember organizational preferences:
+## Memory Files
+Keep durable preferences in reference/organization-preferences.md:
 - How this user likes things organized
 - Directory structures we've used before
 - Naming conventions
@@ -99,22 +99,6 @@ export async function getOrCreateAgent(state: FileOrganizerState): Promise<Letta
   const session = await createAgentSession({
     model: DEFAULT_CONFIG.model,
     systemPrompt: SYSTEM_PROMPT,
-    memory: [
-      {
-        label: 'organization-preferences',
-        value: `# Organization Preferences
-
-## Preferred Structure
-(Will learn from user's choices)
-
-## Naming Conventions
-(Will learn from existing files)
-
-## Past Organizations
-(History of what we've organized)`,
-        description: 'User preferences for file organization',
-      },
-    ],
     allowedTools: ['Bash', 'Read', 'Glob'],
     permissionMode: 'unrestricted',
   }, client);

@@ -19,7 +19,8 @@ const client = new LettaAgentClient({ backend: "cloud" });
 
 // Create the agent once...
 const agentId = await client.createAgent({
-  persona: "You are Nora, a research analyst who tracks our competitors.",
+  systemPrompt: "You are Nora, a research analyst who tracks our competitors.",
+  memfs: true,
 });
 
 // ...then resume it, from anywhere, for as long as it lives.

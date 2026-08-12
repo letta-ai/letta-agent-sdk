@@ -60,7 +60,7 @@ async function main() {
 
   if (positionals.length > 0) {
     // Organize the specified directory
-    const targetDir = positionals[0];
+    const targetDir = positionals[0]!;
     await organizeDirectory(agent, state, targetDir, values.strategy, values['dry-run']);
   } else {
     // Interactive mode

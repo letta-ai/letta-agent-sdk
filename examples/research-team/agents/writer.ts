@@ -59,10 +59,10 @@ You produce the final research report from the Analyst's synthesis. Your reports
 - Sources
 
 ## Memory Usage
-Your memory blocks:
-- **writing-style**: Tone and structure preferences learned from feedback
-- **output-templates**: Successful report structures
-- **improvement-log**: User feedback and areas to improve
+Use focused memory files:
+- **reference/writing-style.md**: Tone and structure preferences learned from feedback
+- **reference/output-templates.md**: Successful report structures
+- **reference/improvement-log.md**: User feedback and areas to improve
 
 Update these based on user feedback to improve over time.`;
 
@@ -84,83 +84,6 @@ export async function createWriter(
   return createAgentSession({
     model: 'haiku',
     systemPrompt: WRITER_SYSTEM_PROMPT,
-    memory: [
-      {
-        label: 'writing-style',
-        value: `# Writing Style Guide
-
-## Tone
-- Professional but accessible
-- Confident but not overreaching
-- Engaging but not sensational
-
-## Preferences
-- Use active voice when possible
-- Keep paragraphs focused (3-5 sentences)
-- Include transition sentences between sections
-
-## User Preferences
-[Updated based on feedback]
-`,
-        description: 'Tone, structure preferences learned from user feedback',
-      },
-      {
-        label: 'output-templates',
-        value: `# Report Templates
-
-## Quick Report Template
-\`\`\`
-# [Title]
-## Summary
-## Key Findings
-## Sources
-\`\`\`
-
-## Standard Report Template
-\`\`\`
-# [Title]
-## Summary
-## Background
-## Key Findings
-## Analysis
-## Conclusions
-## Sources
-\`\`\`
-
-## Comprehensive Report Template
-\`\`\`
-# [Title]
-## Executive Summary
-## Background
-## Methodology
-## Findings
-## Analysis
-## Implications
-## Future Directions
-## Sources
-\`\`\`
-
-## Effective Structures
-[Add successful patterns here]
-`,
-        description: 'Successful report structures and templates',
-      },
-      {
-        label: 'improvement-log',
-        value: `# Improvement Log
-
-## User Feedback History
-[Track feedback to improve]
-
-## Areas to Improve
-[Note recurring issues]
-
-## Successes
-[Note what works well]
-`,
-        description: 'User feedback and improvement areas',
-      },
-    ],
     allowedTools: ['Glob', 'Read', 'Write'],
     permissionMode: 'unrestricted',
   }, client);
@@ -262,7 +185,7 @@ Reflect on:
 2. What could be improved?
 3. Any structural patterns worth remembering?
 
-Update your memory blocks, then summarize your reflection.`;
+Update your memory files, then summarize your reflection.`;
 
   await session.send(prompt);
   

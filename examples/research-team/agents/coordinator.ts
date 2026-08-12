@@ -41,10 +41,10 @@ You manage workflow, ensure quality, and learn from each task to improve team pe
 - Comprehensive: Require extensive coverage, deep analysis, polished writing
 
 ## Memory Usage
-Your memory blocks:
-- **team-performance**: Track metrics, success patterns, agent strengths
-- **user-preferences**: Store feedback, preferred styles, past requests
-- **research-history**: Brief summaries of completed research tasks
+Use focused memory files:
+- **reference/team-performance.md**: Track metrics, success patterns, agent strengths
+- **reference/user-preferences.md**: Store feedback, preferred styles, past requests
+- **reference/research-history.md**: Brief summaries of completed research tasks
 
 Use these to improve coordination over time.`;
 
@@ -65,70 +65,6 @@ export async function createCoordinator(
   return createAgentSession({
     model: 'haiku',
     systemPrompt: COORDINATOR_SYSTEM_PROMPT,
-    memory: [
-      {
-        label: 'team-performance',
-        value: `# Team Performance Metrics
-
-## Overall Stats
-- Tasks Completed: 0
-- Average Rating: N/A
-- Success Rate: N/A
-
-## Agent Performance
-### Researcher
-- Strengths: [To be discovered]
-- Areas to Improve: [To be discovered]
-
-### Analyst  
-- Strengths: [To be discovered]
-- Areas to Improve: [To be discovered]
-
-### Writer
-- Strengths: [To be discovered]
-- Areas to Improve: [To be discovered]
-
-## Successful Patterns
-[Record what works well]
-
-## Lessons Learned
-[Record mistakes and improvements]
-`,
-        description: 'Track team metrics, success patterns, and agent strengths/weaknesses',
-      },
-      {
-        label: 'user-preferences',
-        value: `# User Preferences
-
-## Feedback History
-[Track user ratings and comments]
-
-## Style Preferences
-- Preferred depth: Unknown
-- Citation style: Standard (Author, Year)
-- Tone: Professional but accessible
-
-## Common Requests
-[Track recurring research topics or requirements]
-`,
-        description: 'Store user feedback, preferences, and past requests',
-      },
-      {
-        label: 'research-history',
-        value: `# Research History
-
-## Completed Tasks
-[Brief summaries of past research]
-
-## Topics Covered
-[Track domains and topics researched]
-
-## Notable Insights
-[Key learnings that might help future research]
-`,
-        description: 'Brief summaries of completed research tasks',
-      },
-    ],
     allowedTools: ['Glob', 'Read', 'Write'],
     permissionMode: 'unrestricted',
   }, client);

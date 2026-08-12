@@ -29,8 +29,26 @@ export function createExampleClient(
 
 type ExampleCreateOptions = Omit<
   CreateAgentOptions,
-  "disallowedTools" | "systemInfoReminder"
+  | "disallowedTools"
+  | "human"
+  | "memory"
+  | "persona"
+  | "systemInfoReminder"
 >;
+
+const MEMFS_GUIDANCE = `## Persistent memory
+This agent has a git-backed memory filesystem. Use memory files for durable
+knowledge instead of memory blocks. Keep stable identity and behavior in
+system/ files. Keep project notes, learned preferences, and history in focused
+Markdown files under reference/. Never store secrets in memory.`;
+
+function withMemfsGuidance(
+  systemPrompt: CreateAgentOptions["systemPrompt"],
+): CreateAgentOptions["systemPrompt"] {
+  return typeof systemPrompt === "string"
+    ? `${systemPrompt}\n\n${MEMFS_GUIDANCE}`
+    : systemPrompt;
+}
 
 function sessionOptionsFrom(
   options: ExampleCreateOptions,
@@ -56,11 +74,8 @@ export async function createAgentSession(
     personality: options.personality,
     model: options.model,
     embedding: options.embedding,
-    systemPrompt: options.systemPrompt,
-    memory: options.memory,
-    persona: options.persona,
-    human: options.human,
-    memfs: options.memfs,
+    systemPrompt: withMemfsGuidance(options.systemPrompt),
+    memfs: options.memfs ?? true,
     name: options.name,
     description: options.description,
     hidden: options.hidden,

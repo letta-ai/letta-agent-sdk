@@ -16,7 +16,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { LettaCodeSession } from '../../src/index.js';
-import {
+import type {
   FocusGroupState,
   VoterPersona,
   FocusGroupRound,
@@ -190,7 +190,7 @@ export class FocusGroup {
       const reaction = await chatWithOutput(
         voter,
         `A political candidate just said:\n\n"${round.position}"\n\nHow does this make you feel? React as yourself.`,
-        voterColors[i % voterColors.length],
+        voterColors[i % voterColors.length]!,
         name
       );
       round.voterResponses.push({ voterName: name, reaction });
@@ -218,7 +218,7 @@ export class FocusGroup {
       const reaction = await chatWithOutput(
         voter,
         `The candidate asks: "${round.followUpQuestion}"\n\nAnswer honestly based on your perspective.`,
-        voterColors[i % voterColors.length],
+        voterColors[i % voterColors.length]!,
         name
       );
       round.followUpResponses.push({ voterName: name, reaction });

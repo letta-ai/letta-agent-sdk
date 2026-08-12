@@ -46,11 +46,11 @@ async function main() {
     case 'system-prompt':
       await testSystemPrompt();
       break;
-    case 'memory-config':
-      await testMemoryConfig();
+    case 'memfs':
+      await testMemfs();
       break;
-    case 'convenience-props':
-      await testConvenienceProps();
+    case 'agent-options':
+      await testAgentOptions();
       break;
     case 'conversations':
       await testConversations();
@@ -66,13 +66,13 @@ async function main() {
       await testToolExecution();
       await testPermissionCallback();
       await testSystemPrompt();
-      await testMemoryConfig();
-      await testConvenienceProps();
+      await testMemfs();
+      await testAgentOptions();
       await testConversations();
       console.log('\n✅ All examples passed');
       break;
     default:
-      console.log('Usage: bun v2-examples.ts [basic|multi-turn|one-shot|resume|options|message-types|session-properties|tool-execution|permission-callback|system-prompt|memory-config|convenience-props|conversations|all]');
+      console.log('Usage: bun v2-examples.ts [basic|multi-turn|one-shot|resume|options|message-types|session-properties|tool-execution|permission-callback|system-prompt|memfs|agent-options|conversations|all]');
   }
 }
 
@@ -528,148 +528,43 @@ async function testSystemPrompt() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MEMORY CONFIGURATION TESTS
+// MEMORY FILESYSTEM TEST
 // ═══════════════════════════════════════════════════════════════
 
-async function testMemoryConfig() {
-  console.log('=== Testing Memory Configuration ===\n');
+async function testMemfs() {
+  console.log('=== Testing Memory Filesystem ===\n');
 
-  async function runWithMemory(msg: string, memory?: any[]): Promise<{ success: boolean; result: string }> {
-    const agentId = await client.createAgent({ memory });
-    const session = client.resumeSession(agentId, { permissionMode: 'unrestricted' });
-    await session.send(msg);
-    let result = '';
-    let success = false;
-    for await (const m of session.stream()) {
-      if (m.type === 'result') {
-        result = m.result || '';
-        success = m.success;
-      }
-    }
-    session.close();
-    return { success, result };
-  }
+  const agentId = await client.createAgent({
+    memfs: true,
+    systemPrompt: `Use focused Markdown files under reference/ for durable
+knowledge. Never store secrets in memory.`,
+  });
+  await using session = client.resumeSession(agentId, {
+    permissionMode: 'unrestricted',
+  });
+  const status = await session.getDeviceStatus();
 
-  // Test 1: Default memory (persona, human, project)
-  console.log('Testing default memory blocks...');
-  const defaultResult = await runWithMemory('What memory blocks do you have? List their labels.');
-  const hasDefaultBlocks = defaultResult.result.includes('persona') || 
-                           defaultResult.result.includes('project');
-  console.log(`  default blocks: ${defaultResult.success ? 'PASS' : 'FAIL'}`);
-  console.log(`    Response mentions blocks: ${hasDefaultBlocks ? 'yes' : 'check manually'}`);
-
-  // Test 2: Specific preset blocks only
-  console.log('Testing specific preset blocks...');
-  const specificResult = await runWithMemory('List your memory block labels', ['persona']);
-  console.log(`  specific blocks [persona]: ${specificResult.success ? 'PASS' : 'FAIL'}`);
-
-  // Test 3: Custom blocks
-  console.log('Testing custom memory blocks...');
-  const customResult = await runWithMemory(
-    'What does your "rules" memory block say?',
-    [{ label: 'rules', value: 'Always be concise. Never use more than 10 words.' }]
-  );
-  const isConcise = (customResult.result.split(' ').length || 0) < 20;
-  console.log(`  custom blocks: ${customResult.success ? 'PASS' : 'FAIL'}`);
-  console.log(`    Response is concise: ${isConcise ? 'yes' : 'check'}`);
-
-  // Test 4: Multiple preset blocks
-  console.log('Testing multiple preset blocks...');
-  const multipleResult = await runWithMemory(
-    'List your memory blocks',
-    ['persona', 'human']
-  );
-  console.log(`  multiple presets: ${multipleResult.success ? 'PASS' : 'FAIL'}`);
-
-  // Test 5: Empty memory (core blocks only)
-  console.log('Testing empty memory (core only)...');
-  const emptyResult = await runWithMemory('Hello', []);
-  console.log(`  empty memory: ${emptyResult.success ? 'PASS' : 'FAIL'}`);
-
+  console.log(`  memory checkout: ${status.memoryDirectory ?? 'unavailable'}`);
+  console.log(`  memfs: ${status.memoryDirectory ? 'PASS' : 'FAIL'}`);
   console.log();
 }
 
 // ═══════════════════════════════════════════════════════════════
-// CONVENIENCE PROPS TESTS
+// AGENT CREATION OPTIONS
 // ═══════════════════════════════════════════════════════════════
 
-async function testConvenienceProps() {
-  console.log('=== Testing Convenience Props ===\n');
+async function testAgentOptions() {
+  console.log('=== Testing Agent Creation Options ===\n');
 
-  async function runWithProps(msg: string, props: Record<string, any>): Promise<{ success: boolean; result: string }> {
-    const agentId = await client.createAgent(props);
-    const session = client.resumeSession(agentId, { permissionMode: 'unrestricted' });
-    await session.send(msg);
-    let result = '';
-    let success = false;
-    for await (const m of session.stream()) {
-      if (m.type === 'result') {
-        result = m.result || '';
-        success = m.success;
-      }
-    }
-    session.close();
-    return { success, result };
-  }
+  const agentId = await client.createAgent({
+    personality: 'blank',
+    memfs: true,
+    name: 'SDK Example Agent',
+    description: 'Demonstrates current agent creation options.',
+    tags: ['example:v2'],
+  });
 
-  // Test 1: persona prop
-  console.log('Testing persona prop...');
-  const personaResult = await runWithProps(
-    'Describe your personality in one sentence',
-    { persona: 'You are an enthusiastic cooking assistant who loves Italian food.' }
-  );
-  const hasItalian = personaResult.result.toLowerCase().includes('italian') ||
-                     personaResult.result.toLowerCase().includes('cook');
-  console.log(`  persona: ${personaResult.success ? 'PASS' : 'FAIL'}`);
-  console.log(`    Response mentions cooking/Italian: ${hasItalian ? 'yes' : 'check'}`);
-
-  // Test 2: project block (custom)
-  console.log('Testing project block (custom)...');
-  const projectResult = await runWithProps(
-    'What project are you helping with?',
-    { memory: [{ label: 'project', value: 'A React Native mobile app for tracking daily habits.' }] }
-  );
-  const hasProject = projectResult.result.toLowerCase().includes('react') ||
-                     projectResult.result.toLowerCase().includes('habit') ||
-                     projectResult.result.toLowerCase().includes('mobile');
-  console.log(`  project (custom): ${projectResult.success ? 'PASS' : 'FAIL'}`);
-  console.log(`    Response mentions project: ${hasProject ? 'yes' : 'check'}`);
-
-  // Test 3: human prop
-  console.log('Testing human prop...');
-  const humanResult = await runWithProps(
-    'What do you know about me?',
-    { human: 'Name: Bob. Senior developer. Prefers TypeScript over JavaScript.' }
-  );
-  const hasHuman = humanResult.result.toLowerCase().includes('bob') ||
-                   humanResult.result.toLowerCase().includes('typescript');
-  console.log(`  human: ${humanResult.success ? 'PASS' : 'FAIL'}`);
-  console.log(`    Response mentions user info: ${hasHuman ? 'yes' : 'check'}`);
-
-  // Test 4: Multiple convenience props together
-  console.log('Testing multiple convenience props...');
-  const multiResult = await runWithProps(
-    'Introduce yourself briefly',
-    { 
-      memory: ['persona', 'human'],
-      persona: 'You are a friendly code reviewer.',
-      human: 'Name: Alice.'
-    }
-  );
-  console.log(`  multiple props: ${multiResult.success ? 'PASS' : 'FAIL'}`);
-  console.log(`    Response: ${multiResult.result.slice(0, 100)}...`);
-
-  // Test 5: Convenience props with specific memory blocks
-  console.log('Testing convenience props with memory config...');
-  const combinedResult = await runWithProps(
-    'What is in your persona block?',
-    { memory: ['persona'], persona: 'You are a database expert specializing in PostgreSQL.' }
-  );
-  const hasDB = combinedResult.result.toLowerCase().includes('database') ||
-                combinedResult.result.toLowerCase().includes('postgresql');
-  console.log(`  props with memory: ${combinedResult.success ? 'PASS' : 'FAIL'}`);
-  console.log(`    Response mentions DB: ${hasDB ? 'yes' : 'check'}`);
-
+  console.log(`  created agent: ${agentId}`);
   console.log();
 }
 

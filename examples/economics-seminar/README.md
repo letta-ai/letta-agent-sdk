@@ -98,17 +98,17 @@ But doesn't your model assume...
 
 ## Agent Persistence
 
-Each agent maintains memory blocks that persist across seminars:
+Each agent maintains memory files that persist across seminars:
 
-**Presenter memories:**
-- `research-notes`: Findings and sources from research
-- `past-seminars`: Feedback received from faculty
-- `methodology`: Research approach refined over time
+**Presenter memory files:**
+- `reference/research-notes.md`: Findings and sources from research
+- `reference/past-seminars.md`: Feedback received from faculty
+- `reference/methodology.md`: Research approach refined over time
 
-**Faculty memories:**
-- `seminar-notes`: Key points from presentations attended
-- `presenter-patterns`: Strengths/weaknesses observed
-- `good-questions`: Questions that generated useful discussion
+**Faculty memory files:**
+- `reference/seminar-notes.md`: Key points from presentations attended
+- `reference/presenter-patterns.md`: Strengths and weaknesses observed
+- `reference/good-questions.md`: Questions that generated useful discussion
 
 ## Agent Teleportation
 

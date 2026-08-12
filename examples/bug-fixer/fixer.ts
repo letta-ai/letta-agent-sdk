@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 import { type LettaCodeSession } from '../../src/index.js';
 import { createAgentSession, createExampleClient, formatAgentLink, resumeExampleSession } from '../create-agent-session.js';
-import { BugFixerState, DEFAULT_CONFIG } from './types.js';
+import { DEFAULT_CONFIG, type BugFixerState } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -45,8 +45,9 @@ You have access to tools for exploring and modifying code:
 4. **Make minimal changes** - Fix the bug without unnecessary refactoring
 5. **Verify the fix** - Run tests or the command that was failing
 
-## Memory
-You remember past sessions. Use this to:
+## Memory Files
+Keep durable notes in reference/codebase-knowledge.md and
+reference/fix-history.md. Use them to:
 - Recall where things are in the codebase
 - Remember patterns that caused bugs before
 - Avoid repeating failed approaches
@@ -94,33 +95,6 @@ export async function getOrCreateAgent(state: BugFixerState): Promise<LettaCodeS
   const session = await createAgentSession({
     model: DEFAULT_CONFIG.model,
     systemPrompt: SYSTEM_PROMPT,
-    memory: [
-      {
-        label: 'codebase-knowledge',
-        value: `# Codebase Knowledge
-
-## Project Structure
-(Will be populated as I explore)
-
-## Key Files
-(Important files I've discovered)
-
-## Patterns
-(Common patterns in this codebase)`,
-        description: 'What I know about this codebase',
-      },
-      {
-        label: 'fix-history',
-        value: `# Fix History
-
-## Past Bugs
-(Bugs I've fixed before)
-
-## Lessons Learned
-(What I've learned from past fixes)`,
-        description: 'History of bugs fixed and lessons learned',
-      },
-    ],
     allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
     permissionMode: 'unrestricted',
   }, client);

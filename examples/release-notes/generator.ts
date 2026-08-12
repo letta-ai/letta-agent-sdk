@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 import { type LettaCodeSession } from '../../src/index.js';
 import { createAgentSession, createExampleClient, formatAgentLink, resumeExampleSession } from '../create-agent-session.js';
-import { ReleaseNotesState, DEFAULT_CONFIG } from './types.js';
+import { DEFAULT_CONFIG, type ReleaseNotesState } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -45,8 +45,8 @@ const SYSTEM_PROMPT = `You are a release notes generator. Your job is to create 
 3. **Summarize** - Write human-readable descriptions, not raw commit messages
 4. **Format** - Use clean markdown with consistent style
 
-## Memory
-You remember past releases. Use this to:
+## Memory Files
+Keep durable release context in reference/release-history.md. Use it to:
 - Maintain consistent formatting
 - Reference version numbers correctly
 - Avoid duplicating content from past releases
@@ -111,22 +111,6 @@ export async function getOrCreateAgent(state: ReleaseNotesState): Promise<LettaC
   const session = await createAgentSession({
     model: DEFAULT_CONFIG.model,
     systemPrompt: SYSTEM_PROMPT,
-    memory: [
-      {
-        label: 'release-history',
-        value: `# Release History
-
-## Past Releases
-(Releases I've generated)
-
-## Formatting Preferences
-(Learned from feedback)
-
-## Project Context
-(What this project does)`,
-        description: 'History of releases and formatting preferences',
-      },
-    ],
     allowedTools: ['Bash', 'Read', 'Write', 'Glob'],
     permissionMode: 'unrestricted',
   }, client);

@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 import { type LettaCodeSession } from '../../src/index.js';
 import { createAgentSession, createExampleClient, formatAgentLink, resumeExampleSession } from '../create-agent-session.js';
-import { GameState, DEFAULT_CONFIG, PATHS, CAMPAIGN_FILES } from './types.js';
+import { CAMPAIGN_FILES, DEFAULT_CONFIG, PATHS, type GameState } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -130,40 +130,15 @@ You have access to Read and Write tools. Use them to:
   - session-log.md - What happened each session
   - consequences.md - Pending events from past actions
 
+## Memory Files
+Keep cross-campaign player preferences in reference/player-preferences.md and
+brief campaign pointers in reference/campaign-index.md. Keep full campaign
+state in the campaign files above.
+
 ## Important
 - Always update campaign files after significant events
 - Reference your rulebook when resolving actions
 - Make the world feel alive and reactive to player choices`,
-    memory: [
-      {
-        label: 'campaign-state',
-        value: `# Current Campaign State
-
-## Active Campaign
-None - waiting to start or load a campaign
-
-## Recent Events
-(none yet)
-
-## Pending Consequences
-(none yet)`,
-        description: 'Track the current campaign state and important recent events',
-      },
-      {
-        label: 'player-preferences',
-        value: `# Player Preferences
-
-## Tone
-(not yet established - ask the player)
-
-## Play Style
-(not yet established)
-
-## Boundaries
-(ask if there are topics to avoid)`,
-        description: 'Remember what the player enjoys and any boundaries',
-      },
-    ],
     allowedTools: ['Read', 'Write'],
     permissionMode: 'unrestricted',
   }, client);
