@@ -91,6 +91,387 @@ describe("cooked stream message identity", () => {
   });
 });
 
+describe("remote turn terminal receipts", () => {
+  const runtime: RuntimeScope = {
+    agent_id: "agent-1",
+    conversation_id: "conv-1",
+  };
+
+  test("uses a correlated turn_finished receipt as a successful terminal", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "done",
+        run_id: "run-1",
+        id: "message-1",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-1",
+        run_id: "run-1",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "assistant",
+      content: "done",
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      result: "done",
+      stopReason: "end_turn",
+      runIds: ["run-1"],
+    });
+    coordinator.close();
+  });
+
+  test("accepts turn_finished as the first run evidence", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-receipt-only",
+        run_id: "run-receipt-only",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      runIds: ["run-receipt-only"],
+    });
+    coordinator.close();
+  });
+
+  test("classifies tool_rule as a successful terminal", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-tool-rule",
+        run_id: "run-tool-rule",
+        stop_reason: "tool_rule",
+      },
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      stopReason: "tool_rule",
+      runIds: ["run-tool-rule"],
+    });
+    coordinator.close();
+  });
+
+  test("terminalizes a manual approval when turn_finished follows loop status", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      {
+        type: "update_loop_status",
+        runtime,
+        loop_status: {
+          status: "WAITING_ON_APPROVAL",
+          active_run_ids: ["run-approval"],
+        },
+      },
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-approval",
+        run_id: "run-approval",
+        stop_reason: "requires_approval",
+      },
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "loop_status",
+      status: "WAITING_ON_APPROVAL",
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: false,
+      approvalConflict: true,
+      stopReason: "requires_approval",
+      runIds: ["run-approval"],
+    });
+    coordinator.close();
+  });
+
+  test("keeps an auto-handled approval open when turn_finished follows loop status", () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      autoHandlesToolApprovals: true,
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      {
+        type: "update_loop_status",
+        runtime,
+        loop_status: {
+          status: "WAITING_ON_APPROVAL",
+          active_run_ids: ["run-approval"],
+        },
+      },
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-approval",
+        run_id: "run-approval",
+        stop_reason: "requires_approval",
+      },
+      runtime,
+    );
+
+    expect(coordinator.hasInFlightTurn()).toBe(true);
+    coordinator.close();
+  });
+
+  test("does not apply a settled run receipt to the next tracked turn", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "first",
+        run_id: "run-1",
+        id: "message-1",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-1",
+      }),
+      runtime,
+    );
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      runIds: ["run-1"],
+    });
+
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-1",
+        run_id: "run-1",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+
+    expect(coordinator.hasInFlightTurn()).toBe(true);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "second",
+        run_id: "run-2",
+        id: "message-2",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-2",
+        run_id: "run-2",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "assistant",
+      content: "second",
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      result: "second",
+      runIds: ["run-2"],
+    });
+    coordinator.close();
+  });
+
+  test("ignores a turn_finished receipt for a different active run", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "running",
+        run_id: "run-1",
+        id: "message-1",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        run_id: "run-other",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+    expect(coordinator.hasInFlightTurn()).toBe(true);
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        run_id: "run-1",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      runIds: ["run-1"],
+    });
+    coordinator.close();
+  });
+
+  test("ignores an uncorrelated turn_finished without a run id", () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+
+    expect(coordinator.hasInFlightTurn()).toBe(true);
+    coordinator.close();
+  });
+
+  test("classifies terminal failure receipts as failed results", async () => {
+    const stopReasons = [
+      "invalid_llm_response",
+      "invalid_tool_call",
+      "max_tokens_exceeded",
+      "no_tool_call",
+      "insufficient_credits",
+      "context_window_overflow_in_system_prompt",
+    ];
+
+    for (const stopReason of stopReasons) {
+      const coordinator = new RemoteTurnCoordinator({
+        label: "test",
+        onDeviceStatus: () => {},
+      });
+      coordinator.trackSentTurn(runtime);
+      coordinator.handleProtocolMessage(
+        {
+          type: "turn_finished",
+          runtime,
+          turn_id: `turn-${stopReason}`,
+          run_id: `run-${stopReason}`,
+          stop_reason: stopReason,
+          error: "terminal failure",
+        },
+        runtime,
+      );
+
+      expect(await coordinator.nextMessage()).toMatchObject({
+        type: "result",
+        success: false,
+        errorCode: "error",
+        errorDetail: "terminal failure",
+        stopReason,
+      });
+      coordinator.close();
+    }
+  });
+
+  test("reports active transport loss as a recoverable unknown outcome", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "partial",
+        run_id: "run-1",
+        id: "message-1",
+      }),
+      runtime,
+    );
+    coordinator.closeWithError("connection dropped");
+
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "error",
+      errorCode: "stream_closed",
+      recoverable: true,
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: false,
+      errorCode: "stream_closed",
+      recoverable: true,
+      runIds: ["run-1"],
+    });
+  });
+});
+
 function streamDelta(
   runtime: RuntimeScope,
   delta: Record<string, unknown>,
