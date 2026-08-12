@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { LettaAgentClient } from "../index.js";
 import type {
   LettaCodeSession,
@@ -12,8 +12,23 @@ const API_KEY = process.env.LETTA_API_KEY;
 const RUN_LIVE = process.env.LETTA_LIVE_INTEGRATION === "1" && !!API_KEY;
 const BASE_URL = process.env.LETTA_BASE_URL ?? "https://api.letta.com";
 const TEST_TIMEOUT_MS = Number(process.env.LETTA_LIVE_TEST_TIMEOUT_MS ?? "180000");
+const DISCONNECT_TIMEOUT_MS = Number(
+  process.env.LETTA_LIVE_DISCONNECT_TIMEOUT_MS ?? "30000",
+);
+/** WebSocket.CLOSED — Bun settles here synchronously on close(). */
+const WEBSOCKET_CLOSED = 3;
 
 const describeLive = RUN_LIVE ? describe : describe.skip;
+
+/** Retry cleanup for agents left behind when per-test deletion fails. */
+const createdAgentIds: string[] = [];
+
+afterAll(async () => {
+  if (!API_KEY) return;
+  await Promise.allSettled(
+    createdAgentIds.map((id) => deleteAgent(id)),
+  );
+});
 
 function captureCloudSockets(): {
   WebSocket: LettaCodeSocketConstructor;
@@ -75,6 +90,7 @@ describeLive("live Cloud transport disconnect", () => {
           tags: ["sdk-live-test"],
           memfs: false,
         });
+        createdAgentIds.push(agentId);
         session = client.createSession(agentId);
         await asAdvanced(session).initialize();
 
@@ -92,17 +108,22 @@ describeLive("live Cloud transport disconnect", () => {
         // This closes the real production relay connection after the turn was
         // accepted for transport, while stream() is parked awaiting events.
         streamSocket!.close();
-        await Promise.race([
-          drained,
-          new Promise<never>((_, reject) => {
-            setTimeout(
-              () => reject(new Error("Cloud stream remained parked after relay disconnect")),
-              10_000,
-            );
-          }),
-        ]);
+        let parkedTimer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            drained,
+            new Promise<never>((_, reject) => {
+              parkedTimer = setTimeout(
+                () => reject(new Error("Cloud stream remained parked after relay disconnect")),
+                DISCONNECT_TIMEOUT_MS,
+              );
+            }),
+          ]);
+        } finally {
+          clearTimeout(parkedTimer);
+        }
 
-        expect(controlSocket!.readyState).toBe(3);
+        expect(controlSocket!.readyState).toBe(WEBSOCKET_CLOSED);
         expect(messages).toContainEqual(expect.objectContaining({
           type: "error",
           stopReason: "error",
@@ -114,7 +135,11 @@ describeLive("live Cloud transport disconnect", () => {
         });
       } finally {
         session?.close();
-        if (agentId) await deleteAgent(agentId);
+        if (agentId) {
+          await deleteAgent(agentId);
+          const idx = createdAgentIds.indexOf(agentId);
+          if (idx !== -1) createdAgentIds.splice(idx, 1);
+        }
       }
     },
     TEST_TIMEOUT_MS,
