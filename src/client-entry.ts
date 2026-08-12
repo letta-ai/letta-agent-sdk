@@ -36,5 +36,19 @@ export type {
 } from "./computers.js";
 export type * from "./management-types.js";
 export { extractStreamTextDelta } from "./stream-events.js";
+export { createTranscriptAccumulator } from "./transcript-accumulator.js";
+export type {
+  TranscriptAccumulator,
+  TranscriptHistoryPage,
+  TranscriptRebaseOptions,
+  TranscriptRow,
+  TranscriptRowIdentity,
+  TranscriptRowKind,
+  TranscriptTextKind,
+  TranscriptTextRow,
+  TranscriptToolCallRow,
+  TranscriptToolCallStatus,
+  TranscriptToolResult,
+} from "./transcript-accumulator.js";
 export { createReactNativeWebSocketConstructor } from "./websocket.js";
 export type * from "./types.js";
