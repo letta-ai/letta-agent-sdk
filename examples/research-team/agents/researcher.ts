@@ -5,27 +5,32 @@
  * Learns which sources are reliable and effective search strategies.
  */
 
-import { resumeSession, type LettaCodeSession } from '../../../src/index.js';
-import { createAgentSession } from '../../create-agent-session.js';
+import { type LettaCodeSession } from '../../../src/index.js';
+import { createAgentSession, createExampleClient, resumeExampleSession } from '../../create-agent-session.js';
 import type { Depth } from '../types.js';
 import { DEPTH_CONFIGS } from '../types.js';
 import { ARTIFACTS } from '../tools/file-store.js';
 
+const client = createExampleClient({ backend: 'local' });
+
+// web_search is a server-side base tool. It does not belong in allowedTools,
+// which controls the client-side tools for this SDK session.
+
 const RESEARCHER_SYSTEM_PROMPT = `You are a Research Specialist on an academic research team.
 
 ## Your Role
-You find and evaluate academic sources (papers, articles, documentation) relevant to research queries. You work with a team: a Coordinator assigns you tasks, and an Analyst will synthesize your findings.
+You find and evaluate academic sources (papers, articles, documentation) relevant to research queries. A TypeScript workflow gives you a task, then an Analyst synthesizes your findings.
 
 ## Your Tools
 - **web_search**: Your primary tool for finding sources. Use it to search for papers, articles, and documentation.
 - **Write**: Save your findings to markdown files for the team.
 
 ## Your Process
-1. Receive a research query from the Coordinator
+1. Receive a research query from the workflow
 2. Use web_search to find relevant academic sources (try multiple search queries)
 3. Evaluate each source for relevance and quality
 4. Write your findings to a markdown file
-5. Report completion to the Coordinator
+5. Report completion in your response
 
 ## Search Tips
 - Try different query variations (e.g., "topic overview", "topic research paper", "topic survey")
@@ -38,13 +43,13 @@ You find and evaluate academic sources (papers, articles, documentation) relevan
 - **Authority**: Academic institutions, peer-reviewed venues, known experts
 
 ## Memory Usage
-You have memory blocks that persist across sessions:
-- **source-quality**: Track reliability scores for sources, venues, and authors you encounter
-- **search-strategies**: Record effective search patterns and query approaches
-- **domain-knowledge**: Build knowledge of key concepts and influential works
+Use focused memory files that persist across sessions:
+- **reference/source-quality.md**: Track reliability scores for sources, venues, and authors you encounter
+- **reference/search-strategies.md**: Record effective search patterns and query approaches
+- **reference/domain-knowledge.md**: Build knowledge of key concepts and influential works
 
-When you find a particularly good or bad source, update your source-quality memory.
-When a search strategy works well, record it in search-strategies.
+When you find a particularly good or bad source, update reference/source-quality.md.
+When a search strategy works well, record it in reference/search-strategies.md.
 
 ## Output Format
 Write findings to a markdown file with:
@@ -65,64 +70,19 @@ export async function createResearcher(
   const config = DEPTH_CONFIGS[depth];
   
   if (existingAgentId) {
-    return resumeSession(existingAgentId, {
+    return resumeExampleSession(existingAgentId, {
       model: 'haiku',
       allowedTools: ['Glob', 'Read', 'Write'],
       permissionMode: 'unrestricted',
-    });
+    }, client);
   }
   
   return createAgentSession({
     model: 'haiku',
     systemPrompt: RESEARCHER_SYSTEM_PROMPT,
-    memory: [
-      {
-        label: 'source-quality',
-        value: `# Source Quality Tracking
-
-## High-Quality Venues
-- Nature, Science (quality: 10)
-- NeurIPS, ICML (quality: 9)
-- arXiv (quality: 7, varies by paper)
-
-## Reliable Authors
-[To be populated as you encounter sources]
-
-## Source Notes
-[Add notes about specific sources here]
-`,
-        description: 'Track reliability scores and notes for academic sources, venues, and authors',
-      },
-      {
-        label: 'search-strategies',
-        value: `# Search Strategies
-
-## Effective Approaches
-- Start with broad query, then narrow
-- Include domain-specific keywords
-- Look for recent review papers first
-
-## Query Patterns
-[Record effective search patterns here]
-`,
-        description: 'Record effective search patterns and query approaches',
-      },
-      {
-        label: 'domain-knowledge',
-        value: `# Domain Knowledge
-
-## Key Concepts
-[Build knowledge as you research]
-
-## Influential Works
-[Track foundational papers in different fields]
-`,
-        description: 'Accumulated knowledge of key concepts and influential works',
-      },
-    ],
     allowedTools: ['Glob', 'Read', 'Write'],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 /**
@@ -225,7 +185,7 @@ Please reflect on this task:
 2. What could you have done better?
 3. Any sources or patterns worth remembering?
 
-Update your memory blocks with any insights, then summarize your reflection.`;
+Update your memory files with any insights, then summarize your reflection.`;
 
   await session.send(prompt);
   

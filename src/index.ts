@@ -218,12 +218,11 @@ export {
  *
  * @example
  * ```typescript
- * // Create a generic agent with custom memory.
+ * // Create an agent with a git-backed memory filesystem.
  * const agentId = await createAgent({
- *   memory: [
- *     { label: 'persona', value: 'You are a helpful coding assistant' },
- *     { label: 'project', value: 'Use Bun for JavaScript projects' },
- *   ],
+ *   memfs: true,
+ *   systemPrompt: `You are a helpful coding assistant. Keep durable project
+ *     notes in focused Markdown files under reference/.`,
  *   model: 'claude-sonnet-4',
  *   tags: ['project:docs']
  * });

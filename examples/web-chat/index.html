@@ -88,7 +88,7 @@
 <body>
   <header>
     <h1>Letta Code Chat</h1>
-    <button id="mem-toggle" style="font-size:0.8rem;padding:0.3rem 0.6rem;background:#333;">Memory</button>
+    <button id="mem-toggle" style="font-size:0.8rem;padding:0.3rem 0.6rem;background:#333;">Memory files</button>
   </header>
   <div id="memory" style="display:none;background:#1a1a1a;border:1px solid #333;border-radius:6px;padding:0.75rem;margin-bottom:1rem;max-height:200px;overflow-y:auto;font-size:0.8rem;">
     <div id="mem-content" style="white-space:pre-wrap;color:#888;">Loading...</div>
@@ -103,6 +103,15 @@
     const input = document.getElementById('input');
     const btn = document.getElementById('send');
     let busy = false;
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
 
     function add(role, text) {
       const d = document.createElement('div');
@@ -182,13 +191,16 @@
       try {
         const res = await fetch('/api/memory');
         const data = await res.json();
-        if (!data.blocks || data.blocks.length === 0) {
-          memContent.innerHTML = '<em>No memory yet</em>';
+        if (!data.available) {
+          memContent.innerHTML = '<em>The memory-file panel requires the Cloud backend.</em>';
           return;
         }
-        memContent.innerHTML = data.blocks
-          .filter(b => !['skills', 'loaded_skills'].includes(b.label))
-          .map(b => `<h3>${b.label}</h3>${(b.value || '').replace(/</g,'&lt;')}`)
+        if (!data.files || data.files.length === 0) {
+          memContent.innerHTML = '<em>No memory files yet.</em>';
+          return;
+        }
+        memContent.innerHTML = data.files
+          .map(file => `<h3>${escapeHtml(file.path)}</h3>${escapeHtml(file.content || '')}`)
           .join('');
       } catch(e) {
         memContent.textContent = 'Failed to load';

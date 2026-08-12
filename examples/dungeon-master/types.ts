@@ -2,13 +2,6 @@
  * Dungeon Master Types
  */
 
-export interface Campaign {
-  name: string;
-  createdAt: Date;
-  lastPlayed: Date;
-  sessionCount: number;
-}
-
 export interface GameState {
   dmAgentId: string | null;
   activeCampaign: string | null;

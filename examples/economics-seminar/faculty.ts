@@ -5,9 +5,12 @@
  * Each has a distinct perspective and style.
  */
 
-import { resumeSession, type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession } from '../create-agent-session.js';
+import { type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession, createExampleClient, resumeExampleSession } from '../create-agent-session.js';
 import type { FacultyMember, SeminarConfig } from './types.js';
+
+// File-editing demo: pin the local backend so agent state stays consistent.
+const client = createExampleClient({ backend: 'local' });
 
 /**
  * Generate system prompt for a faculty member
@@ -41,10 +44,10 @@ You are part of a faculty panel evaluating a research presentation. Your job is 
 - Dismissive follow-ups: "That didn't answer my question. Let me try again..."
 
 ## Memory Usage
-Your memory blocks persist across seminars:
-- **seminar-notes**: Remember key points from presentations
-- **presenter-patterns**: Track this presenter's strengths/weaknesses
-- **good-questions**: Questions that generated useful discussion
+Use focused memory files that persist across seminars:
+- **reference/seminar-notes.md**: Remember key points from presentations
+- **reference/presenter-patterns.md**: Track this presenter's strengths/weaknesses
+- **reference/good-questions.md**: Questions that generated useful discussion
 
 You've attended many seminars and remember patterns from past discussions.`;
 }
@@ -58,69 +61,19 @@ export async function createFacultyMember(
   config: SeminarConfig
 ): Promise<LettaCodeSession> {
   if (existingAgentId) {
-    return resumeSession(existingAgentId, {
+    return resumeExampleSession(existingAgentId, {
       model: config.model,
       allowedTools: ['Read', 'Write'],
       permissionMode: 'unrestricted',
-    });
+    }, client);
   }
   
   return createAgentSession({
     model: config.model,
     systemPrompt: getFacultySystemPrompt(faculty),
-    memory: [
-      {
-        label: 'seminar-notes',
-        value: `# Seminar Notes
-
-## Past Presentations
-[Track the weak arguments and methodological failures you've witnessed]
-
-## Common Sins
-- Overstating causal claims from correlational data
-- Ignoring obvious confounders
-- Cherry-picking time periods
-- Hand-waving away inconvenient findings
-
-## Presenters to Watch
-[Note who needs extra scrutiny next time]
-`,
-        description: 'Notes from seminars attended - focus on weaknesses',
-      },
-      {
-        label: 'presenter-patterns',
-        value: `# Presenter Weaknesses
-
-## Evasion Tactics
-[How does this presenter dodge hard questions?]
-
-## Blind Spots
-[What do they consistently fail to address?]
-
-## Soft Points
-[Where do they crumble under pressure?]
-`,
-        description: 'Track presenter weaknesses to exploit',
-      },
-      {
-        label: 'killer-questions',
-        value: `# Killer Questions
-
-## Questions That Drew Blood
-[Questions that exposed fatal flaws]
-
-## Effective Attack Patterns
-[What lines of questioning work best?]
-
-## Unfinished Business
-[Questions they never adequately answered]
-`,
-        description: 'Most effective attack strategies',
-      },
-    ],
     allowedTools: ['Read', 'Write'],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 /**
@@ -210,7 +163,7 @@ As ${faculty.name}, deliver your honest assessment:
 3. Did the presenter ever actually answer your questions, or just talk around them?
 4. Would you recommend this paper for publication? (Be honest - probably not)
 
-Be blunt. You're known for not pulling punches. Update your memory with observations about this presenter's weaknesses for when they inevitably return.
+Be blunt. You're known for not pulling punches. Update your memory files with observations about this presenter's weaknesses for when they inevitably return.
 Keep it to 2-3 brutal sentences.`;
 
   await session.send(prompt);

@@ -60,7 +60,7 @@ async function main() {
 
   if (positionals.length > 0) {
     // Organize the specified directory
-    const targetDir = positionals[0];
+    const targetDir = positionals[0]!;
     await organizeDirectory(agent, state, targetDir, values.strategy, values['dry-run']);
   } else {
     // Interactive mode
@@ -71,8 +71,7 @@ async function main() {
   if (!state.agentId && agent.agentId) {
     state.agentId = agent.agentId;
     await saveState(state);
-    console.log(`\x1b[90m[Agent saved: ${agent.agentId}]\x1b[0m`);
-    console.log(`\x1b[90m[→ https://app.letta.com/agents/${agent.agentId}]\x1b[0m\n`);
+    console.log(`\x1b[90m[Agent saved: ${agent.agentId}]\x1b[0m\n`);
   }
 
   agent.close();
@@ -88,7 +87,7 @@ USAGE:
   bun cli.ts [directory]           Organize a directory
   bun cli.ts                       Interactive mode
   bun cli.ts --status              Show agent status
-  bun cli.ts --reset               Reset agent (forget preferences)
+  bun cli.ts --reset               Clear the saved agent ID
   bun cli.ts -h, --help            Show this help
 
 OPTIONS:
@@ -108,12 +107,13 @@ STRATEGIES:
   (none)    AI decides best approach
 
 SAFETY:
-  - Always previews changes before executing
-  - Never deletes files (only moves)
-  - Creates directories as needed
+  - Use --dry-run for a non-mutating preview
+  - Without --dry-run, the prompt asks for confirmation before moves
+  - The unrestricted permission mode does not enforce that confirmation
 
 PERSISTENCE:
-  The agent learns your organizational preferences over time.
+  The same agent and memory files are reused across runs until you reset the
+  saved ID.
 `);
 }
 

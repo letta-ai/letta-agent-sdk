@@ -10,13 +10,14 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { resumeSession, type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession } from '../create-agent-session.js';
-import { ReleaseNotesState, DEFAULT_CONFIG } from './types.js';
+import { type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession, createExampleClient, formatAgentLink, resumeExampleSession } from '../create-agent-session.js';
+import { DEFAULT_CONFIG, type ReleaseNotesState } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const STATE_FILE = join(__dirname, 'state.json');
+const client = createExampleClient({ backend: 'local' });
 
 // ANSI colors
 const COLORS = {
@@ -44,8 +45,8 @@ const SYSTEM_PROMPT = `You are a release notes generator. Your job is to create 
 3. **Summarize** - Write human-readable descriptions, not raw commit messages
 4. **Format** - Use clean markdown with consistent style
 
-## Memory
-You remember past releases. Use this to:
+## Memory Files
+Keep durable release context in reference/release-history.md. Use it to:
 - Maintain consistent formatting
 - Reference version numbers correctly
 - Avoid duplicating content from past releases
@@ -99,36 +100,20 @@ export async function saveState(state: ReleaseNotesState): Promise<void> {
 export async function getOrCreateAgent(state: ReleaseNotesState): Promise<LettaCodeSession> {
   if (state.agentId) {
     console.log(`${COLORS.system}Resuming release notes agent...${COLORS.reset}`);
-    return resumeSession(state.agentId, {
+    return resumeExampleSession(state.agentId, {
       model: DEFAULT_CONFIG.model,
       allowedTools: ['Bash', 'Read', 'Write', 'Glob'],
       permissionMode: 'unrestricted',
-    });
+    }, client);
   }
 
   console.log(`${COLORS.system}Creating new release notes agent...${COLORS.reset}`);
   const session = await createAgentSession({
     model: DEFAULT_CONFIG.model,
     systemPrompt: SYSTEM_PROMPT,
-    memory: [
-      {
-        label: 'release-history',
-        value: `# Release History
-
-## Past Releases
-(Releases I've generated)
-
-## Formatting Preferences
-(Learned from feedback)
-
-## Project Context
-(What this project does)`,
-        description: 'History of releases and formatting preferences',
-      },
-    ],
     allowedTools: ['Bash', 'Read', 'Write', 'Glob'],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 
   return session;
 }
@@ -213,7 +198,7 @@ export async function showStatus(state: ReleaseNotesState): Promise<void> {
   console.log('\n📝 Release Notes Generator Status\n');
   console.log(`Agent: ${state.agentId || '(not created yet)'}`);
   if (state.agentId) {
-    console.log(`  → https://app.letta.com/agents/${state.agentId}`);
+    console.log(`  → ${formatAgentLink(state.agentId, client)}`);
   }
   console.log(`Releases generated: ${state.releasesGenerated}`);
   console.log('');
@@ -227,5 +212,5 @@ export async function reset(): Promise<void> {
     const fs = await import('node:fs/promises');
     await fs.unlink(STATE_FILE);
   }
-  console.log('\n🗑️  Release notes generator reset. Agent forgotten.\n');
+  console.log('\nSaved agent ID cleared. The agent still exists in the local backend.\n');
 }

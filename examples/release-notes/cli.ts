@@ -61,7 +61,7 @@ async function main() {
     return;
   }
 
-  const fromRef = positionals[0];
+  const fromRef = positionals[0]!;
   const toRef = positionals[1] || 'HEAD';
 
   // Get or create the agent
@@ -73,8 +73,7 @@ async function main() {
   if (!state.agentId && agent.agentId) {
     state.agentId = agent.agentId;
     await saveState(state);
-    console.log(`\x1b[90m[Agent saved: ${agent.agentId}]\x1b[0m`);
-    console.log(`\x1b[90m[→ https://app.letta.com/agents/${agent.agentId}]\x1b[0m\n`);
+    console.log(`\x1b[90m[Agent saved: ${agent.agentId}]\x1b[0m\n`);
   }
 
   agent.close();
@@ -90,7 +89,7 @@ USAGE:
   bun cli.ts <from-ref> [to-ref]   Generate notes for commit range
   bun cli.ts <from-ref> -o FILE    Output to file
   bun cli.ts --status              Show agent status
-  bun cli.ts --reset               Reset agent (forget preferences)
+  bun cli.ts --reset               Clear the saved agent ID
   bun cli.ts -h, --help            Show this help
 
 ARGUMENTS:
@@ -115,7 +114,8 @@ CATEGORIES:
   - 🔧 Maintenance
 
 PERSISTENCE:
-  The agent learns your formatting preferences over time.
+  The same agent and memory files are reused across runs until you reset the
+  saved ID.
 `);
 }
 

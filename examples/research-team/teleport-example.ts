@@ -17,8 +17,10 @@
  *   bun teleport-example.ts
  */
 
-import { resumeSession } from '../../src/index.js';
+import { resumeExampleSession, createExampleClient, formatAgentLink } from '../create-agent-session.js';
 import { loadTeamState } from './tools/file-store.js';
+
+const client = createExampleClient({ backend: 'local' });
 
 async function main() {
   console.log('🚀 Agent Teleportation Demo\n');
@@ -41,7 +43,7 @@ async function main() {
   for (const [role, agentId] of Object.entries(teamState.agentIds)) {
     if (agentId) {
       console.log(`   ${role}: ${agentId}`);
-      console.log(`   → https://app.letta.com/agents/${agentId}\n`);
+      console.log(`   → ${formatAgentLink(agentId, client)}\n`);
     }
   }
 
@@ -54,10 +56,10 @@ async function main() {
   console.log('   The researcher remembers which sources are reliable');
   console.log('   and which search strategies work best.\n');
 
-  const researcher = resumeSession(teamState.agentIds.researcher!, {
+  const researcher = resumeExampleSession(teamState.agentIds.researcher!, {
     allowedTools: ['Read', 'Write'],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 
   console.log('   Asking: "What search strategies have you found effective?"\n');
   
@@ -87,10 +89,10 @@ async function main() {
     console.log('   The analyst remembers effective analysis patterns');
     console.log('   and quality standards from previous work.\n');
 
-    const analyst = resumeSession(teamState.agentIds.analyst, {
+    const analyst = resumeExampleSession(teamState.agentIds.analyst, {
       allowedTools: ['Read', 'Write'],
       permissionMode: 'unrestricted',
-    });
+    }, client);
 
     console.log('   Asking: "What analysis frameworks have worked well?"\n');
 
@@ -126,8 +128,9 @@ async function main() {
   
   console.log('Try it yourself:\n');
   console.log('   // In your own code:');
-  console.log('   import { resumeSession } from "@letta-ai/letta-agent-sdk";');
-  console.log(`   const agent = resumeSession("${teamState.agentIds.researcher}");`);
+  console.log('   import { LettaAgentClient } from "@letta-ai/letta-agent-sdk";');
+  console.log('   const client = new LettaAgentClient({ backend: "local" });');
+  console.log(`   const agent = client.resumeSession("${teamState.agentIds.researcher}");`);
   console.log('   await agent.send("Your question here");');
   console.log('');
 }

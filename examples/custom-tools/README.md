@@ -30,7 +30,7 @@ The example runs two turns: one for each tool. Each turn logs the tool call, too
 ## Defining your own tools
 
 ```typescript
-import { type AnyAgentTool } from "@letta-ai/letta-agent-sdk";
+import { LettaAgentClient, type AnyAgentTool } from "@letta-ai/letta-agent-sdk";
 
 const myTool: AnyAgentTool = {
   name: "my_tool",
@@ -51,7 +51,7 @@ const myTool: AnyAgentTool = {
   },
 };
 
-// Pass to resumeSession
+const client = new LettaAgentClient({ backend: "cloud" });
 const session = client.resumeSession(agentId, {
   tools: [myTool],
 });

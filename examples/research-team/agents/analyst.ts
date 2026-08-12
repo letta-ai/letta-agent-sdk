@@ -5,11 +5,13 @@
  * Learns effective analytical frameworks and quality standards.
  */
 
-import { resumeSession, type LettaCodeSession } from '../../../src/index.js';
-import { createAgentSession } from '../../create-agent-session.js';
+import { type LettaCodeSession } from '../../../src/index.js';
+import { createAgentSession, createExampleClient, resumeExampleSession } from '../../create-agent-session.js';
 import type { Depth } from '../types.js';
 import { DEPTH_CONFIGS } from '../types.js';
 import { ARTIFACTS, getOutputPath } from '../tools/file-store.js';
+
+const client = createExampleClient({ backend: 'local' });
 
 const ANALYST_SYSTEM_PROMPT = `You are a Research Analyst on an academic research team.
 
@@ -22,7 +24,7 @@ You synthesize findings from the Researcher, identify patterns and themes, and p
 3. Identify key themes, patterns, and connections
 4. Note gaps, contradictions, and limitations
 5. Produce a structured analysis document
-6. Report completion to the Coordinator
+6. Report completion in your response
 
 ## Analysis Framework
 For each analysis, address:
@@ -39,10 +41,10 @@ For each analysis, address:
 - Be intellectually honest about limitations
 
 ## Memory Usage
-You have memory blocks that persist:
-- **analysis-patterns**: Effective frameworks and synthesis techniques
-- **quality-standards**: What makes good analysis, common pitfalls
-- **citation-practices**: How to properly cite and attribute
+Use focused memory files that persist:
+- **reference/analysis-patterns.md**: Effective frameworks and synthesis techniques
+- **reference/quality-standards.md**: What makes good analysis, common pitfalls
+- **reference/citation-practices.md**: How to properly cite and attribute
 
 Update these when you discover effective approaches or learn from mistakes.`;
 
@@ -54,81 +56,19 @@ export async function createAnalyst(
   depth: Depth = 'standard'
 ): Promise<LettaCodeSession> {
   if (existingAgentId) {
-    return resumeSession(existingAgentId, {
+    return resumeExampleSession(existingAgentId, {
       model: 'haiku',
       allowedTools: ['Glob', 'Read', 'Write'],
       permissionMode: 'unrestricted',
-    });
+    }, client);
   }
   
   return createAgentSession({
     model: 'haiku',
     systemPrompt: ANALYST_SYSTEM_PROMPT,
-    memory: [
-      {
-        label: 'analysis-patterns',
-        value: `# Analysis Patterns
-
-## Effective Frameworks
-- Thematic analysis: Group findings by topic
-- Compare/contrast: Find agreements and disagreements
-- Temporal analysis: Track evolution of ideas over time
-- Gap analysis: What's missing from the literature?
-
-## Synthesis Techniques
-- Start with highest-quality sources
-- Look for convergent findings across multiple sources
-- Note where sources disagree and why
-
-## Patterns to Watch For
-[Add effective patterns as you discover them]
-`,
-        description: 'Effective analytical frameworks and synthesis techniques',
-      },
-      {
-        label: 'quality-standards',
-        value: `# Quality Standards
-
-## Good Analysis Includes
-- Clear thesis or main finding
-- Evidence from multiple sources
-- Acknowledgment of limitations
-- Logical flow of arguments
-
-## Common Pitfalls
-- Over-generalizing from single sources
-- Ignoring contradictory evidence
-- Failing to distinguish correlation from causation
-- Not citing specific sources
-
-## Lessons Learned
-[Add lessons from past analyses]
-`,
-        description: 'Quality standards and common pitfalls to avoid',
-      },
-      {
-        label: 'citation-practices',
-        value: `# Citation Practices
-
-## When to Cite
-- Specific claims or statistics
-- Direct quotes
-- Novel ideas or frameworks
-- Contested claims
-
-## Citation Format
-Use inline citations: (Author, Year)
-List full references at end
-
-## Attribution Notes
-[Track any attribution issues or patterns]
-`,
-        description: 'Proper citation and attribution practices',
-      },
-    ],
     allowedTools: ['Glob', 'Read', 'Write'],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 /**

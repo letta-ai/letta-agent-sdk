@@ -12,7 +12,7 @@
  *   bun run examples/custom-tools/main.ts
  */
 
-import { LettaCodeClient, type AnyAgentTool } from "../../src/index.js";
+import { LettaAgentClient, type AnyAgentTool } from "../../src/index.js";
 
 // ─── Custom tool definitions ─────────────────────────────────────────
 
@@ -105,19 +105,24 @@ const rollDice: AnyAgentTool = {
 // ─── Main ────────────────────────────────────────────────────────────
 
 async function main() {
-  const client = new LettaCodeClient({
+  if (!process.env.LETTA_API_KEY) {
+    throw new Error("Set LETTA_API_KEY to run the Cloud custom-tools example.");
+  }
+
+  const client = new LettaAgentClient({
     backend: "cloud",
     apiKey: process.env.LETTA_API_KEY,
   });
 
   const agentId = await client.createAgent({
     model: "letta/auto",
-    persona: "You are a helpful assistant with access to custom tools.",
+    systemPrompt: "You are a helpful assistant with access to custom tools.",
+    memfs: false,
   });
   console.log("Created agent:", agentId);
 
   const session = client.resumeSession(agentId, {
-    permissionMode: "bypassPermissions",
+    permissionMode: "unrestricted",
     tools: [getLocalTime, rollDice],
   });
 

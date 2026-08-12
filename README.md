@@ -19,7 +19,8 @@ const client = new LettaAgentClient({ backend: "cloud" });
 
 // Create the agent once...
 const agentId = await client.createAgent({
-  persona: "You are Nora, a research analyst who tracks our competitors.",
+  systemPrompt: "You are Nora, a research analyst who tracks our competitors.",
+  memfs: true,
 });
 
 // ...then resume it, from anywhere, for as long as it lives.
@@ -49,7 +50,7 @@ Browser, Expo, and React Native applications import from `@letta-ai/letta-agent-
 
 ## Examples
 
-Runnable applications live in [`examples/`](./examples) — including a web chat UI, client tools, and multi-agent systems. See the [React chat template](https://github.com/letta-ai/letta-agent-sdk-react-chat) for a more complete example of a custom UI running on the Letta Agent SDK.
+Runnable applications live in [`examples/`](./examples). Start with the [examples guide](./examples/README.md), which orders the demos by concept and lists their setup and side effects. See the [React chat template](https://github.com/letta-ai/letta-agent-sdk-react-chat) for a more complete custom UI.
 
 ## Contributing
 

@@ -98,7 +98,7 @@ USAGE:
 
 OPTIONS:
   --status       Show current agent status and IDs
-  --reset        Reset all agents (start fresh)
+  --reset        Clear the saved agent IDs
   --faculty=N    Number of faculty members (1-4, default: 3)
   --rounds=N     Max Q&A rounds per faculty (1-5, default: 2)
   -h, --help     Show this help
@@ -122,7 +122,8 @@ FACULTY PANEL:
   👩‍🏫 Dr. Patel (Behavioral) - Psychology, biases, real behavior
   👴 Dr. Morrison (Historian) - Historical context, precedent
 
-Each agent remembers past seminars and learns over time!
+Each agent can store notes that persist between seminars. Run another seminar
+and inspect the transcript to see what context the agents retained.
 `);
 }
 
