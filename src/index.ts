@@ -288,10 +288,11 @@ export function resumeSession(
 /**
  * One-shot convenience for scripts, smoke tests, and evals.
  *
- * Creates a short-lived conversation, waits for the final result, and closes
- * the session. Applications that need streaming, approvals, cancellation,
- * queueing, or continued interaction should use createSession() with send()
- * and stream() instead.
+ * Creates a new conversation on the agent, waits for the final result, and
+ * closes the short-lived session. The conversation remains persisted.
+ * Applications that need streaming, approvals, cancellation, queueing, or
+ * continued interaction should use createSession() with send() and stream()
+ * instead.
  *
  * @example
  * ```typescript
