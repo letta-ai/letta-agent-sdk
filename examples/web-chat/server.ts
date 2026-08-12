@@ -31,12 +31,14 @@ const HTML_FILE = join(__dirname, 'index.html');
 interface AppState {
   agentId: string | null;
   repositoryId: string | null;
+  backend: 'cloud' | 'local' | null;
 }
 
 let session: LettaCodeSession | null = null;
-let state: AppState = { agentId: null, repositoryId: null };
+let state: AppState = { agentId: null, repositoryId: null, backend: null };
 const client = createExampleClient();
 const isCloud = client.backend === 'cloud';
+const backend = isCloud ? 'cloud' : 'local';
 
 // Load state
 async function loadState(): Promise<void> {
@@ -45,6 +47,8 @@ async function loadState(): Promise<void> {
     state = {
       agentId: stored.agentId ?? null,
       repositoryId: stored.repositoryId ?? null,
+      backend: stored.backend
+        ?? (stored.agentId?.startsWith('agent-local-') ? 'local' : stored.agentId ? 'cloud' : null),
     };
   }
 }
@@ -83,7 +87,10 @@ async function ensureMemoryRepository(agentId: string): Promise<string | null> {
   }
 
   const repositories = await client.agents.repositories.list(agentId);
-  if (!repositories.some((repository) => repository.id === state.repositoryId)) {
+  const attached = repositories.find(
+    (repository) => repository.id === state.repositoryId,
+  );
+  if (!attached || attached.permissions !== 'read_write') {
     await client.agents.repositories.attach(agentId, state.repositoryId, {
       permissions: 'read_write',
     });
@@ -95,6 +102,13 @@ async function ensureMemoryRepository(agentId: string): Promise<string | null> {
 // Get or create session
 async function getSession(): Promise<LettaCodeSession> {
   if (session) return session;
+
+  if (state.agentId && state.backend && state.backend !== backend) {
+    throw new Error(
+      `Saved web-chat state uses the ${state.backend} backend. ` +
+      `Start with the same backend or reset examples/web-chat/state.json.`,
+    );
+  }
 
   if (state.agentId) {
     console.log(`Resuming agent: ${state.agentId}`);
@@ -123,6 +137,8 @@ You have memory that persists across conversations. ${isCloud
     }, client);
     if (session.agentId) {
       state.agentId = session.agentId;
+      state.backend = backend;
+      await saveState();
       await ensureMemoryRepository(session.agentId);
     }
   }
@@ -293,7 +309,7 @@ Bun.serve({
         session.close();
         session = null;
       }
-      state = { agentId: null, repositoryId: null };
+      state = { agentId: null, repositoryId: null, backend: null };
       await saveState();
       return Response.json({ ok: true });
     }
