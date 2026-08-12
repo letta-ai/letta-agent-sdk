@@ -124,14 +124,16 @@ describeLive("live Cloud transport disconnect", () => {
         }
 
         expect(controlSocket!.readyState).toBe(WEBSOCKET_CLOSED);
+        // This test owns the live transport boundary. Unit tests own the
+        // error-code classification for an uncertain delivery outcome.
         expect(messages).toContainEqual(expect.objectContaining({
           type: "error",
-          stopReason: "error",
+          errorCode: expect.any(String),
         }));
         expect(messages.at(-1)).toMatchObject({
           type: "result",
           success: false,
-          errorCode: "error",
+          errorCode: expect.any(String),
         });
       } finally {
         session?.close();
