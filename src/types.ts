@@ -109,6 +109,25 @@ export type MessageContentItem = TextContent | ImageContent;
  */
 export type SendMessage = string | MessageContentItem[];
 
+/**
+ * Per-turn options accepted by `send()`.
+ */
+export interface SendOptions {
+  /**
+   * Caller-supplied offline threading id (OTID) for this user message.
+   *
+   * The OTID is the canonical optimistic-input-matching key: stamp the row you
+   * render optimistically with the same value and you can correlate it with the
+   * persisted user message that comes back from the stream or from
+   * `listMessages()`. It is also used as the turn's `clientMessageId`, so it
+   * shows up on `SDKQueueItem.clientMessageId` while the message is queued.
+   *
+   * When omitted the SDK generates one. Must be a non-empty string; reuse the
+   * same value when retrying a send so the runtime can deduplicate it.
+   */
+  otid?: string;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // SKILLS / REMINDER / DREAMING TYPES
 // ═══════════════════════════════════════════════════════════════
@@ -737,7 +756,11 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
 }
 
 export interface LettaCodeSession extends AsyncDisposable {
-  send(message: SendMessage): Promise<void>;
+  /**
+   * Send a user message. Pass `{ otid }` to supply your own correlation id for
+   * optimistic reconciliation; the SDK generates one when omitted.
+   */
+  send(message: SendMessage, options?: SendOptions): Promise<void>;
   stream(): AsyncGenerator<SDKMessage>;
   abort(): Promise<void>;
   sendCommand(command: SDKProtocolCommand): Promise<void>;

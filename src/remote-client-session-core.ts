@@ -20,6 +20,7 @@ import type {
   SDKResultMessage,
   SendCommandOptions,
   SendMessage,
+  SendOptions,
   SessionDeviceStatus,
   UpdateModelOptions,
   UpdateModelResult,
@@ -43,6 +44,7 @@ import {
   resolveDreamingSettings,
   sameContextCandidates,
   toBaseModelHandle,
+  turnSendOptions,
   type NormalizedUpdateModelInput,
   type RemoteClientSessionCoreConfig,
   type RemoteClientRuntimeController,
@@ -207,7 +209,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     this.initialized = false;
   }
 
-  async send(message: SendMessage): Promise<void> {
+  async send(message: SendMessage, options?: SendOptions): Promise<void> {
     if (this.closed) throw new Error("Session is closed");
     if (!this.initialized) {
       await this.initialize();
@@ -224,11 +226,9 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     if (!controller || !runtime) {
       throw new Error("Session transport disconnected before the turn was sent");
     }
-    const turn = this.turns.trackSentTurn(runtime);
+    const turn = this.turns.trackSentTurn(runtime, options?.otid);
     try {
-      controller.sendTurnMessage(runtime, message, {
-        clientMessageId: turn.clientMessageId,
-      });
+      controller.sendTurnMessage(runtime, message, turnSendOptions(turn));
     } catch (error) {
       this.turns.removeTrackedTurn(turn);
       throw error;
