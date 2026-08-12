@@ -7,8 +7,8 @@
  * 3. Analyst - provides focus group analysis
  */
 
-import { resumeSession, type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession } from '../create-agent-session.js';
+import { type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession, resumeExampleSession } from '../create-agent-session.js';
 import { VoterPersona, CONFIG } from './types.js';
 
 // ============================================================================
@@ -54,7 +54,7 @@ export async function createCandidateAgent(): Promise<LettaCodeSession> {
 }
 
 export async function resumeCandidateAgent(agentId: string): Promise<LettaCodeSession> {
-  return resumeSession(agentId, {
+  return resumeExampleSession(agentId, {
     model: CONFIG.model,
     permissionMode: 'unrestricted',
   });
@@ -119,7 +119,7 @@ Background: ${persona.background}`,
 }
 
 export async function resumeVoterAgent(agentId: string): Promise<LettaCodeSession> {
-  return resumeSession(agentId, {
+  return resumeExampleSession(agentId, {
     model: CONFIG.model,
     permissionMode: 'unrestricted',
   });
@@ -165,7 +165,7 @@ export async function createAnalystAgent(): Promise<LettaCodeSession> {
 }
 
 export async function resumeAnalystAgent(agentId: string): Promise<LettaCodeSession> {
-  return resumeSession(agentId, {
+  return resumeExampleSession(agentId, {
     model: CONFIG.model,
     permissionMode: 'unrestricted',
   });

@@ -9,8 +9,8 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { resumeSession, type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession } from '../create-agent-session.js';
+import { type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession, createExampleClient, resumeExampleSession } from '../create-agent-session.js';
 import { GameState, DEFAULT_CONFIG, PATHS, CAMPAIGN_FILES } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -19,6 +19,7 @@ const __dirname = dirname(__filename);
 const STATE_FILE = join(__dirname, PATHS.stateFile);
 const RULEBOOK_FILE = join(__dirname, PATHS.rulebook);
 const CAMPAIGNS_DIR = join(__dirname, PATHS.campaignsDir);
+const client = createExampleClient({ backend: 'local' });
 
 // ANSI colors
 const COLORS = {
@@ -94,11 +95,11 @@ export async function listCampaigns(): Promise<string[]> {
 export async function createDM(state: GameState): Promise<LettaCodeSession> {
   if (state.dmAgentId) {
     // Resume existing DM
-    return resumeSession(state.dmAgentId, {
+    return resumeExampleSession(state.dmAgentId, {
       model: DEFAULT_CONFIG.model,
       allowedTools: ['Read', 'Write'],
       permissionMode: 'unrestricted',
-    });
+    }, client);
   }
 
   // Create new DM
@@ -165,7 +166,7 @@ None - waiting to start or load a campaign
     ],
     allowedTools: ['Read', 'Write'],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 
   return session;
 }
@@ -240,7 +241,7 @@ Use the Write tool to create rulebook.md now.`;
   
   console.log(`\n\n${COLORS.system}Rulebook created! The DM is ready.${COLORS.reset}`);
   console.log(`${COLORS.system}[DM Agent: ${session.agentId}]${COLORS.reset}`);
-  console.log(`${COLORS.system}[→ https://app.letta.com/agents/${session.agentId}]${COLORS.reset}\n`);
+  console.log(`${COLORS.system}[→ https://chat.letta.com/agents/${session.agentId}]${COLORS.reset}\n`);
 }
 
 /**
@@ -376,7 +377,7 @@ export async function showStatus(state: GameState): Promise<void> {
   
   console.log(`DM Agent: ${state.dmAgentId || '(not created)'}`);
   if (state.dmAgentId) {
-    console.log(`  → https://app.letta.com/agents/${state.dmAgentId}`);
+    console.log(`  → https://chat.letta.com/agents/${state.dmAgentId}`);
   }
   
   console.log(`\nRulebook: ${hasRulebook() ? '✓ Created' : '✗ Not created'}`);

@@ -8,7 +8,9 @@
  * Run with: bun examples/v2-examples.ts [example]
  */
 
-import { createAgent, createSession, resumeSession, prompt } from '../src/index.js';
+import { LettaAgentClient, prompt } from '../src/index.js';
+
+const client = new LettaAgentClient({ backend: 'local' });
 
 async function main() {
   const example = process.argv[2] || 'basic';
@@ -83,8 +85,8 @@ async function basicSession() {
   console.log('=== Basic Session ===\n');
 
   // Create agent, then resume default conversation
-  const agentId = await createAgent();
-  await using session = resumeSession(agentId, {
+  const agentId = await client.createAgent();
+  await using session = client.resumeSession(agentId, {
     permissionMode: 'unrestricted',
   });
   
@@ -108,7 +110,7 @@ async function multiTurn() {
   console.log('=== Multi-Turn Conversation ===\n');
 
   // Create new agent + new conversation
-  await using session = createSession(await createAgent(), {
+  await using session = client.createSession(await client.createAgent(), {
     model: 'haiku',
     permissionMode: 'unrestricted',
   });
@@ -136,7 +138,7 @@ async function oneShot() {
   console.log('=== One-Shot Prompt ===\n');
 
   // One-shot creates new agent
-  const agentId = await createAgent();
+  const agentId = await client.createAgent();
   const result = await prompt('What is the capital of France? One word.', agentId);
 
   if (result.success) {
@@ -153,12 +155,12 @@ async function sessionResume() {
   console.log('=== Session Resume (Persistent Memory) ===\n');
 
   // Create agent first
-  const agentId = await createAgent();
+  const agentId = await client.createAgent();
   console.log(`[Setup] Created agent: ${agentId}\n`);
 
   // First session - establish a memory
   {
-    const session = resumeSession(agentId, {
+    const session = client.resumeSession(agentId, {
       permissionMode: 'unrestricted',
     });
     
@@ -181,7 +183,7 @@ async function sessionResume() {
 
   // Resume and verify agent remembers
   {
-    await using session = resumeSession(agentId, {
+    await using session = client.resumeSession(agentId, {
       permissionMode: 'unrestricted',
     });
     
@@ -208,14 +210,14 @@ async function testOptions() {
 
   // Test basic session
   console.log('Testing basic session...');
-  const agentId = await createAgent();
+  const agentId = await client.createAgent();
   const modelResult = await prompt('Say "model test ok"', agentId);
   console.log(`  basic: ${modelResult.success ? 'PASS' : 'FAIL'} - ${modelResult.result?.slice(0, 50)}`);
 
   // Test systemPrompt preset via createSession (only presets allowed)
   console.log('Testing systemPrompt preset...');
-  const systemPromptAgentId = await createAgent({ systemPrompt: 'letta-claude' });
-  const sysPromptSession = createSession(systemPromptAgentId, {
+  const systemPromptAgentId = await client.createAgent({ systemPrompt: 'letta-claude' });
+  const sysPromptSession = client.createSession(systemPromptAgentId, {
     permissionMode: 'unrestricted',
   });
   await sysPromptSession.send('Hello, what kind of agent are you?');
@@ -228,7 +230,7 @@ async function testOptions() {
 
   // Test cwd option via createSession
   console.log('Testing cwd option...');
-  const cwdSession = createSession(await createAgent(), {
+  const cwdSession = client.createSession(await client.createAgent(), {
     cwd: '/tmp',
     allowedTools: ['Bash'],
     permissionMode: 'unrestricted',
@@ -244,7 +246,7 @@ async function testOptions() {
 
   // Test allowedTools option with tool execution
   console.log('Testing allowedTools option...');
-  const toolsSession = createSession(await createAgent(), {
+  const toolsSession = client.createSession(await client.createAgent(), {
     allowedTools: ['Bash'],
     permissionMode: 'unrestricted',
   });
@@ -259,7 +261,7 @@ async function testOptions() {
 
   // Test permissionMode: unrestricted
   console.log('Testing permissionMode: unrestricted...');
-  const unrestrictedSession = createSession(await createAgent(), {
+  const unrestrictedSession = client.createSession(await client.createAgent(), {
     allowedTools: ['Bash'],
     permissionMode: 'unrestricted',
   });
@@ -282,8 +284,8 @@ async function testOptions() {
 async function testMessageTypes() {
   console.log('=== Testing Message Types ===\n');
 
-  const agentId = await createAgent();
-  const session = resumeSession(agentId, {
+  const agentId = await client.createAgent();
+  const session = client.resumeSession(agentId, {
     permissionMode: 'unrestricted',
   });
 
@@ -328,7 +330,7 @@ async function testSessionProperties() {
   console.log('=== Testing Session Properties ===\n');
 
   // Create new agent + new conversation
-  const session = createSession(await createAgent(), {
+  const session = client.createSession(await client.createAgent(), {
     model: 'haiku',
     permissionMode: 'unrestricted',
   });
@@ -363,10 +365,10 @@ async function testToolExecution() {
   console.log('=== Testing Tool Execution ===\n');
 
   // Create a shared agent for tool tests
-  const agentId = await createAgent();
+  const agentId = await client.createAgent();
   
   async function runWithTools(message: string, tools: string[]): Promise<string> {
-    const session = createSession(agentId, {
+    const session = client.createSession(agentId, {
       allowedTools: tools,
       permissionMode: 'unrestricted',
     });
@@ -418,7 +420,7 @@ async function testPermissionCallback() {
 
   // Test 1: Allow specific commands via callback
   console.log('Testing canUseTool callback (allow)...');
-  const allowSession = createSession(await createAgent(), {
+  const allowSession = client.createSession(await client.createAgent(), {
     // NO allowedTools - this ensures callback is invoked
     permissionMode: 'standard',
     canUseTool: async (toolName, toolInput) => {
@@ -441,7 +443,7 @@ async function testPermissionCallback() {
 
   // Test 2: Deny specific commands via callback
   console.log('Testing canUseTool callback (deny)...');
-  const denySession = createSession(await createAgent(), {
+  const denySession = client.createSession(await client.createAgent(), {
     permissionMode: 'standard',
     canUseTool: async (toolName, toolInput) => {
       const command = (toolInput as { command?: string }).command || '';
@@ -472,8 +474,8 @@ async function testSystemPrompt() {
   console.log('=== Testing System Prompt Configuration ===\n');
 
   async function runWithSystemPrompt(msg: string, systemPrompt: any): Promise<string> {
-    const agentId = await createAgent({ systemPrompt });
-    const session = resumeSession(agentId, { permissionMode: 'unrestricted' });
+    const agentId = await client.createAgent({ systemPrompt });
+    const session = client.resumeSession(agentId, { permissionMode: 'unrestricted' });
     await session.send(msg);
     let result = '';
     for await (const m of session.stream()) {
@@ -533,8 +535,8 @@ async function testMemoryConfig() {
   console.log('=== Testing Memory Configuration ===\n');
 
   async function runWithMemory(msg: string, memory?: any[]): Promise<{ success: boolean; result: string }> {
-    const agentId = await createAgent({ memory });
-    const session = resumeSession(agentId, { permissionMode: 'unrestricted' });
+    const agentId = await client.createAgent({ memory });
+    const session = client.resumeSession(agentId, { permissionMode: 'unrestricted' });
     await session.send(msg);
     let result = '';
     let success = false;
@@ -595,8 +597,8 @@ async function testConvenienceProps() {
   console.log('=== Testing Convenience Props ===\n');
 
   async function runWithProps(msg: string, props: Record<string, any>): Promise<{ success: boolean; result: string }> {
-    const agentId = await createAgent(props);
-    const session = resumeSession(agentId, { permissionMode: 'unrestricted' });
+    const agentId = await client.createAgent(props);
+    const session = client.resumeSession(agentId, { permissionMode: 'unrestricted' });
     await session.send(msg);
     let result = '';
     let success = false;
@@ -682,13 +684,13 @@ async function testConversations() {
   let conversationId2: string | null = null;
 
   // Create agent first
-  const agentId = await createAgent();
+  const agentId = await client.createAgent();
   console.log(`Created agent: ${agentId}\n`);
 
   // Test 1: Resume default conversation and get conversationId
   console.log('Test 1: Resume default conversation...');
   {
-    const session = resumeSession(agentId, {
+    const session = client.resumeSession(agentId, {
       permissionMode: 'unrestricted',
     });
 
@@ -710,7 +712,7 @@ async function testConversations() {
   // Test 2: Create NEW conversation using createSession
   console.log('\nTest 2: Create new conversation (createSession)...');
   {
-    const session = createSession(agentId, {
+    const session = client.createSession(agentId, {
       permissionMode: 'unrestricted',
     });
 
@@ -732,9 +734,9 @@ async function testConversations() {
   console.log('\nTest 3: Resume conversation by conversationId...');
   if (conversationId1 === 'default') {
     console.log('  SKIP - "default" is not a real conversation ID');
-    console.log('  Use resumeSession(agentId) to resume default conversation');
+    console.log('  Use client.resumeSession(agentId) to resume default conversation');
   } else {
-    await using session = resumeSession(conversationId1!, {
+    await using session = client.resumeSession(conversationId1!, {
       permissionMode: 'unrestricted',
     });
 
@@ -746,7 +748,7 @@ async function testConversations() {
     }
 
     const remembers = response.toLowerCase().includes('beta');
-    console.log(`  resumeSession(convId): ${remembers ? 'PASS' : 'FAIL'}`);
+    console.log(`  client.resumeSession(convId): ${remembers ? 'PASS' : 'FAIL'}`);
     console.log(`  Response: ${response.slice(0, 80)}...`);
     
     // Verify same conversationId
@@ -757,7 +759,7 @@ async function testConversations() {
   // Test 4: Create another new conversation (verify different IDs)
   console.log('\nTest 4: Create another new conversation...');
   {
-    await using session = createSession(agentId, {
+    await using session = client.createSession(agentId, {
       permissionMode: 'unrestricted',
     });
 
@@ -777,10 +779,10 @@ async function testConversations() {
     console.log(`  conversationId2: ${conversationId2}`);
   }
 
-  // Test 5: Resume default conversation via resumeSession(agentId)
-  console.log('\nTest 5: Resume default conversation via resumeSession(agentId)...');
+  // Test 5: Resume default conversation via client.resumeSession(agentId)
+  console.log('\nTest 5: Resume default conversation via client.resumeSession(agentId)...');
   {
-    await using session = resumeSession(agentId, {
+    await using session = client.resumeSession(agentId, {
       permissionMode: 'unrestricted',
     });
 
@@ -792,14 +794,14 @@ async function testConversations() {
     }
 
     const remembersAlpha = response.toLowerCase().includes('alpha');
-    console.log(`  resumeSession(agentId): ${remembersAlpha ? 'PASS' : 'CHECK'}`);
+    console.log(`  client.resumeSession(agentId): ${remembersAlpha ? 'PASS' : 'CHECK'}`);
     console.log(`  Response: ${response.slice(0, 80)}...`);
   }
 
   // Test 6: conversationId in result message
   console.log('\nTest 6: conversationId in result message...');
   {
-    await using session = resumeSession(conversationId1!, {
+    await using session = client.resumeSession(conversationId1!, {
       permissionMode: 'unrestricted',
     });
 

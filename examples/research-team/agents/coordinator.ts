@@ -5,14 +5,16 @@
  * and tracks team performance over time.
  */
 
-import { resumeSession, type LettaCodeSession } from '../../../src/index.js';
-import { createAgentSession } from '../../create-agent-session.js';
+import { type LettaCodeSession } from '../../../src/index.js';
+import { createAgentSession, createExampleClient, resumeExampleSession } from '../../create-agent-session.js';
 import type { Depth, ResearchTask, UserFeedback } from '../types.js';
 import { DEPTH_CONFIGS, generateTaskId, formatDuration } from '../types.js';
 import { loadTeamState, saveTeamState, ARTIFACTS, readOutput, getOutputPath, outputExists } from '../tools/file-store.js';
 import { createResearcher, runResearchTask, reflectOnTask as researcherReflect } from './researcher.js';
 import { createAnalyst, runAnalysis, reflectOnTask as analystReflect } from './analyst.js';
 import { createWriter, writeReport, reflectOnTask as writerReflect } from './writer.js';
+
+const client = createExampleClient({ backend: 'local' });
 
 const COORDINATOR_SYSTEM_PROMPT = `You are the Research Team Coordinator.
 
@@ -53,11 +55,11 @@ export async function createCoordinator(
   existingAgentId?: string | null
 ): Promise<LettaCodeSession> {
   if (existingAgentId) {
-    return resumeSession(existingAgentId, {
+    return resumeExampleSession(existingAgentId, {
       model: 'haiku',
       allowedTools: ['Glob', 'Read', 'Write'],
       permissionMode: 'unrestricted',
-    });
+    }, client);
   }
   
   return createAgentSession({
@@ -129,7 +131,7 @@ export async function createCoordinator(
     ],
     allowedTools: ['Glob', 'Read', 'Write'],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 /**
@@ -177,7 +179,7 @@ export async function runResearchWorkflow(
   } else if (researcher.agentId) {
     log('Research', `Resumed researcher agent: ${researcher.agentId}`);
   }
-  log('Research', `  → https://app.letta.com/agents/${researcher.agentId}`);
+  log('Research', `  → https://chat.letta.com/agents/${researcher.agentId}`);
   
   if (!researchResult.success) {
     researcher.close();
@@ -204,7 +206,7 @@ export async function runResearchWorkflow(
   } else if (analyst.agentId) {
     log('Analysis', `Resumed analyst agent: ${analyst.agentId}`);
   }
-  log('Analysis', `  → https://app.letta.com/agents/${analyst.agentId}`);
+  log('Analysis', `  → https://chat.letta.com/agents/${analyst.agentId}`);
   
   if (!analysisResult.success) {
     analyst.close();
@@ -230,7 +232,7 @@ export async function runResearchWorkflow(
   } else if (writer.agentId) {
     log('Writing', `Resumed writer agent: ${writer.agentId}`);
   }
-  log('Writing', `  → https://app.letta.com/agents/${writer.agentId}`);
+  log('Writing', `  → https://chat.letta.com/agents/${writer.agentId}`);
   
   if (!writeResult.success) {
     writer.close();

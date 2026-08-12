@@ -115,10 +115,12 @@ Each agent maintains memory blocks that persist across seminars:
 After running a seminar, the agents can be "teleported" into other contexts:
 
 ```typescript
-import { resumeSession } from '@letta-ai/letta-agent-sdk';
+import { LettaAgentClient } from '@letta-ai/letta-agent-sdk';
+
+const client = new LettaAgentClient({ backend: 'cloud' });
 
 // Get agent ID from --status
-const drChen = resumeSession('agent-xxx', { permissionMode: 'unrestricted' });
+const drChen = client.resumeSession('agent-xxx', { permissionMode: 'unrestricted' });
 
 // Dr. Chen remembers all past seminars!
 await drChen.send('What patterns have you noticed in economics presentations?');
@@ -126,7 +128,7 @@ await drChen.send('What patterns have you noticed in economics presentations?');
 
 View any agent in the browser:
 ```
-https://app.letta.com/agents/<agent-id>
+https://chat.letta.com/agents/<agent-id>
 ```
 
 ## Learning Demonstration

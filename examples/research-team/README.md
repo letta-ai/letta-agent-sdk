@@ -201,13 +201,15 @@ The research team agents you create here can be "teleported" into any context:
 ### How It Works
 
 ```typescript
-import { resumeSession } from '@letta-ai/letta-agent-sdk';
+import { LettaAgentClient } from '@letta-ai/letta-agent-sdk';
+
+const client = new LettaAgentClient({ backend: 'local' });
 
 // Get agent ID from team-state.json or --status
 const researcherAgentId = 'agent-xxx-yyy-zzz';
 
 // Teleport the trained researcher into your code
-const researcher = resumeSession(researcherAgentId, {
+const researcher = client.resumeSession(researcherAgentId, {
   // Client-side tools only. web_search is server-side and stays attached
   // to the agent from creation, so it needs no entry here.
   allowedTools: ['Read', 'Write'],
@@ -226,9 +228,10 @@ await researcher.send('Find recent papers on quantum error correction');
 ```typescript
 // server.ts - Turn your research team into an API
 import express from 'express';
-import { resumeSession } from '@letta-ai/letta-agent-sdk';
+import { LettaAgentClient } from '@letta-ai/letta-agent-sdk';
 import { loadTeamState } from './tools/file-store';
 
+const client = new LettaAgentClient({ backend: 'local' });
 const app = express();
 const teamState = await loadTeamState();
 
@@ -236,7 +239,7 @@ app.post('/research', async (req, res) => {
   const { query } = req.body;
   
   // Teleport the trained researcher
-  const researcher = resumeSession(teamState.agentIds.researcher!, {
+  const researcher = client.resumeSession(teamState.agentIds.researcher!, {
     permissionMode: 'unrestricted',
   });
   
@@ -259,7 +262,7 @@ app.post('/research', async (req, res) => {
 Every agent has a web UI in the Letta ADE (Agent Development Environment):
 
 ```
-https://app.letta.com/agents/<agent-id>
+https://chat.letta.com/agents/<agent-id>
 ```
 
 After running the demo, check `--status` for agent IDs, then click the links to:
@@ -313,7 +316,7 @@ Agent IDs are stored in `output/team-state.json`. Running `--reset` clears this 
 ### Memory Block Contents
 Each agent's memory blocks are stored on the Letta server. To inspect them:
 1. Get the agent ID from `--status` or check the ADE links printed during execution
-2. Visit `https://app.letta.com/agents/<agent-id>` to view memory contents
+2. Visit `https://chat.letta.com/agents/<agent-id>` to view memory contents
 
 ## Extending the Demo
 

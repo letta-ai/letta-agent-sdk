@@ -5,11 +5,13 @@
  * Learns which sources are reliable and effective search strategies.
  */
 
-import { resumeSession, type LettaCodeSession } from '../../../src/index.js';
-import { createAgentSession } from '../../create-agent-session.js';
+import { type LettaCodeSession } from '../../../src/index.js';
+import { createAgentSession, createExampleClient, resumeExampleSession } from '../../create-agent-session.js';
 import type { Depth } from '../types.js';
 import { DEPTH_CONFIGS } from '../types.js';
 import { ARTIFACTS } from '../tools/file-store.js';
+
+const client = createExampleClient({ backend: 'local' });
 
 const RESEARCHER_SYSTEM_PROMPT = `You are a Research Specialist on an academic research team.
 
@@ -65,11 +67,11 @@ export async function createResearcher(
   const config = DEPTH_CONFIGS[depth];
   
   if (existingAgentId) {
-    return resumeSession(existingAgentId, {
+    return resumeExampleSession(existingAgentId, {
       model: 'haiku',
       allowedTools: ['Glob', 'Read', 'Write'],
       permissionMode: 'unrestricted',
-    });
+    }, client);
   }
   
   return createAgentSession({
@@ -122,7 +124,7 @@ export async function createResearcher(
     ],
     allowedTools: ['Glob', 'Read', 'Write'],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 /**

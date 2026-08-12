@@ -5,8 +5,8 @@
  * Defends their work against faculty questions.
  */
 
-import { resumeSession, type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession } from '../create-agent-session.js';
+import { type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession, resumeExampleSession } from '../create-agent-session.js';
 import type { SeminarConfig } from './types.js';
 
 const PRESENTER_SYSTEM_PROMPT = `You are an economics researcher presenting at an academic seminar.
@@ -49,7 +49,7 @@ export async function createPresenter(
   config: SeminarConfig
 ): Promise<LettaCodeSession> {
   if (existingAgentId) {
-    return resumeSession(existingAgentId, {
+    return resumeExampleSession(existingAgentId, {
       model: config.model,
       allowedTools: ['Read', 'Write'],
       permissionMode: 'unrestricted',
@@ -229,10 +229,10 @@ function extractTopic(response: string): string {
                      response.match(/present(?:ing)?[:\s]+["']?([^"'\n.]+)/i);
   
   if (topicMatch) {
-    return topicMatch[1].trim();
+    return topicMatch[1]?.trim() ?? 'Untitled topic';
   }
   
   // Fallback: first sentence
-  const firstSentence = response.split(/[.!?]/)[0];
-  return firstSentence.slice(0, 100);
+  const firstSentence = response.split(/[.!?]/)[0] ?? '';
+  return firstSentence.slice(0, 100) || 'Untitled topic';
 }

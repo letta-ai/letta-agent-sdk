@@ -208,7 +208,7 @@ export async function runSeminar(config: SeminarConfig = DEFAULT_CONFIG, userTop
     state.presenterId = presenterId;
     await saveState(state);
     console.log(`\n${COLORS.system}[Presenter agent: ${presenterId}]${COLORS.reset}`);
-    console.log(`${COLORS.system}[→ https://app.letta.com/agents/${presenterId}]${COLORS.reset}`);
+    console.log(`${COLORS.system}[→ https://chat.letta.com/agents/${presenterId}]${COLORS.reset}`);
   }
   
   transcript.push({
@@ -249,7 +249,7 @@ export async function runSeminar(config: SeminarConfig = DEFAULT_CONFIG, userTop
       state.facultyIds[faculty.role] = session.agentId;
       await saveState(state);
     }
-    console.log(`${COLORS.system}[→ https://app.letta.com/agents/${session.agentId}]${COLORS.reset}`);
+    console.log(`${COLORS.system}[→ https://chat.letta.com/agents/${session.agentId}]${COLORS.reset}`);
     
     transcript.push({
       speaker: faculty.name,
@@ -376,7 +376,7 @@ export async function getStatus(): Promise<void> {
   console.log(`Seminars completed: ${state.seminarsCompleted}`);
   console.log(`\nPresenter: ${state.presenterId || '(not created yet)'}`);
   if (state.presenterId) {
-    console.log(`  → https://app.letta.com/agents/${state.presenterId}`);
+    console.log(`  → https://chat.letta.com/agents/${state.presenterId}`);
   }
   
   console.log('\nFaculty:');
@@ -384,7 +384,7 @@ export async function getStatus(): Promise<void> {
     const id = state.facultyIds[faculty.role];
     console.log(`  ${faculty.name} (${faculty.role}): ${id || '(not created yet)'}`);
     if (id) {
-      console.log(`    → https://app.letta.com/agents/${id}`);
+      console.log(`    → https://chat.letta.com/agents/${id}`);
     }
   }
   console.log('');

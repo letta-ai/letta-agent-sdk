@@ -5,8 +5,8 @@
  * Each has a distinct perspective and style.
  */
 
-import { resumeSession, type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession } from '../create-agent-session.js';
+import { type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession, resumeExampleSession } from '../create-agent-session.js';
 import type { FacultyMember, SeminarConfig } from './types.js';
 
 /**
@@ -58,7 +58,7 @@ export async function createFacultyMember(
   config: SeminarConfig
 ): Promise<LettaCodeSession> {
   if (existingAgentId) {
-    return resumeSession(existingAgentId, {
+    return resumeExampleSession(existingAgentId, {
       model: config.model,
       allowedTools: ['Read', 'Write'],
       permissionMode: 'unrestricted',

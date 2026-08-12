@@ -10,13 +10,14 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { resumeSession, type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession } from '../create-agent-session.js';
+import { type LettaCodeSession } from '../../src/index.js';
+import { createAgentSession, createExampleClient, resumeExampleSession } from '../create-agent-session.js';
 import { BugFixerState, DEFAULT_CONFIG } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const STATE_FILE = join(__dirname, 'state.json');
+const client = createExampleClient({ backend: 'local' });
 
 // ANSI colors
 const COLORS = {
@@ -82,11 +83,11 @@ export async function saveState(state: BugFixerState): Promise<void> {
 export async function getOrCreateAgent(state: BugFixerState): Promise<LettaCodeSession> {
   if (state.agentId) {
     console.log(`${COLORS.system}Resuming bug fixer agent...${COLORS.reset}`);
-    return resumeSession(state.agentId, {
+    return resumeExampleSession(state.agentId, {
       model: DEFAULT_CONFIG.model,
       allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
       permissionMode: 'unrestricted',
-    });
+    }, client);
   }
 
   console.log(`${COLORS.system}Creating new bug fixer agent...${COLORS.reset}`);
@@ -122,7 +123,7 @@ export async function getOrCreateAgent(state: BugFixerState): Promise<LettaCodeS
     ],
     allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 
   return session;
 }
@@ -244,7 +245,7 @@ export async function showStatus(state: BugFixerState): Promise<void> {
   console.log('\n🐛 Bug Fixer Status\n');
   console.log(`Agent: ${state.agentId || '(not created yet)'}`);
   if (state.agentId) {
-    console.log(`  → https://app.letta.com/agents/${state.agentId}`);
+    console.log(`  → https://chat.letta.com/agents/${state.agentId}`);
   }
   console.log(`Fixes attempted: ${state.fixCount}`);
   console.log('');
