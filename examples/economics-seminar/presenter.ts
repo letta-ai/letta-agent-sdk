@@ -6,8 +6,11 @@
  */
 
 import { type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession, resumeExampleSession } from '../create-agent-session.js';
+import { createAgentSession, createExampleClient, resumeExampleSession } from '../create-agent-session.js';
 import type { SeminarConfig } from './types.js';
+
+// File-editing demo: pin the local backend so agent state stays consistent.
+const client = createExampleClient({ backend: 'local' });
 
 const PRESENTER_SYSTEM_PROMPT = `You are an economics researcher presenting at an academic seminar.
 
@@ -53,7 +56,7 @@ export async function createPresenter(
       model: config.model,
       allowedTools: ['Read', 'Write'],
       permissionMode: 'unrestricted',
-    });
+    }, client);
   }
   
   return createAgentSession({
@@ -107,7 +110,7 @@ export async function createPresenter(
     ],
     allowedTools: ['Read', 'Write'],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 /**

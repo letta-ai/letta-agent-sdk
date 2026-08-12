@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession, createExampleClient, resumeExampleSession } from '../create-agent-session.js';
+import { createAgentSession, createExampleClient, formatAgentLink, resumeExampleSession } from '../create-agent-session.js';
 import { ReleaseNotesState, DEFAULT_CONFIG } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -214,7 +214,7 @@ export async function showStatus(state: ReleaseNotesState): Promise<void> {
   console.log('\n📝 Release Notes Generator Status\n');
   console.log(`Agent: ${state.agentId || '(not created yet)'}`);
   if (state.agentId) {
-    console.log(`  → https://chat.letta.com/agents/${state.agentId}`);
+    console.log(`  → ${formatAgentLink(state.agentId, client)}`);
   }
   console.log(`Releases generated: ${state.releasesGenerated}`);
   console.log('');

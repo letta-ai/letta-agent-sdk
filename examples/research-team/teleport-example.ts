@@ -17,7 +17,7 @@
  *   bun teleport-example.ts
  */
 
-import { resumeExampleSession, createExampleClient } from '../create-agent-session.js';
+import { resumeExampleSession, createExampleClient, formatAgentLink } from '../create-agent-session.js';
 import { loadTeamState } from './tools/file-store.js';
 
 const client = createExampleClient({ backend: 'local' });
@@ -43,7 +43,7 @@ async function main() {
   for (const [role, agentId] of Object.entries(teamState.agentIds)) {
     if (agentId) {
       console.log(`   ${role}: ${agentId}`);
-      console.log(`   → https://chat.letta.com/agents/${agentId}\n`);
+      console.log(`   → ${formatAgentLink(agentId, client)}\n`);
     }
   }
 

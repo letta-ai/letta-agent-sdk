@@ -8,8 +8,11 @@
  */
 
 import { type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession, resumeExampleSession } from '../create-agent-session.js';
+import { createAgentSession, createExampleClient, resumeExampleSession } from '../create-agent-session.js';
 import { VoterPersona, CONFIG } from './types.js';
+
+// File-editing demo: pin the local backend so agent state stays consistent.
+const client = createExampleClient({ backend: 'local' });
 
 // ============================================================================
 // CANDIDATE AGENT
@@ -50,14 +53,14 @@ export async function createCandidateAgent(): Promise<LettaCodeSession> {
       },
     ],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 export async function resumeCandidateAgent(agentId: string): Promise<LettaCodeSession> {
   return resumeExampleSession(agentId, {
     model: CONFIG.model,
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 // ============================================================================
@@ -115,14 +118,14 @@ Background: ${persona.background}`,
       },
     ],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 export async function resumeVoterAgent(agentId: string): Promise<LettaCodeSession> {
   return resumeExampleSession(agentId, {
     model: CONFIG.model,
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 // ============================================================================
@@ -161,14 +164,14 @@ export async function createAnalystAgent(): Promise<LettaCodeSession> {
       },
     ],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 export async function resumeAnalystAgent(agentId: string): Promise<LettaCodeSession> {
   return resumeExampleSession(agentId, {
     model: CONFIG.model,
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 // ============================================================================

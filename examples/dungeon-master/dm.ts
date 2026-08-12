@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession, createExampleClient, resumeExampleSession } from '../create-agent-session.js';
+import { createAgentSession, createExampleClient, formatAgentLink, resumeExampleSession } from '../create-agent-session.js';
 import { GameState, DEFAULT_CONFIG, PATHS, CAMPAIGN_FILES } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -241,7 +241,7 @@ Use the Write tool to create rulebook.md now.`;
   
   console.log(`\n\n${COLORS.system}Rulebook created! The DM is ready.${COLORS.reset}`);
   console.log(`${COLORS.system}[DM Agent: ${session.agentId}]${COLORS.reset}`);
-  console.log(`${COLORS.system}[→ https://chat.letta.com/agents/${session.agentId}]${COLORS.reset}\n`);
+  console.log(`${COLORS.system}[→ ${formatAgentLink(session.agentId, client)}]${COLORS.reset}\n`);
 }
 
 /**
@@ -377,7 +377,7 @@ export async function showStatus(state: GameState): Promise<void> {
   
   console.log(`DM Agent: ${state.dmAgentId || '(not created)'}`);
   if (state.dmAgentId) {
-    console.log(`  → https://chat.letta.com/agents/${state.dmAgentId}`);
+    console.log(`  → ${formatAgentLink(state.dmAgentId, client)}`);
   }
   
   console.log(`\nRulebook: ${hasRulebook() ? '✓ Created' : '✗ Not created'}`);

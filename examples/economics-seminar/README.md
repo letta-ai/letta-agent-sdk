@@ -117,7 +117,7 @@ After running a seminar, the agents can be "teleported" into other contexts:
 ```typescript
 import { LettaAgentClient } from '@letta-ai/letta-agent-sdk';
 
-const client = new LettaAgentClient({ backend: 'cloud' });
+const client = new LettaAgentClient({ backend: 'local' });
 
 // Get agent ID from --status
 const drChen = client.resumeSession('agent-xxx', { permissionMode: 'unrestricted' });
@@ -126,10 +126,11 @@ const drChen = client.resumeSession('agent-xxx', { permissionMode: 'unrestricted
 await drChen.send('What patterns have you noticed in economics presentations?');
 ```
 
-View any agent in the browser:
+Agents created with `backend: 'cloud'` can be viewed in the hosted UI:
 ```
 https://chat.letta.com/agents/<agent-id>
 ```
+(Local-backend agents are not visible in hosted chat.)
 
 ## Learning Demonstration
 

@@ -259,13 +259,13 @@ app.post('/research', async (req, res) => {
 
 ### View Agents in the Browser
 
-Every agent has a web UI in the Letta ADE (Agent Development Environment):
+Agents created on the Cloud backend have a web UI in the Letta ADE (Agent Development Environment):
 
 ```
 https://chat.letta.com/agents/<agent-id>
 ```
 
-After running the demo, check `--status` for agent IDs, then click the links to:
+This demo pins `backend: 'local'`, so its agents are not visible in hosted chat. To use these links, switch the demo to `backend: 'cloud'` first. Then check `--status` for agent IDs, and click the links to:
 - Inspect memory blocks
 - View conversation history
 - Chat with agents directly
@@ -316,7 +316,7 @@ Agent IDs are stored in `output/team-state.json`. Running `--reset` clears this 
 ### Memory Block Contents
 Each agent's memory blocks are stored on the Letta server. To inspect them:
 1. Get the agent ID from `--status` or check the ADE links printed during execution
-2. Visit `https://chat.letta.com/agents/<agent-id>` to view memory contents
+2. Visit `https://chat.letta.com/agents/<agent-id>` to view memory contents (Cloud backend only)
 
 ## Extending the Demo
 

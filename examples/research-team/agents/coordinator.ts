@@ -6,7 +6,7 @@
  */
 
 import { type LettaCodeSession } from '../../../src/index.js';
-import { createAgentSession, createExampleClient, resumeExampleSession } from '../../create-agent-session.js';
+import { createAgentSession, createExampleClient, formatAgentLink, resumeExampleSession } from '../../create-agent-session.js';
 import type { Depth, ResearchTask, UserFeedback } from '../types.js';
 import { DEPTH_CONFIGS, generateTaskId, formatDuration } from '../types.js';
 import { loadTeamState, saveTeamState, ARTIFACTS, readOutput, getOutputPath, outputExists } from '../tools/file-store.js';
@@ -179,7 +179,7 @@ export async function runResearchWorkflow(
   } else if (researcher.agentId) {
     log('Research', `Resumed researcher agent: ${researcher.agentId}`);
   }
-  log('Research', `  → https://chat.letta.com/agents/${researcher.agentId}`);
+  log('Research', `  → ${formatAgentLink(researcher.agentId, client)}`);
   
   if (!researchResult.success) {
     researcher.close();
@@ -206,7 +206,7 @@ export async function runResearchWorkflow(
   } else if (analyst.agentId) {
     log('Analysis', `Resumed analyst agent: ${analyst.agentId}`);
   }
-  log('Analysis', `  → https://chat.letta.com/agents/${analyst.agentId}`);
+  log('Analysis', `  → ${formatAgentLink(analyst.agentId, client)}`);
   
   if (!analysisResult.success) {
     analyst.close();
@@ -232,7 +232,7 @@ export async function runResearchWorkflow(
   } else if (writer.agentId) {
     log('Writing', `Resumed writer agent: ${writer.agentId}`);
   }
-  log('Writing', `  → https://chat.letta.com/agents/${writer.agentId}`);
+  log('Writing', `  → ${formatAgentLink(writer.agentId, client)}`);
   
   if (!writeResult.success) {
     writer.close();

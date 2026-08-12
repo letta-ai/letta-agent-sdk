@@ -6,8 +6,11 @@
  */
 
 import { type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession, resumeExampleSession } from '../create-agent-session.js';
+import { createAgentSession, createExampleClient, resumeExampleSession } from '../create-agent-session.js';
 import type { FacultyMember, SeminarConfig } from './types.js';
+
+// File-editing demo: pin the local backend so agent state stays consistent.
+const client = createExampleClient({ backend: 'local' });
 
 /**
  * Generate system prompt for a faculty member
@@ -62,7 +65,7 @@ export async function createFacultyMember(
       model: config.model,
       allowedTools: ['Read', 'Write'],
       permissionMode: 'unrestricted',
-    });
+    }, client);
   }
   
   return createAgentSession({
@@ -120,7 +123,7 @@ export async function createFacultyMember(
     ],
     allowedTools: ['Read', 'Write'],
     permissionMode: 'unrestricted',
-  });
+  }, client);
 }
 
 /**

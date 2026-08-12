@@ -79,3 +79,16 @@ export function resumeExampleSession(
 ): LettaCodeSession {
   return client.resumeSession(id, options);
 }
+
+/**
+ * Link to view an agent in the hosted chat UI. Hosted chat only loads Cloud
+ * agents, so local-backend demos print a note instead of a URL that 404s.
+ */
+export function formatAgentLink(
+  agentId: string | null,
+  client: LettaAgentClient,
+): string {
+  return client.backend === "cloud"
+    ? `https://chat.letta.com/agents/${agentId}`
+    : `${agentId} (local backend — not visible in hosted chat)`;
+}
