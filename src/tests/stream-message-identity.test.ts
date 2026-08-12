@@ -137,6 +137,57 @@ describe("remote turn terminal receipts", () => {
     coordinator.close();
   });
 
+  test("accepts turn_finished as the first run evidence", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-receipt-only",
+        run_id: "run-receipt-only",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      runIds: ["run-receipt-only"],
+    });
+    coordinator.close();
+  });
+
+  test("classifies tool_rule as a successful terminal", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-tool-rule",
+        run_id: "run-tool-rule",
+        stop_reason: "tool_rule",
+      },
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      stopReason: "tool_rule",
+      runIds: ["run-tool-rule"],
+    });
+    coordinator.close();
+  });
+
   test("does not apply a settled run receipt to the next tracked turn", async () => {
     const coordinator = new RemoteTurnCoordinator({
       label: "test",
