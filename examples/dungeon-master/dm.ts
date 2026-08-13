@@ -1,25 +1,50 @@
-/**
- * Dungeon Master Agent
- * 
- * A persistent DM that creates its own game system and runs campaigns.
- */
+/** A persistent Dungeon Master with file-backed campaign state. */
 
-import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { type LettaCodeSession } from '../../src/index.js';
-import { createAgentSession, createExampleClient, formatAgentLink, resumeExampleSession } from '../create-agent-session.js';
-import { CAMPAIGN_FILES, DEFAULT_CONFIG, PATHS, type GameState } from './types.js';
+import {
+  type LettaCodeClientSessionOptions,
+  type LettaCodeSession,
+} from '../../src/index.js';
+import {
+  createExampleAgent,
+  createExampleClient,
+  formatAgentLink,
+  resumeExampleSession,
+} from '../create-agent-session.js';
+import { CAMPAIGN_FILES, PATHS, type GameState } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const STATE_FILE = join(__dirname, PATHS.stateFile);
+const STATE_TEMP_FILE = `${STATE_FILE}.tmp`;
 const RULEBOOK_FILE = join(__dirname, PATHS.rulebook);
 const CAMPAIGNS_DIR = join(__dirname, PATHS.campaignsDir);
 const client = createExampleClient({ backend: 'local' });
+const INVALID_CAMPAIGN_NAME_CHARACTERS = /[<>:"/\\|?*\u0000-\u001F]/;
+const WINDOWS_RESERVED_NAME = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$/i;
+
+// Setting cwd makes the agent's relative Read and Write paths match the files
+// that this CLI inspects. The allowlist keeps unrelated client tools disabled.
+const DM_SESSION_OPTIONS = {
+  allowedTools: ['Read', 'Write'],
+  permissionMode: 'unrestricted',
+  cwd: __dirname,
+  skillSources: [],
+} satisfies LettaCodeClientSessionOptions;
+
+const CAMPAIGN_FILE_GUIDE = [
+  `${CAMPAIGN_FILES.world} - Setting, locations, and lore`,
+  `${CAMPAIGN_FILES.player} - Character sheet, backstory, and inventory`,
+  `${CAMPAIGN_FILES.npcs} - Non-player characters and relationships`,
+  `${CAMPAIGN_FILES.quests} - Active and completed quests`,
+  `${CAMPAIGN_FILES.sessionLog} - Session summaries`,
+  `${CAMPAIGN_FILES.consequences} - Pending results of earlier choices`,
+].map((line) => `  - ${line}`).join('\n');
 
 // ANSI colors
 const COLORS = {
@@ -29,40 +54,83 @@ const COLORS = {
   reset: '\x1b[0m',
 };
 
-/**
- * Load game state from disk
- */
-export async function loadState(): Promise<GameState> {
-  if (existsSync(STATE_FILE)) {
-    const data = await readFile(STATE_FILE, 'utf-8');
-    return JSON.parse(data);
+function parseState(value: unknown): GameState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${PATHS.stateFile} must contain a JSON object.`);
   }
-  return {
-    dmAgentId: null,
-    activeCampaign: null,
-    campaigns: [],
-  };
+
+  const state = value as Record<string, unknown>;
+  const dmAgentId = state.dmAgentId;
+  const activeCampaign = state.activeCampaign;
+  const pendingCampaign = state.pendingCampaign ?? null;
+  if (dmAgentId !== null && typeof dmAgentId !== 'string') {
+    throw new Error(`${PATHS.stateFile} has an invalid dmAgentId.`);
+  }
+  if (activeCampaign !== null && typeof activeCampaign !== 'string') {
+    throw new Error(`${PATHS.stateFile} has an invalid activeCampaign.`);
+  }
+  if (pendingCampaign !== null && typeof pendingCampaign !== 'string') {
+    throw new Error(`${PATHS.stateFile} has an invalid pendingCampaign.`);
+  }
+  if (activeCampaign) validateCampaignName(activeCampaign);
+  if (pendingCampaign) validateCampaignName(pendingCampaign);
+
+  return { dmAgentId, activeCampaign, pendingCampaign };
 }
 
-/**
- * Save game state to disk
- */
+export async function loadState(): Promise<GameState> {
+  if (!existsSync(STATE_FILE)) {
+    return { dmAgentId: null, activeCampaign: null, pendingCampaign: null };
+  }
+
+  try {
+    return parseState(JSON.parse(await readFile(STATE_FILE, 'utf-8')));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Cannot load ${PATHS.stateFile}: ${detail}`);
+  }
+}
+
 export async function saveState(state: GameState): Promise<void> {
-  await writeFile(STATE_FILE, JSON.stringify(state, null, 2));
+  await writeFile(STATE_TEMP_FILE, `${JSON.stringify(state, null, 2)}\n`);
+  await rename(STATE_TEMP_FILE, STATE_FILE);
 }
 
-/**
- * Get campaign directory path
- */
+function validateCampaignName(campaignName: string): void {
+  const valid =
+    campaignName.length > 0 &&
+    campaignName.length <= 64 &&
+    campaignName === campaignName.trim() &&
+    campaignName !== '.' &&
+    campaignName !== '..' &&
+    !campaignName.endsWith('.') &&
+    !INVALID_CAMPAIGN_NAME_CHARACTERS.test(campaignName) &&
+    !WINDOWS_RESERVED_NAME.test(campaignName);
+  if (!valid) {
+    throw new Error(
+      'Campaign name must be 1-64 characters and valid as a directory name on macOS, Linux, and Windows.',
+    );
+  }
+}
+
+export function normalizeCampaignName(value: string): string {
+  const campaignName = value.trim().normalize('NFC');
+  validateCampaignName(campaignName);
+  return campaignName;
+}
+
 function getCampaignDir(campaignName: string): string {
-  return join(CAMPAIGNS_DIR, campaignName);
+  validateCampaignName(campaignName);
+  const campaignDir = resolve(CAMPAIGNS_DIR, campaignName);
+  if (!campaignDir.startsWith(`${CAMPAIGNS_DIR}${sep}`)) {
+    throw new Error('Campaign path must stay inside the campaigns directory.');
+  }
+  return campaignDir;
 }
 
-/**
- * Get campaign file path
- */
-function getCampaignFile(campaignName: string, file: keyof typeof CAMPAIGN_FILES): string {
-  return join(getCampaignDir(campaignName), CAMPAIGN_FILES[file]);
+function getCampaignRelativePath(campaignName: string): string {
+  validateCampaignName(campaignName);
+  return `${PATHS.campaignsDir}/${campaignName}`;
 }
 
 /**
@@ -86,267 +154,285 @@ export async function readRulebook(): Promise<string | null> {
 export async function listCampaigns(): Promise<string[]> {
   if (!existsSync(CAMPAIGNS_DIR)) return [];
   const entries = await readdir(CAMPAIGNS_DIR, { withFileTypes: true });
-  return entries.filter(e => e.isDirectory()).map(e => e.name);
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right));
 }
 
-/**
- * Create or resume the DM agent
- */
+/** Remove a campaign whose setup did not reach the state-file commit. */
+export async function recoverPendingCampaign(state: GameState): Promise<void> {
+  if (!state.pendingCampaign) return;
+
+  const pendingCampaign = state.pendingCampaign;
+  await rm(getCampaignDir(pendingCampaign), { force: true, recursive: true });
+  state.pendingCampaign = null;
+  await saveState(state);
+  console.log(
+    `${COLORS.system}Removed incomplete campaign setup: ${pendingCampaign}${COLORS.reset}`,
+  );
+}
+
+/** Resume the saved agent's default conversation, or create it once. */
 export async function createDM(state: GameState): Promise<LettaCodeSession> {
   if (state.dmAgentId) {
-    // Resume existing DM
-    return resumeExampleSession(state.dmAgentId, {
-      model: DEFAULT_CONFIG.model,
-      allowedTools: ['Read', 'Write'],
-      permissionMode: 'unrestricted',
-    }, client);
+    return resumeExampleSession(state.dmAgentId, DM_SESSION_OPTIONS, client);
   }
 
-  // Create new DM
-  const session = await createAgentSession({
-    model: DEFAULT_CONFIG.model,
-    systemPrompt: `You are a Dungeon Master - a creative storyteller and game designer who runs tabletop RPG campaigns.
+  // The SDK selects its current default model when `model` is omitted. Saving
+  // the agent ID before the first turn lets a failed setup resume on retry.
+  const agentId = await createExampleAgent({
+    name: 'Dungeon Master',
+    description: 'Runs file-backed tabletop role-playing campaigns.',
+    baseTools: [],
+    systemPrompt: `You are a Dungeon Master who designs and runs tabletop role-playing campaigns.
 
-## Your Role
-- Design and run engaging tabletop RPG experiences
-- Create your own game system with rules you write in rulebook.md
-- Manage persistent campaign worlds that remember everything
-- Collaborate with players on tone, style, and what kind of experience they want
+## Role
+- Create a small game system in ${PATHS.rulebook}.
+- Run campaigns whose state later sessions can read from files.
+- Ask the player about tone, boundaries, and character goals.
 
-## Your Style
-- Adapt to what the player wants (serious, funny, dark, lighthearted)
-- Be descriptive and immersive in narration
-- Give players meaningful choices with real consequences
-- Keep things moving - don't get bogged down in rules
+## Style
+- Match the tone that the player requests.
+- Describe scenes with enough detail to support a choice.
+- Give choices consequences that follow from the saved campaign state.
+- Prefer a clear ruling over a long rules discussion.
 
-## File Management
-You have access to Read and Write tools. Use them to:
-- Write and update your rulebook (rulebook.md)
-- Manage campaign files in campaigns/{name}/:
-  - world.md - Setting, locations, lore
-  - player.md - Character sheet, backstory, inventory
-  - npcs.md - NPCs met, relationships
-  - quests.md - Active/completed quests
-  - session-log.md - What happened each session
-  - consequences.md - Pending events from past actions
+## Files
+The working directory is this example directory. Use relative paths only.
+Write the shared rules to ${PATHS.rulebook}. Store each campaign under
+${PATHS.campaignsDir}/{name}/ with these files:
+${CAMPAIGN_FILE_GUIDE}
 
-## Memory Files
-Keep cross-campaign player preferences in reference/player-preferences.md and
-brief campaign pointers in reference/campaign-index.md. Keep full campaign
-state in the campaign files above.
+Keep full campaign state in those campaign files. Store only durable,
+cross-campaign player preferences in the agent's memory files. Do not store
+secrets in campaign or memory files.
 
-## Important
-- Always update campaign files after significant events
-- Reference your rulebook when resolving actions
-- Make the world feel alive and reactive to player choices`,
-    allowedTools: ['Read', 'Write'],
-    permissionMode: 'unrestricted',
+Read ${PATHS.rulebook} before you resolve an uncertain action. Update the active
+campaign files after events that change the world, character, quests, or future
+consequences. Never write one campaign's state into another campaign.`,
   }, client);
 
-  return session;
+  state.dmAgentId = agentId;
+  await saveState(state);
+  return resumeExampleSession(agentId, DM_SESSION_OPTIONS, client);
 }
 
-/**
- * Stream output with color
- */
 function createStreamPrinter(): (text: string) => void {
   return (text: string) => {
     process.stdout.write(`${COLORS.dm}${text}${COLORS.reset}`);
   };
 }
 
-/**
- * Send a message to the DM and get response
- */
+/** Send one turn, print assistant fragments, and require a terminal result. */
 export async function chat(
   session: LettaCodeSession,
   message: string,
-  onOutput?: (text: string) => void
+  onOutput?: (text: string) => void,
 ): Promise<string> {
   await session.send(message);
-  
-  let response = '';
-  const printer = onOutput || createStreamPrinter();
-  
-  let lastToolName = '';
+
+  let streamedResponse = '';
+  let streamedError: string | undefined;
+  const printedToolCalls = new Set<string>();
+  const printer = onOutput ?? createStreamPrinter();
+
   for await (const msg of session.stream()) {
     if (msg.type === 'assistant') {
-      response += msg.content;
+      streamedResponse += msg.content;
       printer(msg.content);
-      lastToolName = '';
-    } else if (msg.type === 'tool_call' && 'toolName' in msg) {
-      if (msg.toolName !== lastToolName) {
-        console.log(`\n${COLORS.system}[${msg.toolName}]${COLORS.reset}`);
-        lastToolName = msg.toolName;
+      continue;
+    }
+
+    if (msg.type === 'tool_call' && !printedToolCalls.has(msg.toolCallId)) {
+      printedToolCalls.add(msg.toolCallId);
+      console.log(`\n${COLORS.system}[${msg.toolName}]${COLORS.reset}`);
+      continue;
+    }
+
+    if (msg.type === 'error') {
+      streamedError = msg.errorDetail ?? msg.message;
+      continue;
+    }
+
+    if (msg.type === 'result') {
+      if (!msg.success) {
+        throw new Error(
+          streamedError ?? msg.errorDetail ?? msg.error ?? msg.errorCode ?? 'Dungeon Master turn failed.',
+        );
       }
+
+      const completeResponse = msg.result ?? streamedResponse;
+      // Some transports provide only the complete text on the result message.
+      if (!streamedResponse && completeResponse) printer(completeResponse);
+      return completeResponse;
     }
   }
-  
-  return response;
+
+  throw new Error('Dungeon Master stream ended before a terminal result.');
 }
 
-/**
- * Initialize a new DM (create rulebook)
- */
-export async function initializeDM(session: LettaCodeSession, state: GameState): Promise<void> {
+/** Ask a new agent to create the rulebook that the CLI will inspect. */
+export async function initializeDM(
+  session: LettaCodeSession,
+  state: GameState,
+): Promise<void> {
   console.log(`\n${COLORS.system}The DM is creating its game system...${COLORS.reset}\n`);
-  
-  const prompt = `You're starting fresh as a Dungeon Master. Your first task is to create your game system.
 
-Write a rulebook.md file that contains your custom tabletop RPG rules. Include:
+  const prompt = `Create ${PATHS.rulebook} in the current working directory. Define a small tabletop role-playing game with:
 
-1. **Core Mechanic** - How do players resolve actions? (dice, cards, narrative, etc.)
-2. **Character Stats** - What defines a character mechanically?
-3. **Combat** - How does fighting work?
-4. **Skills/Abilities** - What can characters do?
-5. **Progression** - How do characters grow?
-6. **Health/Death** - How does damage and dying work?
+1. A core action-resolution mechanic.
+2. Character statistics.
+3. Combat rules.
+4. Skills or abilities.
+5. Character progression.
+6. Damage, recovery, and death rules.
 
-Keep it simple but complete enough to run a game. You can always refine it later.
-
-Use the Write tool to create rulebook.md now.`;
+Keep the rules short enough to use during play. Use the Write tool now.`;
 
   await chat(session, prompt, createStreamPrinter());
-  
-  // Save the DM agent ID
-  if (session.agentId) {
-    state.dmAgentId = session.agentId;
-    await saveState(state);
+  if (!hasRulebook()) {
+    throw new Error(`The turn completed without creating ${PATHS.rulebook}.`);
   }
-  
-  console.log(`\n\n${COLORS.system}Rulebook created! The DM is ready.${COLORS.reset}`);
-  console.log(`${COLORS.system}[DM Agent: ${session.agentId}]${COLORS.reset}`);
-  console.log(`${COLORS.system}[→ ${formatAgentLink(session.agentId, client)}]${COLORS.reset}\n`);
+
+  const agentId = session.agentId ?? state.dmAgentId;
+  if (!agentId) throw new Error('The session did not report a Dungeon Master agent ID.');
+
+  console.log(`\n\n${COLORS.system}Rulebook created. The DM is ready.${COLORS.reset}`);
+  console.log(`${COLORS.system}[DM Agent: ${agentId}]${COLORS.reset}`);
+  console.log(`${COLORS.system}[→ ${formatAgentLink(agentId, client)}]${COLORS.reset}\n`);
 }
 
-/**
- * Start a new campaign
- */
+/** Create the campaign directory and begin play in the saved conversation. */
 export async function startNewCampaign(
   session: LettaCodeSession,
   state: GameState,
-  campaignName: string
+  campaignName: string,
 ): Promise<void> {
-  // Create campaign directory
-  const campaignDir = getCampaignDir(campaignName);
-  await mkdir(campaignDir, { recursive: true });
-  
-  // Update state
-  state.activeCampaign = campaignName;
-  if (!state.campaigns.includes(campaignName)) {
-    state.campaigns.push(campaignName);
+  const normalizedName = normalizeCampaignName(campaignName);
+  const campaignDir = getCampaignDir(normalizedName);
+  const campaignPath = getCampaignRelativePath(normalizedName);
+  if (existsSync(campaignDir)) {
+    throw new Error(`Campaign ${JSON.stringify(normalizedName)} already exists.`);
   }
+
+  state.pendingCampaign = normalizedName;
   await saveState(state);
-  
-  console.log(`\n${COLORS.system}Starting new campaign: ${campaignName}${COLORS.reset}\n`);
-  
-  const prompt = `We're starting a new campaign called "${campaignName}".
+  console.log(`\n${COLORS.system}Starting new campaign: ${normalizedName}${COLORS.reset}\n`);
 
-The campaign files are in: campaigns/${campaignName}/
+  const prompt = `Start the new campaign ${JSON.stringify(normalizedName)}. Store its files only under ${campaignPath}/.
 
-First, let's create this world together. Ask me:
-1. What kind of setting/world interests me?
-2. What tone am I looking for? (serious, comedic, dark, heroic, etc.)
-3. Any topics I'd like to avoid?
+Ask the player the following questions:
+1. What setting interests them?
+2. What tone do they want?
+3. What topics do they want to exclude?
+4. What character do they want to play?
 
-Then ask about my character concept - I'll describe who I want to play and you'll help fill in the mechanical details based on your rulebook.
+Use ${PATHS.rulebook} to help with the character's mechanical details. Begin with a short greeting and the questions.`;
 
-Start by greeting me and asking these questions.`;
-
-  await chat(session, prompt, createStreamPrinter());
+  try {
+    await mkdir(campaignDir, { recursive: true });
+    await chat(session, prompt, createStreamPrinter());
+    state.activeCampaign = normalizedName;
+    state.pendingCampaign = null;
+    await saveState(state);
+  } catch (error) {
+    await rm(campaignDir, { force: true, recursive: true });
+    state.pendingCampaign = null;
+    await saveState(state);
+    throw error;
+  }
   console.log('\n');
 }
 
-/**
- * Resume an existing campaign
- */
+/** Resume a campaign after the agent reloads its file-backed state. */
 export async function resumeCampaign(
   session: LettaCodeSession,
   state: GameState,
-  campaignName: string
+  campaignName: string,
 ): Promise<void> {
+  validateCampaignName(campaignName);
+  const campaignDir = getCampaignDir(campaignName);
+  const campaignPath = getCampaignRelativePath(campaignName);
+  if (!existsSync(campaignDir)) {
+    throw new Error(`Campaign ${JSON.stringify(campaignName)} does not exist.`);
+  }
+
   state.activeCampaign = campaignName;
   await saveState(state);
-  
+
   console.log(`\n${COLORS.system}Resuming campaign: ${campaignName}${COLORS.reset}\n`);
-  
-  const prompt = `We're resuming the campaign "${campaignName}".
 
-Please:
-1. Read the campaign files in campaigns/${campaignName}/ to refresh your memory
-2. Read your rulebook.md if needed
-3. Give me a brief recap of where we left off
-4. Set the scene for our next moment of play
+  const prompt = `Resume the campaign ${JSON.stringify(campaignName)}.
 
-Use the Read tool to load the campaign state, then continue our adventure.`;
+1. Read the available files under ${campaignPath}/.
+2. Read ${PATHS.rulebook} if you need to resolve an action.
+3. Give the player a short recap based only on saved campaign state.
+4. Set the next scene.
+
+Keep all updates for this campaign under ${campaignPath}/.`;
 
   await chat(session, prompt, createStreamPrinter());
   console.log('\n');
 }
 
-/**
- * Main gameplay loop
- */
-export async function playSession(session: LettaCodeSession): Promise<void> {
+/** Run the interactive player loop for one campaign. */
+export async function playSession(
+  session: LettaCodeSession,
+  campaignName: string,
+): Promise<void> {
   const readline = await import('node:readline');
-  
+  const campaignPath = getCampaignRelativePath(campaignName);
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
-  
-  const askQuestion = (prompt: string): Promise<string> => {
-    return new Promise((resolve) => {
-      rl.question(prompt, (answer) => {
-        resolve(answer);
-      });
-    });
-  };
-  
+
+  const inputLines = rl[Symbol.asyncIterator]();
   console.log(`${COLORS.system}(Type 'quit' to end session, 'save' to save progress)${COLORS.reset}\n`);
-  
-  while (true) {
-    const input = await askQuestion(`${COLORS.player}> ${COLORS.reset}`);
-    
-    if (input.toLowerCase() === 'quit' || input.toLowerCase() === 'exit') {
-      // Ask DM to save state
-      console.log(`\n${COLORS.system}Ending session...${COLORS.reset}\n`);
-      await chat(session, `The player is ending the session. Please:
-1. Update the session-log.md with a summary of what happened this session
-2. Update any other campaign files that need changes (player.md, npcs.md, quests.md, consequences.md)
-3. Give a brief farewell that hints at what might come next
 
-Use the Write tool to save everything.`, createStreamPrinter());
-      console.log('\n');
-      break;
-    }
-    
-    if (input.toLowerCase() === 'save') {
-      console.log(`\n${COLORS.system}Saving progress...${COLORS.reset}\n`);
-      await chat(session, `Please save the current game state:
-1. Update session-log.md with recent events
-2. Update player.md with any changes to the character
-3. Update any other files that need it
+  try {
+    while (true) {
+      process.stdout.write(`${COLORS.player}> ${COLORS.reset}`);
+      const nextInput = await inputLines.next();
+      if (nextInput.done) break;
+      const input = nextInput.value;
+      const command = input.trim().toLowerCase();
 
-Use the Write tool to save.`, createStreamPrinter());
+      if (command === 'quit' || command === 'exit') {
+        console.log(`\n${COLORS.system}Ending session...${COLORS.reset}\n`);
+        await chat(session, `The player is ending the session.
+
+1. Summarize this session in ${campaignPath}/${CAMPAIGN_FILES.sessionLog}.
+2. Update any changed files under ${campaignPath}/.
+3. Give the player a short farewell with one possible next development.
+
+Use the Write tool for the file updates.`, createStreamPrinter());
+        console.log('\n');
+        break;
+      }
+
+      if (command === 'save') {
+        console.log(`\n${COLORS.system}Saving progress...${COLORS.reset}\n`);
+        await chat(session, `Save the current campaign state under ${campaignPath}/.
+
+Update ${CAMPAIGN_FILES.sessionLog} and each other campaign file whose state changed. Do not write campaign state outside ${campaignPath}/.`, createStreamPrinter());
+        console.log('\n');
+        continue;
+      }
+
+      if (!input.trim()) continue;
+
+      console.log('');
+      await chat(session, input, createStreamPrinter());
       console.log('\n');
-      continue;
     }
-    
-    if (!input.trim()) continue;
-    
-    // Send player input to DM
-    console.log('');
-    await chat(session, input, createStreamPrinter());
-    console.log('\n');
+  } finally {
+    rl.close();
   }
-  
-  rl.close();
 }
 
-/**
- * Show game status
- */
 export async function showStatus(state: GameState): Promise<void> {
   console.log('\n🎲 Dungeon Master Status\n');
   
@@ -373,22 +459,12 @@ export async function showStatus(state: GameState): Promise<void> {
   console.log('');
 }
 
-/**
- * Reset everything
- */
+/** Delete generated files without deleting the persisted backend agent. */
 export async function resetAll(): Promise<void> {
-  const fs = await import('node:fs/promises');
-  
-  if (existsSync(STATE_FILE)) {
-    await fs.unlink(STATE_FILE);
-  }
-  if (existsSync(RULEBOOK_FILE)) {
-    await fs.unlink(RULEBOOK_FILE);
-  }
-  if (existsSync(CAMPAIGNS_DIR)) {
-    await fs.rm(CAMPAIGNS_DIR, { recursive: true });
-    await mkdir(CAMPAIGNS_DIR);
-  }
-  
+  await rm(STATE_FILE, { force: true });
+  await rm(STATE_TEMP_FILE, { force: true });
+  await rm(RULEBOOK_FILE, { force: true });
+  await rm(CAMPAIGNS_DIR, { force: true, recursive: true });
+
   console.log('\nLocal state and campaign files deleted. The agent still exists in the local backend.\n');
 }
