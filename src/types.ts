@@ -753,6 +753,15 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
    * management calls, and remote/Cloud runtimes.
    */
   filesystemConfinement?: "memory";
+  /**
+   * Constrain writes to one runtime-owned workspace while hiding peer
+   * workspaces under the same isolation root. Supported by local and remote
+   * app servers that advertise runtime workspace sandboxing.
+   */
+  workspaceSandbox?: {
+    root: string;
+    isolationRoot: string;
+  };
 }
 
 export interface LettaCodeSession extends AsyncDisposable {
