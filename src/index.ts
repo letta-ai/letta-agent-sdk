@@ -218,12 +218,9 @@ export {
  *
  * @example
  * ```typescript
- * // Create a stateful agent with initial memory and the default harness prompt.
+ * // Create a stateful agent with the default harness and MemFS guidance.
  * const agentId = await createAgent({
- *   memory: [
- *     { label: 'persona', value: 'You are a careful coding assistant.' },
- *     { label: 'project', value: 'Use Bun for the docs project.' },
- *   ],
+ *   personality: 'memo',
  *   model: 'claude-sonnet-4',
  *   tags: ['project:docs']
  * });

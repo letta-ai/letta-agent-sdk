@@ -201,13 +201,17 @@ export interface BlockReference {
   blockId: string;
 }
 
-/** Creation memory: a preset, inline value, or existing block reference. */
+/**
+ * Memory item - can be a preset name, custom block, or block reference.
+ */
 export type MemoryItem =
   | string // Preset name: "project", "persona", "human"
-  | CreateBlock // Inline memory: { label, value, description? }
+  | CreateBlock // Custom block: { label, value, description? }
   | BlockReference; // Shared block reference: { blockId }
 
-/** Default creation-memory preset names. */
+/**
+ * Default memory block preset names.
+ */
 export type MemoryPreset = "persona" | "human" | "skills" | "loaded_skills";
 
 // ═══════════════════════════════════════════════════════════════
@@ -907,37 +911,23 @@ export interface CreateAgentOptions {
    * - string: Use as the complete system prompt
    * - SystemPromptPreset: Use a preset
    * - { type: 'preset', preset, append? }: Use a preset with optional appended text
-   *
-   * Most stateful agents should keep the default harness prompt and initialize
-   * identity and user context through `memory`, `persona`, or `human` instead.
    */
   systemPrompt?: string | SystemPromptPreset | SystemPromptPresetConfigSDK;
 
   /**
-   * Memory supplied when the agent is created. Each item can be:
-   * - string: Preset name ("persona", "human", "skills", "loaded_skills")
-   * - CreateBlock: Inline memory (e.g., { label: "project", value: "..." })
-   * - { blockId: string }: Reference to an existing shared block
-   *
-   * For hosted Cloud agents with MemFS enabled, inline memory is sent through
-   * the legacy-named `memory_blocks` request field and seeds initial MemFS
-   * files without creating block rows. Ordinary labels map to
-   * `system/<label>.md`. Other backends can retain block-backed memory. Use
-   * this array, rather than the `persona` and `human` shorthands, when you need
-   * several inline memory entries.
+   * Legacy memory block configuration. New agents should use the git-backed
+   * memory filesystem instead. Each item can be:
+   * - string: Preset block name ("persona", "human", "skills", "loaded_skills")
+   * - CreateBlock: Custom block definition (e.g., { label: "project", value: "..." })
+   * - { blockId: string }: Reference to existing shared block
+   * @deprecated Prefer `memfs` and let the agent maintain memory files.
    */
   memory?: MemoryItem[];
 
-  /**
-   * Persona supplied as creation memory. Hosted Cloud MemFS seeds it as
-   * `system/persona.md`; other backends can retain block-backed memory.
-   */
+  /** @deprecated Prefer a personality preset or a system memory file. */
   persona?: string;
 
-  /**
-   * Human context supplied as creation memory. Hosted Cloud MemFS seeds it as
-   * `system/human.md`; other backends can retain block-backed memory.
-   */
+  /** @deprecated Prefer a focused memory file for user preferences. */
   human?: string;
 
   /**

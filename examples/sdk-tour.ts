@@ -536,9 +536,8 @@ async function testSystemPrompt() {
 async function testMemfs() {
   console.log('=== Memory Filesystem ===\n');
 
-  const agentId = await client.createAgent({
-    persona: 'You are a stateful agent with durable memory.',
-  });
+  // Omitting systemPrompt keeps the default harness and its MemFS guidance.
+  const agentId = await client.createAgent();
   await using session = client.resumeSession(agentId, {
     permissionMode: 'unrestricted',
   });
