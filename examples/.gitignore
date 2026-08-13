@@ -1,5 +1,6 @@
 # Generated state files
 **/state.json
+**/state.json.tmp
 **/seminar-state.json
 **/team-state.json
 
@@ -7,5 +8,6 @@
 **/output/
 **/transcripts/
 
-# Generated rulebooks (created by DM)
+# Generated Dungeon Master files
 **/rulebook.md
+/dungeon-master/campaigns/
