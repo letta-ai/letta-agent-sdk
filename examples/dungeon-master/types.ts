@@ -1,20 +1,9 @@
-/**
- * Dungeon Master Types
- */
-
+/** State that the CLI needs to resume the same agent and campaign. */
 export interface GameState {
   dmAgentId: string | null;
   activeCampaign: string | null;
-  campaigns: string[];
+  pendingCampaign: string | null;
 }
-
-export interface DMConfig {
-  model: string;
-}
-
-export const DEFAULT_CONFIG: DMConfig = {
-  model: 'haiku',
-};
 
 export const PATHS = {
   stateFile: 'state.json',
