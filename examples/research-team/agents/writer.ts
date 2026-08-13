@@ -83,7 +83,7 @@ export async function createWriter(
   
   return createAgentSession({
     model: 'haiku',
-    systemPrompt: WRITER_SYSTEM_PROMPT,
+    instructions: WRITER_SYSTEM_PROMPT,
     allowedTools: ['Glob', 'Read', 'Write'],
     permissionMode: 'unrestricted',
   }, client);

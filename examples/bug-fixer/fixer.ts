@@ -94,7 +94,7 @@ export async function getOrCreateAgent(state: BugFixerState): Promise<LettaCodeS
   console.log(`${COLORS.system}Creating new bug fixer agent...${COLORS.reset}`);
   const session = await createAgentSession({
     model: DEFAULT_CONFIG.model,
-    systemPrompt: SYSTEM_PROMPT,
+    instructions: SYSTEM_PROMPT,
     allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
     permissionMode: 'unrestricted',
   }, client);

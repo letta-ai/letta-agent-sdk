@@ -98,7 +98,7 @@ export async function getOrCreateAgent(state: FileOrganizerState): Promise<Letta
   console.log(`${COLORS.system}Creating new file organizer agent...${COLORS.reset}`);
   const session = await createAgentSession({
     model: DEFAULT_CONFIG.model,
-    systemPrompt: SYSTEM_PROMPT,
+    instructions: SYSTEM_PROMPT,
     allowedTools: ['Bash', 'Read', 'Glob'],
     permissionMode: 'unrestricted',
   }, client);

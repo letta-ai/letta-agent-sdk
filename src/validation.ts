@@ -88,6 +88,10 @@ function validateRemovedSessionOptions(options: CreateSessionOptions): void {
 function validateSystemPromptPreset(preset: string): void {
   const validPresets = [
     "default",
+    "letta",
+    "source-claude",
+    "source-codex",
+    "source-gemini",
     "letta-claude",
     "letta-codex",
     "letta-gemini",
@@ -283,6 +287,10 @@ export function validateCreateAgentOptions(options: CreateAgentOptions): void {
     // Check if it's a preset name (if so, validate it)
     const validPresets = [
       "default",
+      "letta",
+      "source-claude",
+      "source-codex",
+      "source-gemini",
       "letta-claude",
       "letta-codex",
       "letta-gemini",

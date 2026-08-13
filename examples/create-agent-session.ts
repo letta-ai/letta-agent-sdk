@@ -34,10 +34,14 @@ type ExampleCreateOptions = Omit<
   | "memory"
   | "persona"
   | "systemInfoReminder"
->;
+  | "systemPrompt"
+> & {
+  /** Instructions appended to the maintained default harness prompt. */
+  instructions?: string;
+};
 
 // Keep legacy creation-memory fields and internal controls out of the examples.
-// A custom systemPrompt is a complete replacement, so pass it through unchanged.
+// Role instructions append to the maintained harness instead of replacing it.
 
 function sessionOptionsFrom(
   options: ExampleCreateOptions,
@@ -63,7 +67,9 @@ export async function createExampleAgent(
     personality: options.personality,
     model: options.model,
     embedding: options.embedding,
-    systemPrompt: options.systemPrompt,
+    systemPrompt: options.instructions === undefined
+      ? undefined
+      : { type: "preset", preset: "default", append: options.instructions },
     memfs: options.memfs,
     name: options.name,
     description: options.description,

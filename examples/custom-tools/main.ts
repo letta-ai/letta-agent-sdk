@@ -116,7 +116,11 @@ async function main() {
 
   const agentId = await client.createAgent({
     model: "letta/auto",
-    systemPrompt: "You are a helpful assistant with access to custom tools.",
+    systemPrompt: {
+      type: "preset",
+      preset: "default",
+      append: "You are a helpful assistant with access to custom tools.",
+    },
     memfs: false,
   });
   console.log("Created agent:", agentId);

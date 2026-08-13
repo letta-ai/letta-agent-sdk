@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Message } from "@letta-ai/letta-client/resources/agents/messages";
+import { buildSystemPrompt } from "@letta-ai/letta-code/agent-presets";
 import {
   CloudManagedSandboxExpiredError,
   LettaAgentClient,
@@ -2102,9 +2103,10 @@ describe("CloudEnvironmentSession", () => {
     await expect(client.createAgent({
       model: "anthropic/claude-sonnet-4",
       systemPrompt: "default",
-    })).rejects.toThrow(
-      "createAgent() does not yet support system prompt presets for this backend",
-    );
+    })).resolves.toBe("agent-created");
+    expect(requests[1]?.body).toMatchObject({
+      system: buildSystemPrompt("default", "memfs"),
+    });
   });
 
   test("uses the Letta Code default model for Cloud createAgent", async () => {

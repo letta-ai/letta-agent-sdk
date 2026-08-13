@@ -121,7 +121,7 @@ async function getSession(): Promise<LettaCodeSession> {
     console.log('Creating new agent...');
     const agentId = await createExampleAgent({
       model: 'haiku',
-      systemPrompt: `You are a helpful assistant accessible through a web interface.
+      instructions: `You are a helpful assistant accessible through a web interface.
 
 Be concise but friendly. You can help with:
 - Answering questions

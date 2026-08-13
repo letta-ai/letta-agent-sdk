@@ -105,7 +105,7 @@ export async function createDM(state: GameState): Promise<LettaCodeSession> {
   // Create new DM
   const session = await createAgentSession({
     model: DEFAULT_CONFIG.model,
-    systemPrompt: `You are a Dungeon Master - a creative storyteller and game designer who runs tabletop RPG campaigns.
+    instructions: `You are a Dungeon Master - a creative storyteller and game designer who runs tabletop RPG campaigns.
 
 ## Your Role
 - Design and run engaging tabletop RPG experiences
