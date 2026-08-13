@@ -537,9 +537,7 @@ async function testMemfs() {
   console.log('=== Memory Filesystem ===\n');
 
   const agentId = await client.createAgent({
-    memfs: true,
-    systemPrompt: `Use focused Markdown files under reference/ for durable
-knowledge. Never store secrets in memory.`,
+    persona: 'You are a stateful agent with durable memory.',
   });
   await using session = client.resumeSession(agentId, {
     permissionMode: 'unrestricted',

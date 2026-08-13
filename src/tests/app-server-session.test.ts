@@ -57,24 +57,36 @@ describe("createAgentBody", () => {
     );
   });
 
-  test("translates convenience memory inputs before canonical creation", async () => {
+  test("keeps the default MemFS harness while translating creation memory", async () => {
     const body = await createAgentBody({
-      personality: "memo",
       memory: [
-        { label: "persona", value: "Memory persona" },
+        { label: "project", value: "SDK initialization correction" },
+        { label: "persona", value: "You are Nora, a research analyst." },
+        { label: "human", value: "The human tracks competitors." },
         { blockId: "block-shared" },
       ],
-      persona: "Convenience persona",
-      human: "Convenience human",
     });
 
-    expect(body.memory_blocks).toEqual(
-      expect.arrayContaining([
-        { label: "persona", value: "Convenience persona" },
-        { label: "human", value: "Convenience human" },
-      ]),
-    );
+    expect(body.system).toBe(buildSystemPrompt("default", "memfs"));
+    expect(body.memory_blocks).toEqual([
+      { label: "project", value: "SDK initialization correction" },
+      { label: "persona", value: "You are Nora, a research analyst." },
+      { label: "human", value: "The human tracks competitors." },
+    ]);
     expect(body.block_ids).toEqual(["block-shared"]);
+  });
+
+  test("keeps the default MemFS harness with persona and human shorthand", async () => {
+    const body = await createAgentBody({
+      persona: "You are Nora, a research analyst.",
+      human: "The human tracks competitors.",
+    });
+
+    expect(body.system).toBe(buildSystemPrompt("default", "memfs"));
+    expect(body.memory_blocks).toEqual([
+      { label: "persona", value: "You are Nora, a research analyst." },
+      { label: "human", value: "The human tracks competitors." },
+    ]);
   });
 
   test("keeps MemFS mode and exact base tools in the canonical request", async () => {
