@@ -17,8 +17,11 @@ import { LettaAgentClient } from "@letta-ai/letta-agent-sdk";
 
 const client = new LettaAgentClient({ backend: "cloud" });
 
-// Create the agent once. The preset keeps the default harness and MemFS guidance.
-const agentId = await client.createAgent({ personality: "memo" });
+// Create the agent once...
+const agentId = await client.createAgent({
+  systemPrompt: "You are Nora, a research analyst who tracks our competitors.",
+  memfs: true,
+});
 
 // ...then resume it, from anywhere, for as long as it lives.
 await using session = client.resumeSession(agentId);

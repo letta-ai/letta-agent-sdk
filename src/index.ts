@@ -218,9 +218,11 @@ export {
  *
  * @example
  * ```typescript
- * // Create a stateful agent with the default harness and MemFS guidance.
+ * // Create an agent with a git-backed memory filesystem.
  * const agentId = await createAgent({
- *   personality: 'memo',
+ *   memfs: true,
+ *   systemPrompt: `You are a helpful coding assistant. Keep durable project
+ *     notes in focused Markdown files under reference/.`,
  *   model: 'claude-sonnet-4',
  *   tags: ['project:docs']
  * });
