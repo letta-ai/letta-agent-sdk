@@ -401,6 +401,35 @@ function fakeAppServerHandle(
       }
       stream.serverMessage(message);
     };
+    const emitSuccessfulTerminal = (runId: string) => {
+      emitStream({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          message_type: "stop_reason",
+          stop_reason: "end_turn",
+          run_id: runId,
+        },
+      });
+      emitStream({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          message_type: "usage_statistics",
+          prompt_tokens: 10,
+          completion_tokens: 2,
+          total_tokens: 12,
+          step_count: 1,
+        },
+      });
+      emitStream({
+        type: "turn_finished",
+        runtime,
+        turn_id: `turn-${runId}`,
+        run_id: runId,
+        stop_reason: "end_turn",
+      });
+    };
 
     if (FakeAppServerSocket.inputScenario === "queuedSecond") {
       const inputCount = control.sent.filter(
@@ -494,15 +523,7 @@ function fakeAppServerHandle(
           run_id: "run-final",
         },
       });
-      emitStream({
-        type: "stream_delta",
-        runtime,
-        delta: {
-          message_type: "stop_reason",
-          stop_reason: "end_turn",
-          run_id: "run-final",
-        },
-      });
+      emitSuccessfulTerminal("run-final");
       return;
     }
 
@@ -539,15 +560,7 @@ function fakeAppServerHandle(
             run_id: "run-final",
           },
         });
-        emitStream({
-          type: "stream_delta",
-          runtime,
-          delta: {
-            message_type: "stop_reason",
-            stop_reason: "end_turn",
-            run_id: "run-final",
-          },
-        });
+        emitSuccessfulTerminal("run-final");
         return;
       }
 
@@ -653,17 +666,8 @@ function fakeAppServerHandle(
         run_id: "run-1",
       },
     };
-    const stopDelta = {
-      type: "stream_delta",
-      runtime,
-      delta: {
-        message_type: "stop_reason",
-        stop_reason: "end_turn",
-        run_id: "run-1",
-      },
-    };
     emitStream(assistantDelta);
-    emitStream(stopDelta);
+    emitSuccessfulTerminal("run-1");
   }
 }
 
@@ -1376,6 +1380,23 @@ describe("LettaAgentClient", () => {
           run_id: "run-first",
         },
       });
+      fakeStreamSocket().serverMessage({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          message_type: "usage_statistics",
+          total_tokens: 12,
+          step_count: 1,
+        },
+      });
+      fakeStreamSocket().serverMessage({
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-first",
+        run_id: "run-first",
+        stop_reason: "end_turn",
+      });
+      firstMessages.push((await firstIterator.next()).value);
       firstMessages.push((await firstIterator.next()).value);
       expect(firstMessages.at(-1)).toMatchObject({
         type: "result",
@@ -1397,6 +1418,22 @@ describe("LettaAgentClient", () => {
           content: "second response",
           run_id: "run-second",
         },
+      });
+      fakeStreamSocket().serverMessage({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          message_type: "usage_statistics",
+          total_tokens: 12,
+          step_count: 1,
+        },
+      });
+      fakeStreamSocket().serverMessage({
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-second",
+        run_id: "run-second",
+        stop_reason: "end_turn",
       });
       fakeStreamSocket().serverMessage({
         type: "stream_delta",

@@ -101,6 +101,7 @@ export class RemoteTurnCoordinator {
       runIds: new Set<string>(),
       observedTurnEvidence: false,
       observedRequiresApprovalStop: false,
+      pendingTerminal: null,
       abortRequested: false,
       timeout: null,
     };
@@ -332,6 +333,7 @@ export class RemoteTurnCoordinator {
       return;
     }
     if (status === "WAITING_ON_INPUT" && active.observedTurnEvidence) {
+      if (active.pendingTerminal) return;
       this.completeActiveTurn({
         runtime: active.runtime,
         stopReason: null,
@@ -368,14 +370,19 @@ export class RemoteTurnCoordinator {
     }
     const errorCode = toSdkErrorCode(finished.stopReason);
     const success = !isFailureStopReason(finished.stopReason);
-    this.completeActiveTurn({
+    const terminal = {
       runtime: active.runtime,
       stopReason: finished.stopReason,
       runIds: [...active.runIds],
       success,
       ...(success ? {} : { errorCode: errorCode ?? "error" }),
       ...(finished.error ? { detail: finished.error } : {}),
-    });
+    } satisfies RuntimeTurnResult;
+    if (active.pendingTerminal) {
+      active.pendingTerminal = terminal;
+      return;
+    }
+    this.completeActiveTurn(terminal);
   }
 
   private handleTurnTerminalDelta(
@@ -391,11 +398,18 @@ export class RemoteTurnCoordinator {
         active.observedRequiresApprovalStop = true;
         return;
       }
-      this.completeActiveTurn({
+      // Hosted streams send final usage after stop_reason. Keep result last so
+      // consumers that stop at result cannot miss the accounting event.
+      active.pendingTerminal = {
         runtime: active.runtime,
         stopReason,
         runIds: [...active.runIds],
-      });
+      };
+      return;
+    }
+
+    if (messageType === "usage_statistics" && active.pendingTerminal) {
+      this.completeActiveTurn(active.pendingTerminal);
       return;
     }
 

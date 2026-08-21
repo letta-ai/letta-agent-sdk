@@ -286,7 +286,28 @@ describe("remote turn terminal receipts", () => {
       }),
       runtime,
     );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-1",
+        run_id: "run-1",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "usage_statistics",
+        total_tokens: 1,
+      }),
+      runtime,
+    );
     expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "stream_event",
+      event: { message_type: "usage_statistics" },
+    });
     expect(await coordinator.nextMessage()).toMatchObject({
       type: "result",
       runIds: ["run-1"],
@@ -333,6 +354,61 @@ describe("remote turn terminal receipts", () => {
       success: true,
       result: "second",
       runIds: ["run-2"],
+    });
+    coordinator.close();
+  });
+
+  test("keeps trailing usage ahead of the terminal result", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "done",
+        run_id: "run-usage",
+        id: "message-usage",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-usage",
+      }),
+      runtime,
+    );
+    expect(coordinator.hasInFlightTurn()).toBe(true);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "usage_statistics",
+        prompt_tokens: 100,
+        completion_tokens: 20,
+        total_tokens: 120,
+        step_count: 3,
+      }),
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "assistant",
+      content: "done",
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "stream_event",
+      event: {
+        message_type: "usage_statistics",
+        step_count: 3,
+      },
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      result: "done",
+      runIds: ["run-usage"],
     });
     coordinator.close();
   });

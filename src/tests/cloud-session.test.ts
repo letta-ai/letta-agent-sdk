@@ -252,6 +252,7 @@ class FakeCloudSocket {
   static instances: FakeCloudSocket[] = [];
   static scenario:
     | "normal"
+    | "usage_after_stop"
     | "approval"
     | "terminal_error"
     | "stale_idle_then_error"
@@ -468,6 +469,11 @@ class FakeCloudSocket {
       return;
     }
 
+    if (payload?.kind === "create_message" && FakeCloudSocket.scenario === "usage_after_stop") {
+      this.finishTurnWithUsageAfterStop(runtime);
+      return;
+    }
+
     if (payload?.kind === "approval_response") {
       this.finishTurn(runtime, "approved");
       return;
@@ -499,6 +505,52 @@ class FakeCloudSocket {
       loop_status: {
         status: "WAITING_ON_INPUT",
         active_run_ids: ["run-cloud"],
+      },
+    });
+  }
+
+  private finishTurnWithUsageAfterStop(runtime: unknown): void {
+    this.serverMessageTo("stream", {
+      type: "stream_delta",
+      seq: 501,
+      event_seq: 1,
+      runtime,
+      delta: {
+        id: "msg-cloud-usage",
+        message_type: "assistant_message",
+        content: "usage captured",
+        run_id: "run-cloud-usage",
+      },
+    });
+    this.serverMessageTo("stream", {
+      type: "stream_delta",
+      seq: 502,
+      event_seq: 2,
+      runtime,
+      delta: {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-cloud-usage",
+      },
+    });
+    this.serverMessageTo("control", {
+      type: "turn_finished",
+      runtime,
+      turn_id: "turn-cloud-usage",
+      run_id: "run-cloud-usage",
+      stop_reason: "end_turn",
+    });
+    this.serverMessageTo("stream", {
+      type: "stream_delta",
+      seq: 503,
+      event_seq: 3,
+      runtime,
+      delta: {
+        message_type: "usage_statistics",
+        prompt_tokens: 100,
+        completion_tokens: 20,
+        total_tokens: 120,
+        step_count: 3,
       },
     });
   }
@@ -622,6 +674,48 @@ function resetFakeCloud(): void {
 }
 
 describe("CloudEnvironmentSession", () => {
+  test("keeps hosted usage after stop ahead of the terminal result", async () => {
+    resetFakeCloud();
+    FakeCloudSocket.scenario = "usage_after_stop";
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("agent-1");
+    try {
+      await session.send("hello");
+      const messages = [];
+      for await (const message of session.stream()) messages.push(message);
+
+      expect(messages.map((message) => message.type)).toEqual([
+        "assistant",
+        "stream_event",
+        "result",
+      ]);
+      expect(messages[1]).toMatchObject({
+        type: "stream_event",
+        event: {
+          message_type: "usage_statistics",
+          step_count: 3,
+        },
+      });
+      expect(messages[2]).toMatchObject({
+        type: "result",
+        success: true,
+        runIds: ["run-cloud-usage"],
+      });
+    } finally {
+      session.close();
+    }
+  });
+
   test("creates, refreshes, and cleans up a managed Cloud sandbox with terminateOnClose", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];

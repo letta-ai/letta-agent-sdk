@@ -139,6 +139,7 @@ export type TurnTracker = {
   runIds: Set<string>;
   observedTurnEvidence: boolean;
   observedRequiresApprovalStop: boolean;
+  pendingTerminal: RuntimeTurnResult | null;
   abortRequested: boolean;
   timeout: ReturnType<typeof setTimeout> | null;
 };
