@@ -182,7 +182,8 @@ export interface ConversationsClient {
   ): Promise<LettaConversation>;
   /**
    * Create a persistent conversation from the source's in-context history.
-   * Use `update(fork.id, { archived: true })` when a temporary fork is done.
+   * Use `update()` to change the fork's model. Archive a temporary fork with
+   * `update(fork.id, { archived: true })` when it is done.
    */
   fork(
     sourceConversationId: string,
