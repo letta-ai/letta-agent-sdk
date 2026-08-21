@@ -51,3 +51,35 @@ bun examples/sdk-tour.ts basic
 ```
 
 Then read the function that produced the output. Each lesson is a separate function in [`sdk-tour.ts`](./sdk-tour.ts).
+
+## Fork a conversation
+
+A fork copies in-context messages into a new conversation. Omit `messageId` to copy the full history. Set `messageId` to stop after one source message.
+
+```ts
+const fork = await client.conversations.fork(sourceConversationId, {
+  messageId: checkpointMessageId,
+  hidden: true,
+});
+
+try {
+  // The fork has independent history but uses the same agent and memory.
+  await using session = client.resumeSession(fork.id);
+  await session.send('Review the first approach without changing the source.');
+
+  for await (const message of session.stream()) {
+    if (message.type === 'assistant') process.stdout.write(message.content);
+  }
+} finally {
+  // Closing a session does not archive its conversation.
+  await client.conversations.update(fork.id, { archived: true });
+}
+```
+
+Use `update()` before the session if the fork needs a different model:
+
+```ts
+await client.conversations.update(fork.id, {
+  model: 'letta/auto-fast',
+});
+```
