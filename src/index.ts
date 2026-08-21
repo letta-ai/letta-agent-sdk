@@ -166,6 +166,7 @@ export type {
   UpdateAgentOptions,
   ListConversationsOptions,
   CreateConversationOptions,
+  ForkConversationOptions,
   UpdateConversationOptions,
   ConversationMessagesOptions,
   ConversationMessagesResult,

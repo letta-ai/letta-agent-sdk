@@ -6,6 +6,7 @@ import type {
 } from "@letta-ai/letta-client/resources/agents/agents";
 import type {
   ConversationCreateParams,
+  ConversationForkParams,
   ConversationListParams,
   ConversationUpdateParams,
 } from "@letta-ai/letta-client/resources/conversations/conversations";
@@ -215,6 +216,13 @@ export class CloudManagementTransport implements ManagementTransport {
     body: ConversationUpdateParams,
   ): Promise<LettaConversation> {
     return this.client.conversations.update(conversationId, body);
+  }
+
+  async forkConversation(
+    conversationId: string,
+    query: ConversationForkParams,
+  ): Promise<LettaConversation> {
+    return this.client.conversations.fork(conversationId, query);
   }
 
   async listConversationMessages(

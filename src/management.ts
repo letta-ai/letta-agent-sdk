@@ -4,6 +4,7 @@ import type {
 } from "@letta-ai/letta-client/resources/agents/agents";
 import type {
   ConversationCreateParams,
+  ConversationForkParams,
   ConversationListParams,
   ConversationUpdateParams,
 } from "@letta-ai/letta-client/resources/conversations/conversations";
@@ -14,6 +15,7 @@ import type {
   ConversationsClient,
   ConversationMessagesResult,
   CreateConversationOptions,
+  ForkConversationOptions,
   LettaAgent,
   LettaConversation,
   ListAgentsOptions,
@@ -46,6 +48,10 @@ export interface ManagementTransport {
   updateConversation(
     conversationId: string,
     body: ConversationUpdateParams,
+  ): Promise<LettaConversation>;
+  forkConversation(
+    conversationId: string,
+    query: ConversationForkParams,
   ): Promise<LettaConversation>;
   listConversationMessages(
     conversationId: string,
@@ -143,6 +149,15 @@ function conversationUpdateBody(
   };
 }
 
+function conversationForkQuery(
+  options: ForkConversationOptions,
+): ConversationForkParams {
+  return {
+    message_id: options.messageId,
+    hidden: options.hidden,
+  };
+}
+
 function conversationMessagesQuery(
   options: ConversationMessagesOptions,
 ): MessageListParams {
@@ -197,6 +212,13 @@ export function createConversationsClient(
         conversationId,
         conversationUpdateBody(options),
       ),
+    fork: async (sourceConversationId, options = {}) => {
+      assertNonEmptyId(sourceConversationId, "conversation id");
+      return await transport().forkConversation(
+        sourceConversationId,
+        conversationForkQuery(options),
+      );
+    },
     listMessages: (conversationId, options = {}) =>
       transport().listConversationMessages(
         conversationId,

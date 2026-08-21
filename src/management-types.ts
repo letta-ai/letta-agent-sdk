@@ -7,6 +7,7 @@ import type { Message } from "@letta-ai/letta-client/resources/agents/messages";
 import type {
   Conversation,
   ConversationCreateParams,
+  ConversationForkParams,
   ConversationListParams,
   ConversationUpdateParams,
 } from "@letta-ai/letta-client/resources/conversations/conversations";
@@ -78,6 +79,13 @@ export interface UpdateConversationOptions {
   modelSettings?: ConversationUpdateParams["model_settings"];
   contextWindowLimit?: ConversationUpdateParams["context_window_limit"];
   archived?: ConversationUpdateParams["archived"];
+}
+
+export interface ForkConversationOptions {
+  /** Include source messages through this message, inclusive. */
+  messageId?: Present<ConversationForkParams["message_id"]>;
+  /** Hide the fork from normal conversation listings. */
+  hidden?: Present<ConversationForkParams["hidden"]>;
 }
 
 export interface ConversationMessagesOptions {
@@ -171,6 +179,14 @@ export interface ConversationsClient {
   update(
     conversationId: string,
     options: UpdateConversationOptions,
+  ): Promise<LettaConversation>;
+  /**
+   * Create a persistent conversation from the source's in-context history.
+   * Use `update(fork.id, { archived: true })` when a temporary fork is done.
+   */
+  fork(
+    sourceConversationId: string,
+    options?: ForkConversationOptions,
   ): Promise<LettaConversation>;
   listMessages(
     conversationId: string,

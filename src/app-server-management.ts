@@ -10,6 +10,7 @@ import type {
   AgentRetrieveResponseMessage,
   AgentUpdateResponseMessage,
   ConversationCreateResponseMessage,
+  ConversationForkResponseMessage,
   ConversationListResponseMessage,
   ConversationMessagesListResponseMessage,
   ConversationRetrieveResponseMessage,
@@ -22,6 +23,7 @@ import type {
 } from "@letta-ai/letta-client/resources/agents/agents";
 import type {
   ConversationCreateParams,
+  ConversationForkParams,
   ConversationListParams,
   ConversationUpdateParams,
 } from "@letta-ai/letta-client/resources/conversations/conversations";
@@ -197,6 +199,23 @@ export class AppServerManagementTransport
       response.conversation,
       `Failed to update conversation ${conversationId}.`,
     );
+  }
+
+  async forkConversation(
+    conversationId: string,
+    body: ConversationForkParams,
+  ): Promise<LettaConversation> {
+    const response = await this.request<ConversationForkResponseMessage>(
+      "conversation_fork",
+      { conversation_id: conversationId, body },
+      "conversation_fork_response",
+    );
+    const fork = ensureResponse(
+      response,
+      response.conversation,
+      `Failed to fork conversation ${conversationId}.`,
+    );
+    return this.retrieveConversation(fork.id);
   }
 
   async listConversationMessages(

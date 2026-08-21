@@ -558,6 +558,121 @@ describeLive("live integration: letta-agent-sdk", () => {
   );
 
   test(
+    "conversation forks preserve full or checkpointed history and can be archived",
+    async () => {
+      await ensureAgentReady();
+      if (!API_KEY) throw new Error("LETTA_API_KEY is required");
+
+      const management = new LettaAgentClient({
+        backend: "cloud",
+        apiKey: API_KEY,
+        apiBaseUrl: BASE_URL,
+      });
+      const nonce = Math.random().toString(36).slice(2, 10);
+      const firstMarker = `FORK_FIRST_${nonce}`;
+      const secondMarker = `FORK_SECOND_${nonce}`;
+      const activeConversationIds: string[] = [];
+
+      const sendMessage = async (
+        conversationId: string,
+        marker: string,
+      ): Promise<void> => {
+        const response = await fetch(
+          `${BASE_URL}/v1/conversations/${conversationId}/messages`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              input: `Reply with exactly this text and nothing else: ${marker}`,
+              streaming: false,
+            }),
+          },
+        );
+        if (!response.ok) {
+          throw new Error(
+            `Failed to seed fork history: ${response.status} ${await response.text()}`,
+          );
+        }
+      };
+
+      try {
+        const source = await management.conversations.create({
+          agentId,
+          summary: `SDK fork source ${nonce}`,
+          model: "letta/auto-fast",
+          hidden: true,
+        });
+        activeConversationIds.push(source.id);
+
+        await sendMessage(source.id, firstMarker);
+
+        const firstHistory =
+          await management.conversations.listMessages(source.id, {
+            order: "asc",
+            limit: 100,
+          });
+        const checkpoint = firstHistory.messages.find((message) =>
+          JSON.stringify(message).includes(firstMarker)
+        )?.id;
+        expect(checkpoint).toBeDefined();
+
+        await sendMessage(source.id, secondMarker);
+
+        const fullFork = await management.conversations.fork(
+          source.id,
+          { hidden: true },
+        );
+        activeConversationIds.push(fullFork.id);
+        const checkpointFork = await management.conversations.fork(
+          source.id,
+          {
+            messageId: checkpoint!,
+            hidden: true,
+          },
+        );
+        activeConversationIds.push(checkpointFork.id);
+
+        const fullHistory =
+          await management.conversations.listMessages(fullFork.id, {
+            order: "asc",
+            limit: 100,
+          });
+        const checkpointHistory =
+          await management.conversations.listMessages(checkpointFork.id, {
+            order: "asc",
+            limit: 100,
+          });
+        const fullText = JSON.stringify(fullHistory.messages);
+        const checkpointText = JSON.stringify(checkpointHistory.messages);
+
+        expect(fullText).toContain(firstMarker);
+        expect(fullText).toContain(secondMarker);
+        expect(checkpointText).toContain(firstMarker);
+        expect(checkpointText).not.toContain(secondMarker);
+
+        for (const conversationId of activeConversationIds) {
+          const archived = await management.conversations.update(
+            conversationId,
+            { archived: true },
+          );
+          expect(archived.archived).toBe(true);
+        }
+        activeConversationIds.length = 0;
+      } finally {
+        for (const conversationId of activeConversationIds) {
+          await management.conversations.update(conversationId, {
+            archived: true,
+          });
+        }
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
     "listMessages is safe while stream is active",
     async () => {
       await ensureAgentReady();
