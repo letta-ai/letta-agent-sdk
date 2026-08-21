@@ -29,6 +29,7 @@ import type {
 } from "@letta-ai/letta-client/resources/conversations/conversations";
 import type { MessageListParams } from "@letta-ai/letta-client/resources/conversations/messages";
 import { normalizeAppServerModels } from "./app-server-models.js";
+import { ConversationForkHydrationError } from "./management-errors.js";
 import type { ManagementTransport } from "./management.js";
 import { applyUniqueRequestIds } from "./request-ids.js";
 import type {
@@ -215,7 +216,11 @@ export class AppServerManagementTransport
       response.conversation,
       `Failed to fork conversation ${conversationId}.`,
     );
-    return this.retrieveConversation(fork.id);
+    try {
+      return await this.retrieveConversation(fork.id);
+    } catch (error) {
+      throw new ConversationForkHydrationError(fork.id, error);
+    }
   }
 
   async listConversationMessages(

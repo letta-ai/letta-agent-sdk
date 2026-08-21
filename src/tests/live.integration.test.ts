@@ -614,9 +614,13 @@ describeLive("live integration: letta-agent-sdk", () => {
             order: "asc",
             limit: 100,
           });
-        const checkpoint = firstHistory.messages.find((message) =>
-          JSON.stringify(message).includes(firstMarker)
-        )?.id;
+        const checkpointMessage = firstHistory.messages.find(
+          (message) =>
+            message.message_type === "assistant_message" &&
+            JSON.stringify(message).includes(firstMarker),
+        );
+        expect(checkpointMessage?.message_type).toBe("assistant_message");
+        const checkpoint = checkpointMessage?.id;
         expect(checkpoint).toBeDefined();
 
         await sendMessage(source.id, secondMarker);

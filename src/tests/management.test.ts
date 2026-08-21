@@ -3,7 +3,10 @@ import type { AgentState } from "@letta-ai/letta-client/resources/agents/agents"
 import type { Message } from "@letta-ai/letta-client/resources/agents/messages";
 import { AppServerManagementTransport } from "../app-server-management.js";
 import { LettaAgentClient as PortableLettaAgentClient } from "../client-entry.js";
-import { LettaAgentClient as NodeLettaAgentClient } from "../index.js";
+import {
+  ConversationForkHydrationError,
+  LettaAgentClient as NodeLettaAgentClient,
+} from "../index.js";
 import type { LettaCodeSocketOptions } from "../types.js";
 import { asAdvanced } from "./advanced-session.js";
 
@@ -435,6 +438,23 @@ describe("portable management namespaces", () => {
     expect(requests).toHaveLength(0);
   });
 
+  test("rejects an empty fork checkpoint before selecting a transport", async () => {
+    const requests: RecordedRequest[] = [];
+    const client = new PortableLettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createManagementFetch(requests),
+    });
+
+    await expect(
+      client.conversations.fork("conv-source", { messageId: "" }),
+    ).rejects.toThrow(
+      "Invalid message id. Expected a non-empty string.",
+    );
+    expect(requests).toHaveLength(0);
+  });
+
   test("forks and archives through the App Server protocol", async () => {
     ManagementSocket.instances = [];
     const client = new PortableLettaAgentClient({
@@ -518,6 +538,52 @@ describe("portable management namespaces", () => {
       type: "conversation_fork",
       conversation_id: "conv-source",
     });
+  });
+
+  test("preserves the fork id when App Server hydration fails", async () => {
+    class FailingForkHydrationSocket extends ManagementSocket {
+      protected override respond(command: Record<string, unknown>): void {
+        const type = String(command.type);
+        queueMicrotask(() => {
+          this.emit("message", {
+            data: JSON.stringify(
+              type === "conversation_fork"
+                ? {
+                    type: "conversation_fork_response",
+                    request_id: command.request_id,
+                    success: true,
+                    conversation: { id: "conv-orphan" },
+                  }
+                : {
+                    type: "conversation_retrieve_response",
+                    request_id: command.request_id,
+                    success: false,
+                    conversation: null,
+                    error: "Connection closed during hydration.",
+                  },
+            ),
+          });
+        });
+      }
+    }
+
+    ManagementSocket.instances = [];
+    const client = new PortableLettaAgentClient({
+      backend: "remote",
+      url: "ws://remote.test/ws",
+      WebSocket: FailingForkHydrationSocket,
+    });
+
+    try {
+      await client.conversations.fork("conv-source");
+      throw new Error("Expected fork hydration to fail.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConversationForkHydrationError);
+      expect((error as ConversationForkHydrationError).conversationId).toBe(
+        "conv-orphan",
+      );
+      expect((error as Error).message).toContain("conv-orphan");
+    }
   });
 
   test("map the portable API to Cloud REST", async () => {

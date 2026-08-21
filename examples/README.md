@@ -54,7 +54,7 @@ Then read the function that produced the output. Each lesson is a separate funct
 
 ## Fork a conversation
 
-A fork copies in-context messages into a new conversation. Omit `messageId` to copy the full history. Set `messageId` to stop after one source message.
+A fork copies in-context messages into a new conversation. Omit `messageId` to copy the full history. Set `messageId` to stop at that source message, inclusive.
 
 ```ts
 const fork = await client.conversations.fork(sourceConversationId, {

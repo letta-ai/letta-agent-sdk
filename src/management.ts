@@ -214,6 +214,9 @@ export function createConversationsClient(
       ),
     fork: async (sourceConversationId, options = {}) => {
       assertNonEmptyId(sourceConversationId, "conversation id");
+      if (options.messageId !== undefined) {
+        assertNonEmptyId(options.messageId, "message id");
+      }
       return await transport().forkConversation(
         sourceConversationId,
         conversationForkQuery(options),
