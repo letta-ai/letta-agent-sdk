@@ -18,6 +18,7 @@ const RECORD_FIXTURES = process.env.LETTA_RECORD_FIXTURES === "1";
 const BASE_URL = process.env.LETTA_BASE_URL ?? "https://api.letta.com";
 const AGENT_ID_OVERRIDE = process.env.LETTA_AGENT_ID;
 const CONVERSATION_ID_OVERRIDE = process.env.LETTA_CONVERSATION_ID;
+const COMPUTER_ID_OVERRIDE = process.env.LETTA_LIVE_COMPUTER_ID;
 const TEST_TIMEOUT_MS = Number(process.env.LETTA_LIVE_TEST_TIMEOUT_MS ?? "180000");
 
 const describeLive = RUN_LIVE ? describe : describe.skip;
@@ -567,10 +568,14 @@ describeLive("live integration: letta-agent-sdk", () => {
         backend: "cloud",
         apiKey: API_KEY,
         apiBaseUrl: BASE_URL,
+        ...(COMPUTER_ID_OVERRIDE
+          ? { computer: { id: COMPUTER_ID_OVERRIDE } }
+          : {}),
       });
       const nonce = Math.random().toString(36).slice(2, 10);
       const firstMarker = `FORK_FIRST_${nonce}`;
       const secondMarker = `FORK_SECOND_${nonce}`;
+      const forkLaneMarker = `FORK_LANE_${nonce}`;
       const activeConversationIds: string[] = [];
 
       const sendMessage = async (
@@ -656,6 +661,27 @@ describeLive("live integration: letta-agent-sdk", () => {
         expect(fullText).toContain(secondMarker);
         expect(checkpointText).toContain(firstMarker);
         expect(checkpointText).not.toContain(secondMarker);
+
+        await using forkSession = management.resumeSession(checkpointFork.id, {
+          permissionMode: "unrestricted",
+        });
+        const forkTurn = await collectTurn(
+          forkSession,
+          `${forkLaneMarker}: Reply with exactly the earlier FORK_FIRST marker and nothing else.`,
+        );
+        const forkResult = expectTerminalResult(forkTurn);
+        expect(forkResult.success).toBe(true);
+        expect(forkResult.result).toContain(firstMarker);
+        expect(forkResult.result).not.toContain(secondMarker);
+
+        const sourceAfterForkTurn =
+          await management.conversations.listMessages(source.id, {
+            order: "asc",
+            limit: 100,
+          });
+        expect(JSON.stringify(sourceAfterForkTurn.messages)).not.toContain(
+          forkLaneMarker,
+        );
 
         for (const conversationId of activeConversationIds) {
           const archived = await management.conversations.update(
