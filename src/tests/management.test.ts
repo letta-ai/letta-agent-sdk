@@ -3,7 +3,10 @@ import type { AgentState } from "@letta-ai/letta-client/resources/agents/agents"
 import type { Message } from "@letta-ai/letta-client/resources/agents/messages";
 import { AppServerManagementTransport } from "../app-server-management.js";
 import { LettaAgentClient as PortableLettaAgentClient } from "../client-entry.js";
-import { LettaAgentClient as NodeLettaAgentClient } from "../index.js";
+import {
+  ConversationForkHydrationError,
+  LettaAgentClient as NodeLettaAgentClient,
+} from "../index.js";
 import type { LettaCodeSocketOptions } from "../types.js";
 import { asAdvanced } from "./advanced-session.js";
 
@@ -121,6 +124,26 @@ function createManagementFetch(
     ) {
       return jsonResponse([USER_MESSAGE_FIXTURE]);
     }
+    if (
+      url.pathname === "/v1/conversations/conv-source/fork" &&
+      method === "POST"
+    ) {
+      return jsonResponse({
+        id: "conv-fork",
+        agent_id: "agent-1",
+        archived: false,
+      });
+    }
+    if (
+      url.pathname === "/v1/conversations/conv-fork" &&
+      method === "PATCH"
+    ) {
+      return jsonResponse({
+        id: "conv-fork",
+        agent_id: "agent-1",
+        archived: true,
+      });
+    }
     return jsonResponse({ detail: "not found" }, { status: 404 });
   }) as typeof fetch;
 }
@@ -218,6 +241,11 @@ class ManagementSocket {
           id: command.conversation_id,
           agent_id: "agent-1",
           ...(command.body as object),
+        },
+      },
+      conversation_fork: {
+        conversation: {
+          id: "conv-fork",
         },
       },
       conversation_messages_list: {
@@ -320,6 +348,244 @@ async function exerciseManagementApi(
 }
 
 describe("portable management namespaces", () => {
+  test("forks through a selected message and archives the fork over Cloud", async () => {
+    const requests: RecordedRequest[] = [];
+    const client = new PortableLettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createManagementFetch(requests),
+    });
+
+    const fork = await client.conversations.fork("conv-source", {
+      messageId: "message-checkpoint",
+      hidden: true,
+    });
+    expect(fork).toMatchObject({
+      id: "conv-fork",
+      agent_id: "agent-1",
+      archived: false,
+    });
+
+    await expect(
+      client.conversations.update(fork.id, { archived: true }),
+    ).resolves.toMatchObject({
+      id: "conv-fork",
+      archived: true,
+    });
+
+    expect(
+      requests.map(({ url, method, body }) => ({
+        path: url.pathname,
+        query: Object.fromEntries(url.searchParams),
+        method,
+        body,
+      })),
+    ).toEqual([
+      {
+        path: "/v1/conversations/conv-source/fork",
+        query: {
+          hidden: "true",
+          message_id: "message-checkpoint",
+        },
+        method: "POST",
+        body: undefined,
+      },
+      {
+        path: "/v1/conversations/conv-fork",
+        query: {},
+        method: "PATCH",
+        body: { archived: true },
+      },
+    ]);
+  });
+
+  test("omits fork query parameters when copying the full history", async () => {
+    const requests: RecordedRequest[] = [];
+    const client = new PortableLettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createManagementFetch(requests),
+    });
+
+    await expect(
+      client.conversations.fork("conv-source"),
+    ).resolves.toMatchObject({ id: "conv-fork" });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url.pathname).toBe(
+      "/v1/conversations/conv-source/fork",
+    );
+    expect(Object.fromEntries(requests[0]!.url.searchParams)).toEqual({});
+    expect(requests[0]?.body).toBeUndefined();
+  });
+
+  test("rejects an empty fork source before selecting a transport", async () => {
+    const requests: RecordedRequest[] = [];
+    const client = new PortableLettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createManagementFetch(requests),
+    });
+
+    await expect(
+      client.conversations.fork("  ", { hidden: true }),
+    ).rejects.toThrow(
+      "Invalid conversation id. Expected a non-empty string.",
+    );
+    expect(requests).toHaveLength(0);
+  });
+
+  test("rejects an empty fork checkpoint before selecting a transport", async () => {
+    const requests: RecordedRequest[] = [];
+    const client = new PortableLettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createManagementFetch(requests),
+    });
+
+    await expect(
+      client.conversations.fork("conv-source", { messageId: "" }),
+    ).rejects.toThrow(
+      "Invalid message id. Expected a non-empty string.",
+    );
+    expect(requests).toHaveLength(0);
+  });
+
+  test("forks and archives through the App Server protocol", async () => {
+    ManagementSocket.instances = [];
+    const client = new PortableLettaAgentClient({
+      backend: "remote",
+      url: "ws://remote.test/ws",
+      WebSocket: ManagementSocket,
+    });
+
+    const fork = await client.conversations.fork("conv-source", {
+      messageId: "message-checkpoint",
+      hidden: true,
+    });
+    expect(fork).toMatchObject({
+      id: "conv-fork",
+      agent_id: "agent-1",
+    });
+
+    await expect(
+      client.conversations.update(fork.id, { archived: true }),
+    ).resolves.toMatchObject({ id: "conv-fork", archived: true });
+
+    const commands = ManagementSocket.instances.flatMap(
+      (socket) => socket.sent,
+    );
+    expect(commands).toEqual([
+      expect.objectContaining({
+        type: "conversation_fork",
+        conversation_id: "conv-source",
+        body: {
+          message_id: "message-checkpoint",
+          hidden: true,
+        },
+      }),
+      expect.objectContaining({
+        type: "conversation_retrieve",
+        conversation_id: "conv-fork",
+      }),
+      expect.objectContaining({
+        type: "conversation_update",
+        conversation_id: "conv-fork",
+        body: { archived: true },
+      }),
+    ]);
+  });
+
+  test("does not retrieve a conversation after an App Server fork failure", async () => {
+    class FailingForkSocket extends ManagementSocket {
+      protected override respond(command: Record<string, unknown>): void {
+        queueMicrotask(() => {
+          this.emit("message", {
+            data: JSON.stringify({
+              type: "conversation_fork_response",
+              request_id: command.request_id,
+              success: false,
+              conversation: null,
+              error: "Source message was not found.",
+            }),
+          });
+        });
+      }
+    }
+
+    ManagementSocket.instances = [];
+    const client = new PortableLettaAgentClient({
+      backend: "remote",
+      url: "ws://remote.test/ws",
+      WebSocket: FailingForkSocket,
+    });
+
+    await expect(
+      client.conversations.fork("conv-source", {
+        messageId: "message-missing",
+      }),
+    ).rejects.toThrow("Source message was not found.");
+
+    const commands = ManagementSocket.instances.flatMap(
+      (socket) => socket.sent,
+    );
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({
+      type: "conversation_fork",
+      conversation_id: "conv-source",
+    });
+  });
+
+  test("preserves the fork id when App Server hydration fails", async () => {
+    class FailingForkHydrationSocket extends ManagementSocket {
+      protected override respond(command: Record<string, unknown>): void {
+        const type = String(command.type);
+        queueMicrotask(() => {
+          this.emit("message", {
+            data: JSON.stringify(
+              type === "conversation_fork"
+                ? {
+                    type: "conversation_fork_response",
+                    request_id: command.request_id,
+                    success: true,
+                    conversation: { id: "conv-orphan" },
+                  }
+                : {
+                    type: "conversation_retrieve_response",
+                    request_id: command.request_id,
+                    success: false,
+                    conversation: null,
+                    error: "Connection closed during hydration.",
+                  },
+            ),
+          });
+        });
+      }
+    }
+
+    ManagementSocket.instances = [];
+    const client = new PortableLettaAgentClient({
+      backend: "remote",
+      url: "ws://remote.test/ws",
+      WebSocket: FailingForkHydrationSocket,
+    });
+
+    try {
+      await client.conversations.fork("conv-source");
+      throw new Error("Expected fork hydration to fail.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConversationForkHydrationError);
+      expect((error as ConversationForkHydrationError).conversationId).toBe(
+        "conv-orphan",
+      );
+      expect((error as Error).message).toContain("conv-orphan");
+    }
+  });
+
   test("map the portable API to Cloud REST", async () => {
     const requests: RecordedRequest[] = [];
     const client = new PortableLettaAgentClient({

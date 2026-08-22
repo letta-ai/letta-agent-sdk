@@ -10,6 +10,7 @@ import type {
   AgentRetrieveResponseMessage,
   AgentUpdateResponseMessage,
   ConversationCreateResponseMessage,
+  ConversationForkResponseMessage,
   ConversationListResponseMessage,
   ConversationMessagesListResponseMessage,
   ConversationRetrieveResponseMessage,
@@ -22,11 +23,13 @@ import type {
 } from "@letta-ai/letta-client/resources/agents/agents";
 import type {
   ConversationCreateParams,
+  ConversationForkParams,
   ConversationListParams,
   ConversationUpdateParams,
 } from "@letta-ai/letta-client/resources/conversations/conversations";
 import type { MessageListParams } from "@letta-ai/letta-client/resources/conversations/messages";
 import { normalizeAppServerModels } from "./app-server-models.js";
+import { ConversationForkHydrationError } from "./management-errors.js";
 import type { ManagementTransport } from "./management.js";
 import { applyUniqueRequestIds } from "./request-ids.js";
 import type {
@@ -197,6 +200,27 @@ export class AppServerManagementTransport
       response.conversation,
       `Failed to update conversation ${conversationId}.`,
     );
+  }
+
+  async forkConversation(
+    conversationId: string,
+    body: ConversationForkParams,
+  ): Promise<LettaConversation> {
+    const response = await this.request<ConversationForkResponseMessage>(
+      "conversation_fork",
+      { conversation_id: conversationId, body },
+      "conversation_fork_response",
+    );
+    const fork = ensureResponse(
+      response,
+      response.conversation,
+      `Failed to fork conversation ${conversationId}.`,
+    );
+    try {
+      return await this.retrieveConversation(fork.id);
+    } catch (error) {
+      throw new ConversationForkHydrationError(fork.id, error);
+    }
   }
 
   async listConversationMessages(

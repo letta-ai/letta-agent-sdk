@@ -166,6 +166,7 @@ export type {
   UpdateAgentOptions,
   ListConversationsOptions,
   CreateConversationOptions,
+  ForkConversationOptions,
   UpdateConversationOptions,
   ConversationMessagesOptions,
   ConversationMessagesResult,
@@ -174,6 +175,7 @@ export type {
 } from "./management-types.js";
 
 export { RepositoriesClient } from "./repositories.js";
+export { ConversationForkHydrationError } from "./management-errors.js";
 export type {
   Computer,
   ComputerMetadata,
