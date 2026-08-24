@@ -327,7 +327,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   async updateModel(update: string | UpdateModelOptions): Promise<UpdateModelResult> {
     if (this.mode.kind === "session" && this.mode.options.stateless === true) {
       throw new Error(
-        "updateModel() is unavailable in a stateless session because it changes persisted agent configuration.",
+        "updateModel() is unavailable in a stateless session because it changes persistent model configuration.",
       );
     }
     if (!this.initialized) {

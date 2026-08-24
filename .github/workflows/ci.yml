@@ -65,6 +65,14 @@ jobs:
           LETTA_API_KEY: ${{ secrets.LETTA_API_KEY }}
         run: bun examples/sdk-tour.ts all
 
+      - name: Session model scope integration test
+        # Only run with API key on push or same-repo PRs
+        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
+        env:
+          LETTA_API_KEY: ${{ secrets.LETTA_API_KEY }}
+          LETTA_LIVE_INTEGRATION: "1"
+        run: bun test src/tests/live.integration.test.ts -t "session model scope"
+
       - name: Cloud transport disconnect integration test
         # Only run with API key on push or same-repo PRs
         if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}

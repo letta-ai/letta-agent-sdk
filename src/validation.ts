@@ -235,7 +235,7 @@ export function validateCreateSessionOptions(options: CreateSessionOptions): voi
     ].find(([, value]) => value !== undefined);
     if (persistedOption) {
       throw new Error(
-        `stateless sessions cannot set ${persistedOption[0]} because it changes persisted agent configuration.`,
+        `stateless sessions cannot set ${persistedOption[0]} because it changes persistent configuration.`,
       );
     }
   }

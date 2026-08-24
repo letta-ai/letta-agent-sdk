@@ -417,6 +417,103 @@ describeLive("live integration: letta-agent-sdk", () => {
   );
 
   test(
+    "session model scope: createSession changes only the new conversation",
+    async () => {
+      const client = new LettaAgentClient({
+        backend: "cloud",
+        apiKey: API_KEY!,
+        apiBaseUrl: BASE_URL,
+      });
+      const existingAgent = (await client.agents.list({ limit: 1 }))[0];
+      const testAgentId = existingAgent?.id ?? await client.createAgent({
+        name: `sdk-model-scope-test-${Date.now()}`,
+        model: "letta/auto",
+        tags: ["sdk-live-test"],
+        memfs: false,
+      });
+      const createdAgent = existingAgent === undefined;
+      let session: LettaCodeSession | undefined;
+      let conversationId = "";
+
+      try {
+        const agentBefore = await client.agents.retrieve(testAgentId);
+        session = client.createSession(testAgentId, {
+          model: "letta/auto-fast",
+          permissionMode: "unrestricted",
+        });
+        openedSessions.push(session);
+
+        const state = await session.bootstrapState({ limit: 1 });
+        conversationId = state.conversationId;
+        const conversation = await client.conversations.retrieve(
+          conversationId,
+        );
+        const agentAfter = await client.agents.retrieve(testAgentId);
+
+        expect(state.model).toBe("letta/auto-fast");
+        expect(conversation.model).toBe("letta/auto-fast");
+        expect(agentAfter.model).toBe(agentBefore.model);
+      } finally {
+        session?.close();
+        if (createdAgent) {
+          await client.agents.delete(testAgentId);
+        } else if (conversationId) {
+          await client.conversations.update(conversationId, { archived: true });
+        }
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "session model scope: resumeSession(agentId) changes the agent default",
+    async () => {
+      const client = new LettaAgentClient({
+        backend: "cloud",
+        apiKey: API_KEY!,
+        apiBaseUrl: BASE_URL,
+      });
+      const availableAgents = await client.agents.list({ limit: 100 });
+      const reusableAgent =
+        availableAgents.find((agent) =>
+          agent.name?.startsWith("sdk-model-scope-test-"),
+        ) ?? availableAgents[0];
+      const testAgentId = reusableAgent?.id ?? await client.createAgent({
+        name: `sdk-model-scope-test-${Date.now()}`,
+        model: "letta/auto",
+        tags: ["sdk-live-test"],
+        memfs: false,
+      });
+      const createdAgent = reusableAgent === undefined;
+      const agentBefore = await client.agents.retrieve(testAgentId);
+      let session: LettaCodeSession | undefined;
+
+      try {
+        session = client.resumeSession(testAgentId, {
+          model: "letta/auto-fast",
+          permissionMode: "unrestricted",
+        });
+        openedSessions.push(session);
+
+        const state = await session.bootstrapState({ limit: 1 });
+        const agentAfter = await client.agents.retrieve(testAgentId);
+
+        expect(state.conversationId).toBe("default");
+        expect(state.model).toBe("letta/auto-fast");
+        expect(agentAfter.model).toBe("letta/auto-fast");
+      } finally {
+        session?.close();
+        if (createdAgent) {
+          await client.agents.delete(testAgentId);
+        } else if (agentBefore.model) {
+          await client.agents.update(testAgentId, { model: agentBefore.model });
+        }
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
     "send + stream yields renderable messages and terminal result",
     async () => {
       await ensureAgentReady();
