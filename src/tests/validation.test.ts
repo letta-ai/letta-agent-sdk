@@ -62,7 +62,7 @@ describe("validation", () => {
       { stateless: true, resources: [] },
     ]) {
       expect(() => validateCreateSessionOptions(options as never)).toThrow(
-        "changes persisted agent configuration",
+        "changes persistent configuration",
       );
     }
   });

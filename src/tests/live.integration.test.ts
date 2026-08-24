@@ -417,6 +417,43 @@ describeLive("live integration: letta-agent-sdk", () => {
   );
 
   test(
+    "createSession model override changes only the new conversation",
+    async () => {
+      await ensureAgentReady();
+
+      const client = new LettaAgentClient({
+        backend: "cloud",
+        apiKey: API_KEY!,
+        apiBaseUrl: BASE_URL,
+      });
+      const agentBefore = await client.agents.retrieve(agentId);
+      const session = client.createSession(agentId, {
+        model: "letta/auto-fast",
+        permissionMode: "unrestricted",
+      });
+      openedSessions.push(session);
+
+      let conversationId = "";
+      try {
+        const state = await session.bootstrapState({ limit: 1 });
+        conversationId = state.conversationId;
+        const conversation = await client.conversations.retrieve(conversationId);
+        const agentAfter = await client.agents.retrieve(agentId);
+
+        expect(state.model).toBe("letta/auto-fast");
+        expect(conversation.model).toBe("letta/auto-fast");
+        expect(agentAfter.model).toBe(agentBefore.model);
+      } finally {
+        session.close();
+        if (conversationId) {
+          await client.conversations.update(conversationId, { archived: true });
+        }
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
     "send + stream yields renderable messages and terminal result",
     async () => {
       await ensureAgentReady();

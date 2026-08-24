@@ -232,6 +232,9 @@ function fakeAppServerHandle(
 
   if (command.type === "update_model") {
     const payload = command.payload as Record<string, unknown> | undefined;
+    const runtime = command.runtime as
+      | { conversation_id?: string }
+      | undefined;
     const byId = FAKE_MODEL_ENTRIES.find((entry) => entry.id === payload?.model_id);
     const byHandle = FAKE_MODEL_ENTRIES.find((entry) => entry.handle === payload?.model_handle);
     const modelHandle =
@@ -242,7 +245,8 @@ function fakeAppServerHandle(
       request_id: command.request_id,
       success: true,
       runtime: command.runtime,
-      applied_to: "conversation",
+      applied_to:
+        runtime?.conversation_id === "default" ? "agent" : "conversation",
       model_id:
         (typeof payload?.model_id === "string" ? payload.model_id : undefined) ??
         byHandle?.id,
@@ -2504,7 +2508,7 @@ describe("LettaAgentClient", () => {
     }
   });
 
-  test("websocket protocol sessions list models, apply reasoning effort, and abort", async () => {
+  test("default conversation model updates apply to the agent", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({
       backend: "remote",
@@ -2550,7 +2554,7 @@ describe("LettaAgentClient", () => {
         reasoningEffort: "low",
       });
       expect(updateResult).toMatchObject({
-        appliedTo: "conversation",
+        appliedTo: "agent",
         modelId: "sonnet-low",
         modelHandle: "anthropic/claude-sonnet-4",
       });
@@ -2563,6 +2567,41 @@ describe("LettaAgentClient", () => {
       expect(fakeControlSocket().sent.at(-1)).toMatchObject({
         type: "abort_message",
         runtime: { agent_id: "agent-123", conversation_id: "default" },
+      });
+    } finally {
+      session.close();
+    }
+  });
+
+  test("new conversation model updates apply only to the conversation", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+    const session = client.createSession("agent-123", {
+      model: "anthropic/claude-opus-4",
+    });
+
+    try {
+      await asAdvanced(session).initialize();
+
+      expect(fakeControlSocket().sent).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "update_model",
+            runtime: {
+              agent_id: "agent-123",
+              conversation_id: "conv-created",
+            },
+          }),
+        ]),
+      );
+      const updateResult = await session.updateModel("anthropic/claude-sonnet-4");
+      expect(updateResult).toMatchObject({
+        appliedTo: "conversation",
+        modelHandle: "anthropic/claude-sonnet-4",
       });
     } finally {
       session.close();

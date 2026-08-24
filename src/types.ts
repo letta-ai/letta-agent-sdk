@@ -611,6 +611,7 @@ export interface UpdateModelOptions {
 }
 
 export interface UpdateModelResult {
+  /** The scope changed by the runtime. The default conversation uses the agent scope. */
   appliedTo?: "agent" | "conversation";
   modelId?: string;
   modelHandle?: string;
@@ -655,10 +656,16 @@ export interface ClientToolsetConfig {
  * For creating new agents with custom memory/persona, use createAgent().
  */
 export interface CreateSessionOptions {
-  /** Model to use (e.g., "claude-sonnet-4-20250514") - updates the agent's LLM config */
+  /**
+   * Model for the session target. New and named conversations receive a
+   * conversation override. The default conversation updates the agent default.
+   */
   model?: string;
 
-  /** Reasoning effort tier to use with the selected/current model on websocket protocol sessions. */
+  /**
+   * Reasoning tier for the session target. This option uses the same scope as
+   * `model` and is available on WebSocket protocol sessions.
+   */
   reasoningEffort?: ReasoningEffort;
 
   /**
@@ -686,6 +693,8 @@ export interface CreateSessionOptions {
    * Run without loading or changing the agent's MemFS. The agent and
    * conversation remain persistent; this only changes the session's local
    * memory, agent-skill, agent-mod, transcript, and reflection behavior.
+   * Model, reasoning, dreaming, and repository options are unavailable because
+   * they change persistent configuration.
    */
   stateless?: boolean;
 
@@ -770,6 +779,11 @@ export interface LettaCodeSession extends AsyncDisposable {
   ): Promise<TResponse>;
   listMessages(options?: ListMessagesOptions): Promise<ListMessagesResult>;
   listModels(): Promise<ListModelsResult>;
+  /**
+   * Update the model for this session target. Named conversations receive a
+   * conversation override. The default conversation updates the agent default.
+   * Read `appliedTo` from the result to confirm the changed scope.
+   */
   updateModel(update: string | UpdateModelOptions): Promise<UpdateModelResult>;
   /**
    * Fetch the initial conversation projection used to hydrate or reconcile a
