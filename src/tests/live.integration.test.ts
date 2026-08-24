@@ -433,6 +433,7 @@ describeLive("live integration: letta-agent-sdk", () => {
       });
       const createdAgent = existingAgent === undefined;
       let session: LettaCodeSession | undefined;
+      let conversationId = "";
 
       try {
         const agentBefore = await client.agents.retrieve(testAgentId);
@@ -443,8 +444,9 @@ describeLive("live integration: letta-agent-sdk", () => {
         openedSessions.push(session);
 
         const state = await session.bootstrapState({ limit: 1 });
+        conversationId = state.conversationId;
         const conversation = await client.conversations.retrieve(
-          state.conversationId,
+          conversationId,
         );
         const agentAfter = await client.agents.retrieve(testAgentId);
 
@@ -455,6 +457,8 @@ describeLive("live integration: letta-agent-sdk", () => {
         session?.close();
         if (createdAgent) {
           await client.agents.delete(testAgentId);
+        } else if (conversationId) {
+          await client.conversations.update(conversationId, { archived: true });
         }
       }
     },
