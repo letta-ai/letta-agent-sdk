@@ -71,7 +71,7 @@ jobs:
         env:
           LETTA_API_KEY: ${{ secrets.LETTA_API_KEY }}
           LETTA_LIVE_INTEGRATION: "1"
-        run: bun test src/tests/live.integration.test.ts -t "createSession model override changes only the new conversation"
+        run: bun test src/tests/live.integration.test.ts -t "session model scope"
 
       - name: Cloud transport disconnect integration test
         # Only run with API key on push or same-repo PRs
