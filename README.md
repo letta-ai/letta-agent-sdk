@@ -32,6 +32,19 @@ for await (const message of session.stream()) {
 }
 ```
 
+Latency-sensitive applications can initialize the runtime and transport before
+the first user action without fetching transcript history or invoking the model:
+
+```typescript
+const session = client.resumeSession(conversationId);
+await session.ready();
+await session.send(message);
+```
+
+`ready()` is idempotent and safe to call concurrently. `SDKResultMessage.durationMs`
+measures the tracked turn and excludes session initialization; measure `ready()`
+separately when startup latency matters.
+
 Set `LETTA_API_KEY` for the cloud backend. See the [quickstart](https://docs.letta.com/agent-sdk/quickstart) for the local and self-hosted paths.
 
 ## Where your agents run

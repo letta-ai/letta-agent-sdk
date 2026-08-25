@@ -345,6 +345,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
 
   protected override async initializeRuntimeController(): Promise<RuntimeSessionInit> {
     await this.mcpCleanup;
+    if (!this.closed) this.sandboxLifecycleClosing = false;
     const resolved = await this.resolveRuntime();
     const connection = await this.resolveConnectionForRuntime(resolved.runtime).catch(
       async (error: unknown) => {

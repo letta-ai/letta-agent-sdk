@@ -6,6 +6,7 @@ type AssertFalse<T extends false> = T;
 type HasKey<K extends PropertyKey> = K extends keyof LettaCodeSession ? true : false;
 
 type _HasSend = AssertTrue<HasKey<"send">>;
+type _HasReady = AssertTrue<HasKey<"ready">>;
 type _HasStream = AssertTrue<HasKey<"stream">>;
 type _HasAbort = AssertTrue<HasKey<"abort">>;
 type _HasSendCommand = AssertTrue<HasKey<"sendCommand">>;

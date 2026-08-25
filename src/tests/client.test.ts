@@ -1887,7 +1887,7 @@ describe("LettaAgentClient", () => {
     }
   });
 
-  test("concurrent initialize callers resolve from the same attempt", async () => {
+  test("ready is idempotent and concurrent callers share one initialization", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({
       backend: "remote",
@@ -1898,17 +1898,20 @@ describe("LettaAgentClient", () => {
     const session = client.resumeSession("conv-abc");
     try {
       const [first, second] = await Promise.all([
-        asAdvanced(session).initialize(),
-        asAdvanced(session).initialize(),
+        session.ready(),
+        session.ready(),
       ]);
       expect(first).toEqual(second);
       expect(first.conversationId).toBe("conv-abc");
       expect(FakeAppServerSocket.instances).toHaveLength(
         expectedAppServerSocketCount(),
       );
-      await expect(asAdvanced(session).initialize()).rejects.toThrow(
-        "Session already initialized",
-      );
+      expect(await session.ready()).toEqual(first);
+      await session.send("hello");
+      const sent = fakeControlSocket().sent as Array<{ type?: string }>;
+      expect(sent.filter((cmd) => cmd.type === "conversation_retrieve")).toHaveLength(1);
+      expect(sent.filter((cmd) => cmd.type === "runtime_start")).toHaveLength(1);
+      expect(sent.filter((cmd) => cmd.type === "conversation_messages_list")).toHaveLength(0);
     } finally {
       session.close();
     }
@@ -1954,7 +1957,7 @@ describe("LettaAgentClient", () => {
     }
   });
 
-  test("failed post-initialize work clears partial session metadata", async () => {
+  test("ready can retry after failed post-initialize work", async () => {
     FakeAppServerSocket.instances = [];
     FakeAppServerSocket.failNextReflectionSettings = true;
     const client = new LettaAgentClient({
@@ -1967,14 +1970,14 @@ describe("LettaAgentClient", () => {
       dreaming: { trigger: "step-count", stepCount: 3 },
     });
     try {
-      await expect(asAdvanced(session).initialize()).rejects.toThrow(
+      await expect(session.ready()).rejects.toThrow(
         "reflection settings failed (fake)",
       );
       expect(session.agentId).toBeNull();
       expect(session.sessionId).toBeNull();
       expect(session.conversationId).toBeNull();
 
-      const init = await asAdvanced(session).initialize();
+      const init = await session.ready();
       expect(init.agentId).toBe("agent-123");
     } finally {
       FakeAppServerSocket.failNextReflectionSettings = false;
@@ -1982,7 +1985,7 @@ describe("LettaAgentClient", () => {
     }
   });
 
-  test("closing during initialization cannot resurrect the session", async () => {
+  test("ready rejects when the session closes during initialization", async () => {
     FakeAppServerSocket.instances = [];
     FakeAppServerSocket.deferReflectionSettingsResponse = true;
     const client = new LettaAgentClient({
@@ -1995,7 +1998,7 @@ describe("LettaAgentClient", () => {
       dreaming: { trigger: "step-count", stepCount: 3 },
     });
     try {
-      const initialize = asAdvanced(session).initialize();
+      const ready = session.ready();
       for (let i = 0; i < 100; i++) {
         if (FakeAppServerSocket.pendingReflectionSettingsResponse) break;
         await Promise.resolve();
@@ -2004,10 +2007,8 @@ describe("LettaAgentClient", () => {
 
       session.close();
       FakeAppServerSocket.pendingReflectionSettingsResponse?.();
-      await expect(initialize).rejects.toThrow();
-      await expect(asAdvanced(session).initialize()).rejects.toThrow(
-        "Session is closed",
-      );
+      await expect(ready).rejects.toThrow();
+      await expect(session.ready()).rejects.toThrow("Session is closed");
       expect(session.agentId).toBeNull();
       expect(session.sessionId).toBeNull();
       expect(session.conversationId).toBeNull();

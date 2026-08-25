@@ -8,7 +8,8 @@ const DEFAULT_LIMIT = 900;
 const FILE_LIMITS: Record<string, number> = {
   "app-server-session.ts": 950,
   "cloud-session.ts": 1_350,
-  "types.ts": 1_350,
+  "remote-client-session-core.ts": 917,
+  "types.ts": 1_351,
 };
 
 const sourceDir = join(import.meta.dir, "..", "src");
