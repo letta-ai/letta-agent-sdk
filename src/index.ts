@@ -88,6 +88,7 @@ export type {
   GetDeviceStatusOptions,
   SessionDeviceStatus,
   SessionPendingControlRequest,
+  SessionReadyInfo,
   SessionPermissionSuggestion,
   SessionDiffHunkLine,
   SessionDiffHunk,

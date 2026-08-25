@@ -766,6 +766,11 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
 
 export interface LettaCodeSession extends AsyncDisposable {
   /**
+   * Initialize the session runtime and transport without sending a model
+   * request or fetching transcript history. Safe to call repeatedly.
+   */
+  ready(): Promise<SessionReadyInfo>;
+  /**
    * Send a user message. Pass `{ otid }` to supply your own correlation id for
    * optimistic reconciliation; the SDK generates one when omitted.
    */
@@ -827,6 +832,14 @@ export interface LettaCodeSession extends AsyncDisposable {
   readonly agentId: string | null;
   readonly sessionId: string | null;
   readonly conversationId: string | null;
+}
+
+/** Resolved session information returned by session.ready(). */
+export interface SessionReadyInfo {
+  agentId: string;
+  conversationId: string;
+  model: string | undefined;
+  tools?: string[];
 }
 
 export interface ChangeDeviceStateOptions {
@@ -1113,6 +1126,7 @@ export interface SDKResultMessage {
   /** Best-effort human-readable approval-conflict detail (if available). */
   errorDetail?: string;
   stopReason?: string;
+  /** Duration of the tracked turn in milliseconds. Excludes session initialization. */
   durationMs: number;
   totalCostUsd?: number;
   conversationId: string | null;

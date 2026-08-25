@@ -21,6 +21,7 @@ import type {
   SendCommandOptions,
   SendMessage,
   SendOptions,
+  SessionReadyInfo,
   SessionDeviceStatus,
   UpdateModelOptions,
   UpdateModelResult,
@@ -141,6 +142,22 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       });
     this.initializePromise = memo;
     return memo;
+  }
+
+  async ready(): Promise<SessionReadyInfo> {
+    if (this.closed) throw new Error("Session is closed");
+    if (!this.initialized) await this.initialize();
+    await this.recoverIdleTransportIfNeeded();
+
+    if (!this._agentId || !this._conversationId) {
+      throw new Error("Session is not initialized");
+    }
+    return {
+      agentId: this._agentId,
+      conversationId: this._conversationId,
+      model: this._model || undefined,
+      ...(this.toolNames !== undefined ? { tools: [...this.toolNames] } : {}),
+    };
   }
 
   private async performInitialize(): Promise<SDKInitMessage> {

@@ -818,9 +818,8 @@ describe("CloudEnvironmentSession", () => {
 
     const session = client.resumeSession("conv-1");
     try {
-      const init = await asAdvanced(session).initialize();
+      const init = await session.ready();
       expect(init).toMatchObject({
-        type: "init",
         agentId: "agent-from-conv",
         conversationId: "conv-1",
       });
