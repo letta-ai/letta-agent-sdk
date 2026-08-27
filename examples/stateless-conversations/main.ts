@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 
 /**
- * Agent-free query examples
+ * Stateless conversation examples
  *
  * Requires LETTA_API_KEY.
- * Run with: bun examples/agent-free-query/main.ts
+ * Run with: bun examples/stateless-conversations/main.ts
  */
 
 import {
@@ -15,7 +15,7 @@ import {
 } from "../../src/index.js";
 
 if (!process.env.LETTA_API_KEY) {
-  throw new Error("Set LETTA_API_KEY to run the agent-free query examples.");
+  throw new Error("Set LETTA_API_KEY to run the stateless conversation examples.");
 }
 
 const client = new LettaAgentClient({

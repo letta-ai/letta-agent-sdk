@@ -1,4 +1,4 @@
-# Agent-free queries
+# Stateless conversations
 
 Use `query()` when you need one model turn but do not need an agent, memory, or
 a resumable conversation. Each call creates an ephemeral conversation, streams
@@ -17,7 +17,7 @@ No example creates an agent.
 Set `LETTA_API_KEY`, then run:
 
 ```bash
-bun examples/agent-free-query/main.ts
+bun examples/stateless-conversations/main.ts
 ```
 
 The example uses a local App Server with the API backend. Conversation state is
@@ -46,4 +46,5 @@ for await (const message of client.query({
 
 With `backend: "remote"`, the connected App Server creates the ephemeral
 conversation. With `backend: "cloud"`, pass an explicit `computer`; managed
-sandboxes are agent-scoped and therefore are not used for agent-free queries.
+sandboxes are agent-scoped and therefore are not used for stateless
+conversations.
