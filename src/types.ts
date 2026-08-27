@@ -765,6 +765,8 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
 }
 
 export interface LettaCodeSession extends AsyncDisposable {
+  /** File transfer for the SDK-managed Cloud sandbox, when selected. */
+  readonly sandbox?: import("./sandbox-files.js").SandboxFilesClient;
   /**
    * Initialize the session runtime and transport without sending a model
    * request or fetching transcript history. Safe to call repeatedly.
@@ -833,7 +835,6 @@ export interface LettaCodeSession extends AsyncDisposable {
   readonly sessionId: string | null;
   readonly conversationId: string | null;
 }
-
 /** Resolved session information returned by session.ready(). */
 export interface SessionReadyInfo {
   agentId: string;
@@ -841,7 +842,6 @@ export interface SessionReadyInfo {
   model: string | undefined;
   tools?: string[];
 }
-
 export interface ChangeDeviceStateOptions {
   cwd?: string;
   permissionMode?: PermissionMode;

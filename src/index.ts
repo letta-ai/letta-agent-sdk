@@ -152,6 +152,7 @@ export type {
   McpSseServerConfig,
   McpServers,
 } from "./types.js";
+export type * from "./sandbox-files.js";
 export type {
   AgentRepositoriesClient,
   AgentRepository,
