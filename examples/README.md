@@ -8,6 +8,7 @@ Run `bun install` from the repository root before you start. The examples import
 
 | Example | What it teaches | Backend | Side effects |
 | --- | --- | --- | --- |
+| [`agent-free-query/`](./agent-free-query) | Streaming, structured results, and concurrent one-turn questions without an agent | Local App Server + API backend | Creates ephemeral conversations; does not create agents |
 | [`sdk-tour.ts`](./sdk-tour.ts) | Agent creation, streaming, conversations, tools, permissions, and MemFS | Local | Creates local agents and can run tools |
 | [`custom-tools/`](./custom-tools) | Tools that execute in your SDK process for a Cloud agent | Cloud | Creates a Cloud agent and runs local functions |
 | [`dungeon-master/`](./dungeon-master) | One persistent agent with visible files and resumable state | Local | Writes a rulebook, campaign files, and `state.json` |
@@ -29,6 +30,13 @@ bun examples/custom-tools/main.ts
 ```
 
 The web chat selects Cloud when `LETTA_API_KEY` is set. Otherwise, it uses the local backend. Its memory-file editor is available only on Cloud because it edits files in an attached Cloud repository.
+
+The agent-free query example also requires `LETTA_API_KEY`, but runs its App
+Server locally:
+
+```bash
+bun examples/agent-free-query/main.ts
+```
 
 ## Understand the safety boundary
 
