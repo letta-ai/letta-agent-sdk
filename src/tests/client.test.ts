@@ -371,7 +371,13 @@ function fakeAppServerHandle(
       return;
     }
     const createdAgent = command.create_agent as Record<string, unknown> | undefined;
-    const agentId = (command.agent_id as string | undefined) ?? "agent-created";
+    const createConversation = command.create_conversation as
+      | { body?: Record<string, unknown> }
+      | undefined;
+    const agentFree = createConversation?.body?.system !== undefined;
+    const agentId = agentFree
+      ? null
+      : ((command.agent_id as string | undefined) ?? "agent-created");
     const conversationId =
       command.conversation_id === "default"
         ? "default"
@@ -381,14 +387,20 @@ function fakeAppServerHandle(
       request_id: command.request_id,
       success: true,
       runtime: { agent_id: agentId, conversation_id: conversationId },
-      agent: {
-        id: agentId,
-        model: "anthropic/claude-sonnet-4",
-        ...(FakeAppServerSocket.reportedAgentTools !== undefined
-          ? { tools: FakeAppServerSocket.reportedAgentTools }
-          : {}),
+      agent: agentFree
+        ? null
+        : {
+            id: agentId,
+            model: "anthropic/claude-sonnet-4",
+            ...(FakeAppServerSocket.reportedAgentTools !== undefined
+              ? { tools: FakeAppServerSocket.reportedAgentTools }
+              : {}),
+          },
+      conversation: {
+        id: conversationId,
+        agent_id: agentId,
+        ...(agentFree ? { model: createConversation?.body?.model } : {}),
       },
-      conversation: { id: conversationId, agent_id: agentId },
       created: {
         agent: createdAgent !== undefined,
         conversation: command.create_conversation !== undefined,
@@ -1603,6 +1615,48 @@ describe("LettaAgentClient", () => {
         },
       },
     });
+  });
+
+  test("query creates an agent-free ephemeral conversation", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const messages = [];
+    for await (const message of client.query({
+      prompt: "What is 2 + 2?",
+      options: {
+        model: "openai/gpt-5.6-luna",
+        system: "Answer with one number.",
+        modelSettings: { parallel_tool_calls: false },
+        contextWindowLimit: 64_000,
+      },
+    })) {
+      messages.push(message);
+    }
+
+    const runtimeStart = fakeControlSocket().sent.find(
+      (sent) => (sent as { type?: string }).type === "runtime_start",
+    );
+    expect(runtimeStart).toMatchObject({
+      type: "runtime_start",
+      create_conversation: {
+        body: {
+          model: "openai/gpt-5.6-luna",
+          system: "Answer with one number.",
+          model_settings: { parallel_tool_calls: false },
+          context_window_limit: 64_000,
+        },
+      },
+    });
+    expect(runtimeStart).not.toHaveProperty("agent_id");
+    expect(runtimeStart).not.toHaveProperty("create_agent");
+    expect(messages).toContainEqual(
+      expect.objectContaining({ type: "result", success: true }),
+    );
   });
 
   test("creates remote app-server agents with an explicit pinning preference", async () => {

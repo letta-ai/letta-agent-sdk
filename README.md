@@ -45,6 +45,25 @@ await session.send(message);
 measures the tracked turn and excludes session initialization; measure `ready()`
 separately when startup latency matters.
 
+For a simple question that should not create or use an agent, call `query()`.
+It creates an agent-free ephemeral conversation from the supplied model and
+system prompt, streams the turn, and closes the runtime when iteration ends:
+
+```typescript
+for await (const message of client.query({
+  prompt: "What is the capital of France?",
+  options: {
+    model: "openai/gpt-5.6-luna",
+    system: "Answer directly and concisely.",
+  },
+})) {
+  if (message.type === "assistant") process.stdout.write(message.content);
+}
+```
+
+Cloud queries require an explicit connected computer. Local and remote clients
+run the ephemeral conversation through their App Server.
+
 Set `LETTA_API_KEY` for the cloud backend. See the [quickstart](https://docs.letta.com/agent-sdk/quickstart) for the local and self-hosted paths.
 
 ## Where your agents run

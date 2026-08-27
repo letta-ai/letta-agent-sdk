@@ -77,7 +77,12 @@ type CloudRuntimeStartResponse = ProtocolMessage & {
     model?: string | null;
     model_settings?: Record<string, unknown> | null;
   }) | null;
-  conversation: (Record<string, unknown> & { id?: string; agent_id?: string }) | null;
+  conversation: (Record<string, unknown> & {
+    id?: string;
+    agent_id?: string | null;
+    model?: string | null;
+    model_settings?: Record<string, unknown> | null;
+  }) | null;
   error?: string;
 };
 
@@ -142,7 +147,10 @@ export class CloudManagedSandboxExpiredError extends Error {
   }
 }
 
-type CloudSessionMode = Extract<RuntimeSessionMode, { kind: "session" }>;
+type CloudSessionMode = Extract<
+  RuntimeSessionMode,
+  { kind: "session" } | { kind: "agent-free" }
+>;
 
 function getWebSocketConstructor(
   websocketOverride?: LettaCodeSocketConstructor,
@@ -225,7 +233,7 @@ function environmentToRemoteTarget(
 function buildCloudStatusWebSocketUrl(params: {
   apiBaseUrl?: string;
   connectionId: string;
-  agentId: string;
+  agentId: string | null;
   conversationId: string;
   apiKey?: string;
   authMode: "header" | "query";
@@ -239,7 +247,7 @@ function buildCloudStatusWebSocketUrl(params: {
     throw new Error(`Unsupported cloud apiBaseUrl protocol: ${base.protocol}`);
   }
   base.pathname = `/v1/environments/${encodeURIComponent(params.connectionId)}/status/ws`;
-  base.searchParams.set("agentId", params.agentId);
+  if (params.agentId) base.searchParams.set("agentId", params.agentId);
   base.searchParams.set("conversationId", params.conversationId);
   base.searchParams.set("channel", "stream");
   if (params.authMode === "query" && params.apiKey) {
@@ -363,10 +371,12 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     const resolved = await this.resolveRuntime();
     const connection = await this.resolveConnectionForRuntime(resolved.runtime).catch(
       async (error: unknown) => {
-        await this.cleanupSessionRepositories(
-          resolved.runtime.agent_id,
-          resolved.runtime.conversation_id,
-        );
+        if (resolved.runtime.agent_id) {
+          await this.cleanupSessionRepositories(
+            resolved.runtime.agent_id,
+            resolved.runtime.conversation_id,
+          );
+        }
         throw error;
       },
     );
@@ -392,10 +402,12 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     } catch (error) {
       await this.closeMcpBridge();
       await this.cleanupManagedSandbox();
-      await this.cleanupSessionRepositories(
-        resolved.runtime.agent_id,
-        resolved.runtime.conversation_id,
-      );
+      if (resolved.runtime.agent_id) {
+        await this.cleanupSessionRepositories(
+          resolved.runtime.agent_id,
+          resolved.runtime.conversation_id,
+        );
+      }
       throw error;
     }
   }
@@ -461,8 +473,16 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
           clientToolset,
         ),
         runtime: response.runtime,
-        model: typeof response.agent?.model === "string" ? response.agent.model : "",
-        modelSettings: response.agent?.model_settings ?? null,
+        model:
+          typeof response.agent?.model === "string"
+            ? response.agent.model
+            : typeof response.conversation?.model === "string"
+              ? response.conversation.model
+              : "",
+        modelSettings:
+          response.agent?.model_settings ??
+          response.conversation?.model_settings ??
+          null,
         ...(availableTools !== undefined ? { tools: availableTools } : {}),
         ...(skillSources !== undefined ? { skillSources: [...skillSources] } : {}),
       };
@@ -535,11 +555,11 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
         name: SDK_AGENT_ORIGIN,
         title: "Letta Agent SDK",
       },
-      agent_id: runtime.agent_id,
       conversation_id: runtime.conversation_id,
       recover_approvals: false,
       force_device_status: true,
     };
+    if (runtime.agent_id) command.agent_id = runtime.agent_id;
 
     const mode = mapPermissionMode(options.permissionMode);
     if (mode) command.mode = mode;
@@ -621,6 +641,18 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   private async resolveRuntime(): Promise<{ runtime: RuntimeScope }> {
+    if (this.cloudMode.kind === "agent-free") {
+      if (!this.cloudMode.conversationId) {
+        throw new Error("Cloud agent-free sessions require a conversation id.");
+      }
+      return {
+        runtime: {
+          agent_id: null,
+          conversation_id: this.cloudMode.conversationId,
+        },
+      };
+    }
+
     let agentId = this.cloudMode.agentId;
     let conversationId = this.cloudMode.conversationId;
 
@@ -835,6 +867,11 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   private async createManagedSandboxConnection(
     runtime: RuntimeScope,
   ): Promise<ResolvedCloudConnection> {
+    if (!runtime.agent_id) {
+      throw new Error(
+        "Agent-free queries require an explicit Cloud computer; managed sandboxes are agent-scoped.",
+      );
+    }
     // Scope the managed sandbox to the conversation when one exists: the
     // server treats create-with-conversationId as create-or-resume, so
     // sessions of the same conversation share one sandbox and sessions of

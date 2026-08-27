@@ -1038,7 +1038,7 @@ export interface CreateAgentOptions {
  */
 export interface SDKInitMessage {
   type: "init";
-  agentId: string;
+  agentId: string | null;
   sessionId: string;
   conversationId: string;
   model: string;

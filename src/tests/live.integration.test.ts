@@ -311,6 +311,37 @@ function assertRawMessageShape(page: ListMessagesResult): void {
 }
 
 describeLive("live integration: letta-agent-sdk", () => {
+  test(
+    "query runs through an agent-free ephemeral conversation",
+    async () => {
+      const client = new LettaAgentClient({
+        backend: "local",
+        appServer: {
+          harnessBackend: "api",
+          requestTimeoutMs: TEST_TIMEOUT_MS,
+        },
+      });
+      const messages: SDKMessage[] = [];
+
+      for await (const message of client.query({
+        prompt: "Reply with exactly EPHEMERAL_QUERY_OK and nothing else.",
+        options: {
+          model: "openai/gpt-5.6-luna",
+          system: "Follow the user's output-format instruction exactly.",
+          permissionMode: "unrestricted",
+          allowedTools: [],
+        },
+      })) {
+        messages.push(message);
+      }
+
+      const result = expectTerminalResult(messages);
+      expect(result.success).toBe(true);
+      expect(result.result).toBe("EPHEMERAL_QUERY_OK");
+    },
+    TEST_TIMEOUT_MS,
+  );
+
   afterAll(() => {
     for (const session of openedSessions) {
       session.close();

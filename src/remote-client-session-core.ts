@@ -166,7 +166,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     this.runtime = init.runtime;
     this._agentId = init.runtime.agent_id;
     this._conversationId = init.runtime.conversation_id;
-    this._sessionId = `${init.runtime.agent_id}:${init.runtime.conversation_id}`;
+    this._sessionId = init.runtime.agent_id ? `${init.runtime.agent_id}:${init.runtime.conversation_id}` : init.runtime.conversation_id;
     this._modelSettings = init.modelSettings ?? null;
     this._model =
       typeof init.model === "string"
