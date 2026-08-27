@@ -51,6 +51,13 @@ import {
   type LettaCodeCloudSandboxOptions,
   validateCloudSandboxOptions,
 } from "./cloud-sandbox.js";
+import {
+  downloadSandboxFile,
+  type SandboxFileUpload,
+  type SandboxFileUploadResult,
+  type SandboxFilesClient,
+  uploadSandboxFiles,
+} from "./sandbox-files.js";
 
 const DEFAULT_TURN_TIMEOUT_MS = 120_000;
 const DEFAULT_PING_INTERVAL_MS = 30_000;
@@ -313,6 +320,7 @@ export function assertCloudSessionOptionsSupported(
 }
 
 export class CloudEnvironmentSession extends RemoteClientSessionCore {
+  readonly sandbox: SandboxFilesClient | undefined;
   private connectionId: string | null = null;
   private removeExternalToolHandler: (() => void) | null = null;
   private removeControlRequestHandler: (() => void) | null = null;
@@ -339,6 +347,12 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     });
     this.cloudMode = mode;
     this.repositoryManagement = new CloudManagementTransport(apiClient);
+    this.sandbox = this.effectiveEnvironment() === undefined
+      ? {
+          uploadFiles: (files) => this.uploadFilesToManagedSandbox(files),
+          downloadFile: (path) => this.downloadFileFromManagedSandbox(path),
+        }
+      : undefined;
     const tools = mode.options.tools;
     this.externalTools = externalToolsByName(tools);
   }
@@ -556,6 +570,31 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     const sandbox = this.managedSandbox;
     if (!sandbox) return;
     await this.refreshManagedSandbox(sandbox);
+  }
+
+  private async uploadFilesToManagedSandbox(
+    files: readonly SandboxFileUpload[],
+  ): Promise<SandboxFileUploadResult> {
+    const sandbox = await this.requireManagedSandboxForFileTransfer();
+    return uploadSandboxFiles(this.apiClient, sandbox.sandboxId, files);
+  }
+
+  private async downloadFileFromManagedSandbox(path: string): Promise<Uint8Array> {
+    const sandbox = await this.requireManagedSandboxForFileTransfer();
+    return downloadSandboxFile(this.apiClient, sandbox.sandboxId, path);
+  }
+
+  private async requireManagedSandboxForFileTransfer(): Promise<ManagedCloudSandbox> {
+    if (this.effectiveEnvironment() !== undefined) {
+      throw new Error("Sandbox file transfer requires an SDK-managed Cloud sandbox.");
+    }
+    await this.ready();
+    const sandbox = this.managedSandbox;
+    if (!sandbox) {
+      throw new Error("SDK-managed Cloud sandbox is unavailable.");
+    }
+    await this.refreshManagedSandbox(sandbox);
+    return sandbox;
   }
 
   protected override onCoreClose(): void {

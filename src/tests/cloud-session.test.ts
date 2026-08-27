@@ -43,6 +43,7 @@ function headersOf(init?: RequestInit): Record<string, string> {
 
 function bodyOf(init?: RequestInit): unknown {
   if (!init?.body) return undefined;
+  if (init.body instanceof FormData) return init.body;
   return JSON.parse(String(init.body));
 }
 
@@ -144,6 +145,36 @@ function createCloudFetchMock(
     const sandboxTerminateMatch = /^\/v1\/sandboxes\/([^/]+)\/terminate$/.exec(parsed.pathname);
     if (sandboxTerminateMatch && method === "POST") {
       return Promise.resolve(jsonResponse({ success: true, message: "terminated" }));
+    }
+
+    const sandboxFilesMatch = /^\/v1\/sandboxes\/([^/]+)\/files$/.exec(parsed.pathname);
+    if (sandboxFilesMatch && method === "POST") {
+      const form = init?.body;
+      if (!(form instanceof FormData)) {
+        return Promise.resolve(jsonResponse(
+          { errorCode: "NO_FILES", message: "No files were provided" },
+          { status: 400 },
+        ));
+      }
+      const files = form.getAll("file").map((part, index) => {
+        const blob = part as Blob & { name?: string };
+        const name = blob.name ?? `upload-${index}`;
+        return {
+          path: `/root/downloads/upload-1/${name}`,
+          name,
+          mimeType: blob.type,
+          size: blob.size,
+        };
+      });
+      return Promise.resolve(jsonResponse({ files }));
+    }
+
+    if (sandboxFilesMatch && method === "GET") {
+      const path = parsed.searchParams.get("path") ?? "";
+      return Promise.resolve(new Response(`download:${path}`, {
+        status: 200,
+        headers: { "Content-Type": "application/octet-stream" },
+      }));
     }
 
     const agentSandboxRefreshMatch = /^\/v1\/agents\/([^/]+)\/sandboxes\/refresh$/.exec(parsed.pathname);
@@ -840,6 +871,89 @@ describe("CloudEnvironmentSession", () => {
     } finally {
       session.close();
     }
+  });
+
+  test("uploads and downloads files through the managed sandbox", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+    });
+
+    const session = client.resumeSession("conv-1");
+    try {
+      const uploaded = await session.sandbox!.uploadFiles([
+        {
+          name: "input.tar.gz",
+          data: new Blob(["archive"], { type: "application/gzip" }),
+        },
+        {
+          name: "context.json",
+          data: new Blob(["{}"], { type: "application/json" }),
+        },
+      ]);
+      expect(uploaded.files).toEqual([
+        {
+          path: "/root/downloads/upload-1/input.tar.gz",
+          name: "input.tar.gz",
+          mimeType: "application/gzip",
+          size: 7,
+        },
+        {
+          path: "/root/downloads/upload-1/context.json",
+          name: "context.json",
+          mimeType: "application/json;charset=utf-8",
+          size: 2,
+        },
+      ]);
+
+      const uploadRequest = requests.find((request) =>
+        request.method === "POST" &&
+        new URL(request.url).pathname ===
+          "/v1/sandboxes/sandbox-agent-from-conv/files"
+      );
+      expect(uploadRequest).toBeDefined();
+      expect(uploadRequest!.headers.authorization).toBe("Bearer sk-test");
+      expect(uploadRequest!.headers["content-type"]).toBeUndefined();
+      expect((uploadRequest!.body as FormData).getAll("file")).toHaveLength(2);
+      expect(requests.indexOf(uploadRequest!)).toBeGreaterThan(
+        requests.findIndex((request) =>
+          request.method === "POST" &&
+          new URL(request.url).pathname ===
+            "/v1/agents/agent-from-conv/sandboxes"
+        ),
+      );
+
+      const path = "/root/downloads/output/result.tar.gz";
+      const downloaded = await session.sandbox!.downloadFile(path);
+      expect(new TextDecoder().decode(downloaded)).toBe(`download:${path}`);
+      expect(requests).toContainEqual(expect.objectContaining({
+        method: "GET",
+        url: `https://api.test/v1/sandboxes/sandbox-agent-from-conv/files?path=${encodeURIComponent(path)}`,
+      }));
+    } finally {
+      session.close();
+    }
+  });
+
+  test("does not expose sandbox files for an explicit computer", () => {
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock([]),
+      WebSocket: FakeCloudSocket,
+      computer: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("conv-1");
+    expect(session.sandbox).toBeUndefined();
+    session.close();
   });
 
   test("clones configured GitHub repositories into a managed sandbox", async () => {
