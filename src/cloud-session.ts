@@ -496,6 +496,21 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
         return client;
       } catch (error) {
         lastError = error;
+        console.warn(
+          JSON.stringify({
+            event: "cloud_status_transport_connection_failed",
+            attempt: attempt + 1,
+            max_attempts: INITIAL_CLOUD_TRANSPORT_ATTEMPTS,
+            will_retry:
+              attempt + 1 < INITIAL_CLOUD_TRANSPORT_ATTEMPTS,
+            connection_id: connectionId,
+            agent_id: runtime.agent_id,
+            conversation_id: runtime.conversation_id,
+            error_name: error instanceof Error ? error.name : null,
+            error_message:
+              error instanceof Error ? error.message : String(error),
+          }),
+        );
         this.cleanupTransportHandlers();
         client.close();
       }

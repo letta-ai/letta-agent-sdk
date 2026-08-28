@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { Message } from "@letta-ai/letta-client/resources/agents/messages";
 import {
   CloudManagedSandboxExpiredError,
@@ -1717,6 +1717,7 @@ describe("CloudEnvironmentSession", () => {
   test("retries an initial Cloud transport failure before sending input", async () => {
     resetFakeCloud();
     FakeCloudSocket.openConnectionFailuresRemaining = 1;
+    const warningSpy = spyOn(console, "warn").mockImplementation(() => {});
     const requests: RecordedRequest[] = [];
     const client = new LettaAgentClient({
       backend: "cloud",
@@ -1751,14 +1752,29 @@ describe("CloudEnvironmentSession", () => {
           new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes"
         ),
       ).toHaveLength(1);
+      expect(warningSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(warningSpy.mock.calls[0]?.[0]))).toEqual({
+        event: "cloud_status_transport_connection_failed",
+        attempt: 1,
+        max_attempts: 2,
+        will_retry: true,
+        connection_id: "conn-agent-1",
+        agent_id: "agent-1",
+        conversation_id: "default",
+        error_name: "Error",
+        error_message:
+          "App-server WebSocket failed to open: Error: initial socket open failed",
+      });
     } finally {
       session.close();
+      warningSpy.mockRestore();
     }
   });
 
   test("bounds initial Cloud transport retries before runtime start", async () => {
     resetFakeCloud();
     FakeCloudSocket.openConnectionFailuresRemaining = 2;
+    const warningSpy = spyOn(console, "warn").mockImplementation(() => {});
     const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
@@ -1781,8 +1797,27 @@ describe("CloudEnvironmentSession", () => {
       expect(
         FakeCloudSocket.allSent().filter((command) => command.type === "input"),
       ).toHaveLength(0);
+      expect(
+        warningSpy.mock.calls.map(([line]) => JSON.parse(String(line))),
+      ).toEqual([
+        expect.objectContaining({
+          event: "cloud_status_transport_connection_failed",
+          attempt: 1,
+          max_attempts: 2,
+          will_retry: true,
+          connection_id: "conn-explicit",
+        }),
+        expect.objectContaining({
+          event: "cloud_status_transport_connection_failed",
+          attempt: 2,
+          max_attempts: 2,
+          will_retry: false,
+          connection_id: "conn-explicit",
+        }),
+      ]);
     } finally {
       session.close();
+      warningSpy.mockRestore();
     }
   });
 
