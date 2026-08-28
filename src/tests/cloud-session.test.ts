@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { Message } from "@letta-ai/letta-client/resources/agents/messages";
 import {
   CloudManagedSandboxExpiredError,
@@ -291,6 +291,8 @@ class FakeCloudSocket {
     | "hang" = "normal";
   static syncSucceeds = true;
   static deviceStatusOnSync = false;
+  static openConnectionFailuresRemaining = 0;
+  private static currentConnectionShouldFail = false;
   readyState = 0;
   sent: Array<Record<string, unknown>> = [];
   private listeners = new Map<string, Set<Listener>>();
@@ -300,7 +302,21 @@ class FakeCloudSocket {
     readonly options?: { headers?: Record<string, string> },
   ) {
     FakeCloudSocket.instances.push(this);
+    const channel = new URL(url).searchParams.get("channel");
+    if (channel === "control") {
+      FakeCloudSocket.currentConnectionShouldFail =
+        FakeCloudSocket.openConnectionFailuresRemaining > 0;
+      if (FakeCloudSocket.currentConnectionShouldFail) {
+        FakeCloudSocket.openConnectionFailuresRemaining--;
+      }
+    }
+    const shouldFail = FakeCloudSocket.currentConnectionShouldFail;
     queueMicrotask(() => {
+      if (shouldFail) {
+        this.readyState = 3;
+        this.emit("error", new Error("initial socket open failed"));
+        return;
+      }
       this.readyState = 1;
       this.emit("open", {});
     });
@@ -702,6 +718,7 @@ function resetFakeCloud(): void {
   FakeCloudSocket.scenario = "normal";
   FakeCloudSocket.syncSucceeds = true;
   FakeCloudSocket.deviceStatusOnSync = false;
+  FakeCloudSocket.openConnectionFailuresRemaining = 0;
 }
 
 describe("CloudEnvironmentSession", () => {
@@ -1694,6 +1711,113 @@ describe("CloudEnvironmentSession", () => {
       ).toHaveLength(1);
     } finally {
       session.close();
+    }
+  });
+
+  test("retries an initial Cloud transport failure before sending input", async () => {
+    resetFakeCloud();
+    FakeCloudSocket.openConnectionFailuresRemaining = 1;
+    const warningSpy = spyOn(console, "warn").mockImplementation(() => {});
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+    });
+
+    const session = client.resumeSession("agent-1");
+    try {
+      const result = await asAdvanced(session).sendAndWaitForResult("hello once");
+      expect(result).toMatchObject({
+        success: true,
+        result: "hello from cloud",
+      });
+
+      expect(FakeCloudSocket.instances).toHaveLength(4);
+      expect(
+        FakeCloudSocket.allSent().filter((command) => command.type === "runtime_start"),
+      ).toHaveLength(1);
+      expect(
+        FakeCloudSocket.allSent().filter((command) => {
+          const payload = command.payload as { kind?: string } | undefined;
+          return command.type === "input" && payload?.kind === "create_message";
+        }),
+      ).toHaveLength(1);
+      expect(
+        requests.filter((request) =>
+          request.method === "POST" &&
+          new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes"
+        ),
+      ).toHaveLength(1);
+      expect(warningSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(warningSpy.mock.calls[0]?.[0]))).toEqual({
+        event: "cloud_status_transport_connection_failed",
+        attempt: 1,
+        max_attempts: 2,
+        will_retry: true,
+        connection_id: "conn-agent-1",
+        agent_id: "agent-1",
+        conversation_id: "default",
+        error_name: "Error",
+        error_message:
+          "App-server WebSocket failed to open: Error: initial socket open failed",
+      });
+    } finally {
+      session.close();
+      warningSpy.mockRestore();
+    }
+  });
+
+  test("bounds initial Cloud transport retries before runtime start", async () => {
+    resetFakeCloud();
+    FakeCloudSocket.openConnectionFailuresRemaining = 2;
+    const warningSpy = spyOn(console, "warn").mockImplementation(() => {});
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock([]),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("agent-1");
+    try {
+      await expect(asAdvanced(session).initialize()).rejects.toThrow(
+        "Cloud status WebSocket failed to open for connection conn-explicit",
+      );
+      expect(FakeCloudSocket.instances).toHaveLength(4);
+      expect(
+        FakeCloudSocket.allSent().filter((command) => command.type === "runtime_start"),
+      ).toHaveLength(0);
+      expect(
+        FakeCloudSocket.allSent().filter((command) => command.type === "input"),
+      ).toHaveLength(0);
+      expect(
+        warningSpy.mock.calls.map(([line]) => JSON.parse(String(line))),
+      ).toEqual([
+        expect.objectContaining({
+          event: "cloud_status_transport_connection_failed",
+          attempt: 1,
+          max_attempts: 2,
+          will_retry: true,
+          connection_id: "conn-explicit",
+        }),
+        expect.objectContaining({
+          event: "cloud_status_transport_connection_failed",
+          attempt: 2,
+          max_attempts: 2,
+          will_retry: false,
+          connection_id: "conn-explicit",
+        }),
+      ]);
+    } finally {
+      session.close();
+      warningSpy.mockRestore();
     }
   });
 
