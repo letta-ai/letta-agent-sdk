@@ -3,6 +3,8 @@ name: Bump version and release
 run-name: Release @letta-ai/letta-agent-sdk (${{ inputs.cascade_id || 'manual' }})
 
 on:
+  schedule:
+    - cron: "23 * * * *"
   workflow_dispatch:
     inputs:
       version_type:
@@ -27,7 +29,46 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  sync-letta-code:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch release for latest Letta Code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          current_version="$(
+            gh api "repos/${GITHUB_REPOSITORY}/contents/package.json?ref=main" --jq '.content' \
+              | base64 -d \
+              | jq -r '.dependencies["@letta-ai/letta-code"]'
+          )"
+          latest_version="$(npm view @letta-ai/letta-code version)"
+
+          if [[ ! "$latest_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Expected a stable Letta Code version, got '$latest_version'."
+            exit 1
+          fi
+
+          if [ "$current_version" = "$latest_version" ]; then
+            echo "Agent SDK already uses @letta-ai/letta-code@$latest_version."
+            exit 0
+          fi
+
+          cascade_id="letta-code-v${latest_version}-sdk-sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh workflow run release.yml \
+            --ref main \
+            -f version_type=patch \
+            -f prerelease= \
+            -f letta_code_version="$latest_version" \
+            -f cascade_id="$cascade_id"
+
   publish:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: npm-publish
     permissions:
