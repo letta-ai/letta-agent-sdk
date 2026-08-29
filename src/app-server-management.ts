@@ -242,6 +242,14 @@ export class AppServerManagementTransport
     return { messages: response.messages };
   }
 
+  enqueueConversationMessage(): Promise<never> {
+    return Promise.reject(
+      new Error(
+        'conversations.enqueue() is only available with backend: "cloud". App-server backends deliver messages through a session\'s send().',
+      ),
+    );
+  }
+
   private async request<TResponse extends { type: string }>(
     type: string,
     body: Record<string, unknown>,
