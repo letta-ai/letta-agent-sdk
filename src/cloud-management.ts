@@ -16,12 +16,15 @@ import type {
   AgentRepository,
   AgentRepositoryPermissions,
   ConversationMessagesResult,
+  EnqueueMessageOptions,
+  EnqueueMessageResult,
   LettaAgent,
   LettaConversation,
 } from "./management-types.js";
 import type {
   LettaCodeModelEntry,
   ListModelsResult,
+  SendMessage,
 } from "./types.js";
 
 function asAgentRepository(body: unknown, action: string): AgentRepository {
@@ -73,6 +76,27 @@ function cloudModelEntry(
 
 function isNotFound(error: unknown): boolean {
   return error instanceof APIError && error.status === 404;
+}
+
+function asEnqueueMessageResult(body: unknown): EnqueueMessageResult {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new Error("Cloud enqueue message response was not an object.");
+  }
+  const response = body as Record<string, unknown>;
+  if (
+    typeof response.client_message_id !== "string" ||
+    typeof response.workflow_id !== "string" ||
+    typeof response.super_run_id !== "string"
+  ) {
+    throw new Error(
+      "Cloud enqueue message response did not include client_message_id, workflow_id, and super_run_id.",
+    );
+  }
+  return {
+    clientMessageId: response.client_message_id,
+    workflowId: response.workflow_id,
+    superRunId: response.super_run_id,
+  };
 }
 
 /**
@@ -234,5 +258,41 @@ export class CloudManagementTransport implements ManagementTransport {
       toOrderRelativeCursors(query),
     );
     return { messages: page.items };
+  }
+
+  async enqueueConversationMessage(
+    conversationId: string,
+    message: SendMessage,
+    options: EnqueueMessageOptions,
+  ): Promise<EnqueueMessageResult> {
+    const clientMessageId = options.clientMessageId ?? crypto.randomUUID();
+    const settings = {
+      ...(options.workingDirectory !== undefined
+        ? { working_directory: options.workingDirectory }
+        : {}),
+      ...(options.permissionMode !== undefined
+        ? { permission_mode: options.permissionMode }
+        : {}),
+    };
+    const body = await this.client.post<unknown>(
+      `/v1/conversations/${encodeURIComponent(conversationId)}/messages/enqueue`,
+      {
+        body: {
+          ...(options.agentId !== undefined
+            ? { agent_id: options.agentId }
+            : {}),
+          messages: [
+            {
+              role: "user",
+              content: message,
+              client_message_id: clientMessageId,
+            },
+          ],
+          client_message_id: clientMessageId,
+          ...(Object.keys(settings).length > 0 ? { settings } : {}),
+        },
+      },
+    );
+    return asEnqueueMessageResult(body);
   }
 }

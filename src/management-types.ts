@@ -12,7 +12,12 @@ import type {
   ConversationUpdateParams,
 } from "@letta-ai/letta-client/resources/conversations/conversations";
 import type { MessageListParams } from "@letta-ai/letta-client/resources/conversations/messages";
-import type { ListMessagesResult, ListModelsResult } from "./types.js";
+import type {
+  ListMessagesResult,
+  ListModelsResult,
+  PermissionMode,
+  SendMessage,
+} from "./types.js";
 
 /** Agent state returned by either the Cloud API or Letta Code app-server. */
 export type LettaAgent = AgentState;
@@ -99,6 +104,34 @@ export interface ConversationMessagesOptions {
 }
 
 export type ConversationMessagesResult = ListMessagesResult;
+
+export interface EnqueueMessageOptions {
+  /**
+   * Required when `conversationId` is `"default"`; identifies the agent whose
+   * default conversation receives the message. Ignored otherwise.
+   */
+  agentId?: string;
+  /**
+   * Correlation id for this message. Reuse the same value when retrying an
+   * enqueue so the listener can deduplicate delivery; the SDK generates one
+   * when omitted. Matches the `otid` contract of `session.send()`.
+   */
+  clientMessageId?: string;
+  /** Permission mode the listener applies before the turn when the runtime is cold. */
+  permissionMode?: PermissionMode;
+  /** Working directory for the runtime; `null` resets to the listener boot cwd. */
+  workingDirectory?: string | null;
+}
+
+/** The Cloud API's 202 acceptance of an enqueued message. */
+export interface EnqueueMessageResult {
+  /** The correlation id the message was accepted under (caller-supplied or SDK-generated). */
+  clientMessageId: string;
+  /** Temporal workflow id of the conversation queue that owns delivery. */
+  workflowId: string;
+  /** Super run id tracking the message from queue through delivery and completion. */
+  superRunId: string;
+}
 
 export type AgentRepositoryPermissions = "read" | "read_write";
 export type AgentRepositoryRecompileTarget = "default" | false;
@@ -193,4 +226,28 @@ export interface ConversationsClient {
     conversationId: string,
     options?: ConversationMessagesOptions,
   ): Promise<ConversationMessagesResult>;
+  /**
+   * Hand a user message to the server for delivery instead of sending it over
+   * a session. Cloud backend only.
+   *
+   * The returned promise resolves once the Cloud API has durably accepted the
+   * message (HTTP 202): from that point the server owns delivery. It ensures
+   * or resumes the conversation's sandbox, delivers the message to the
+   * listener with acknowledgement and retries, and tracks the whole lifecycle
+   * as a super run. The caller may exit immediately; the turn runs
+   * server-side. This is the send path chat.letta.com uses.
+   *
+   * Use `enqueue()` when you cannot hold a connection open for the length of
+   * a turn, such as serverless webhook handlers. Use a session's `send()` and
+   * `stream()` when you want to stream the turn's output; a session delivers
+   * input over its open socket and does not survive the caller.
+   *
+   * Pass `"default"` as `conversationId` with `options.agentId` to target an
+   * agent's default conversation.
+   */
+  enqueue(
+    conversationId: string,
+    message: SendMessage,
+    options?: EnqueueMessageOptions,
+  ): Promise<EnqueueMessageResult>;
 }

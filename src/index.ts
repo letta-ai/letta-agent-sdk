@@ -174,6 +174,8 @@ export type {
   ConversationMessagesResult,
   DetachAgentRepositoryOptions,
   AgentRepositoryPermissions,
+  EnqueueMessageOptions,
+  EnqueueMessageResult,
 } from "./management-types.js";
 
 export { RepositoriesClient } from "./repositories.js";

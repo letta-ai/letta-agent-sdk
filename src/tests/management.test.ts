@@ -144,6 +144,20 @@ function createManagementFetch(
         archived: true,
       });
     }
+    if (
+      /^\/v1\/conversations\/[^/]+\/messages\/enqueue$/.test(url.pathname) &&
+      method === "POST"
+    ) {
+      const enqueueBody = body as { client_message_id?: string };
+      return jsonResponse(
+        {
+          client_message_id: enqueueBody.client_message_id,
+          workflow_id: "conversation-queue:conv-1",
+          super_run_id: "super-run-1",
+        },
+        { status: 202 },
+      );
+    }
     return jsonResponse({ detail: "not found" }, { status: 404 });
   }) as typeof fetch;
 }
@@ -419,6 +433,149 @@ describe("portable management namespaces", () => {
     );
     expect(Object.fromEntries(requests[0]!.url.searchParams)).toEqual({});
     expect(requests[0]?.body).toBeUndefined();
+  });
+
+  test("enqueues a message over Cloud and returns the acceptance receipt", async () => {
+    const requests: RecordedRequest[] = [];
+    const client = new PortableLettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createManagementFetch(requests),
+    });
+
+    const result = await client.conversations.enqueue("conv-1", "hello", {
+      clientMessageId: "client-message-1",
+    });
+    expect(result).toEqual({
+      clientMessageId: "client-message-1",
+      workflowId: "conversation-queue:conv-1",
+      superRunId: "super-run-1",
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url.pathname).toBe(
+      "/v1/conversations/conv-1/messages/enqueue",
+    );
+    expect(requests[0]?.method).toBe("POST");
+    expect(requests[0]?.body).toEqual({
+      messages: [
+        {
+          role: "user",
+          content: "hello",
+          client_message_id: "client-message-1",
+        },
+      ],
+      client_message_id: "client-message-1",
+    });
+  });
+
+  test("generates a client message id and forwards runtime settings", async () => {
+    const requests: RecordedRequest[] = [];
+    const client = new PortableLettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createManagementFetch(requests),
+    });
+
+    const result = await client.conversations.enqueue(
+      "default",
+      [{ type: "text", text: "hello" }],
+      {
+        agentId: "agent-1",
+        permissionMode: "unrestricted",
+        workingDirectory: null,
+      },
+    );
+    expect(result.clientMessageId).toBeString();
+    expect(result.clientMessageId.length).toBeGreaterThan(0);
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url.pathname).toBe(
+      "/v1/conversations/default/messages/enqueue",
+    );
+    expect(requests[0]?.body).toEqual({
+      agent_id: "agent-1",
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "hello" }],
+          client_message_id: result.clientMessageId,
+        },
+      ],
+      client_message_id: result.clientMessageId,
+      settings: {
+        working_directory: null,
+        permission_mode: "unrestricted",
+      },
+    });
+  });
+
+  test("rejects a default-conversation enqueue without an agent id", async () => {
+    const requests: RecordedRequest[] = [];
+    const client = new PortableLettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createManagementFetch(requests),
+    });
+
+    await expect(
+      client.conversations.enqueue("default", "hello"),
+    ).rejects.toThrow(
+      'enqueue("default", ...) requires options.agentId to identify the agent.',
+    );
+    await expect(
+      client.conversations.enqueue("conv-1", "hello", { clientMessageId: " " }),
+    ).rejects.toThrow("Invalid client message id. Expected a non-empty string.");
+    await expect(
+      client.conversations.enqueue("  ", "hello"),
+    ).rejects.toThrow("Invalid conversation id. Expected a non-empty string.");
+    expect(requests).toHaveLength(0);
+  });
+
+  test("propagates Cloud enqueue rejections and rejects malformed acceptances", async () => {
+    const responses = [
+      new Response(JSON.stringify({ error: "Conversation not found." }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      }),
+      new Response(JSON.stringify({ client_message_id: "client-message-1" }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ];
+    const client = new PortableLettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: (async () => responses.shift()!) as unknown as typeof fetch,
+    });
+
+    await expect(
+      client.conversations.enqueue("conv-missing", "hello"),
+    ).rejects.toThrow("404");
+    await expect(
+      client.conversations.enqueue("conv-1", "hello"),
+    ).rejects.toThrow(
+      "Cloud enqueue message response did not include client_message_id, workflow_id, and super_run_id.",
+    );
+  });
+
+  test("rejects enqueue on the app-server backend as cloud-only", async () => {
+    ManagementSocket.instances = [];
+    const client = new PortableLettaAgentClient({
+      backend: "remote",
+      url: "ws://remote.test/ws",
+      WebSocket: ManagementSocket,
+    });
+
+    await expect(
+      client.conversations.enqueue("conv-1", "hello"),
+    ).rejects.toThrow(
+      'conversations.enqueue() is only available with backend: "cloud".',
+    );
   });
 
   test("rejects an empty fork source before selecting a transport", async () => {
