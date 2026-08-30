@@ -94,6 +94,8 @@ export type {
   SessionDiffHunk,
   SessionDiffPreview,
   SkillSource,
+  SkillItem,
+  AgentSkill,
   DreamingOptions,
   SessionDreamingOptions,
   DreamingTrigger,
