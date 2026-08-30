@@ -1,5 +1,6 @@
 import type Letta from "@letta-ai/letta-client";
 import { RepositoriesClient } from "./repositories.js";
+import { resolveSkillItems, type SkillNodeSupport } from "./skill-loading.js";
 import { createAgentRepositoriesClient } from "./agent-repositories.js";
 import { AppServerManagementTransport } from "./app-server-management.js";
 import {
@@ -227,6 +228,18 @@ export class LettaAgentClientBase {
 
     validateCreateAgentOptions(options);
 
+    // Resolve skill directory paths to inline skills up front so every
+    // backend receives the same shape. Directory loading is Node-only; the
+    // portable client resolves inline skills and rejects paths.
+    if (options.skills !== undefined && options.skills.length > 0) {
+      const nodeSupport = this.skillNodeSupport();
+      const skills = await resolveSkillItems(
+        options.skills,
+        nodeSupport?.loadSkillDirectory,
+      );
+      options = { ...options, skills };
+    }
+
     if (this.backend === "remote") {
       const session = new AppServerSession(this.appServerSessionOptions(), {
         kind: "create-agent",
@@ -237,7 +250,11 @@ export class LettaAgentClientBase {
       return initMsg.agentId;
     }
     if (this.backend === "cloud") {
-      return createCloudAgent(this.getCloudClient(), options);
+      return createCloudAgent(
+        this.getCloudClient(),
+        options,
+        this.skillNodeSupport()?.pushSkillSupportFiles,
+      );
     }
     return this.createLocalAgent(options);
   }
@@ -449,6 +466,15 @@ export class LettaAgentClientBase {
 
   protected createLocalAgent(_options: CreateAgentOptions): Promise<string> {
     throw this.localBackendUnavailableError();
+  }
+
+  /**
+   * Node-only skill seeding support (directory loading, memory-repo git
+   * push). The Node client overrides this; the portable client returns
+   * undefined, which limits skills to inline SKILL.md-only objects.
+   */
+  protected skillNodeSupport(): SkillNodeSupport | undefined {
+    return undefined;
   }
 
   protected createLocalSession(

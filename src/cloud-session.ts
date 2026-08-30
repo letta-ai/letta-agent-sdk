@@ -7,6 +7,11 @@ import {
 } from "@letta-ai/letta-code/app-server-client";
 import { createAgentBody } from "./agent-creation.js";
 import {
+  resolveSkillItems,
+  skillsHaveSupportFiles,
+  type SkillFilesPusher,
+} from "./skill-loading.js";
+import {
   AppServerRuntimeController,
   agentToolNames,
   createExternalToolCallHandler,
@@ -301,11 +306,37 @@ function externalToolsByName(tools: AnyAgentTool[] | undefined): Map<string, Any
 export async function createCloudAgent(
   client: Letta,
   agentOptions: CreateAgentOptions,
+  pushSkillSupportFiles?: SkillFilesPusher,
 ): Promise<string> {
-  const body = await createAgentBody(agentOptions);
+  // Directory paths were already resolved to inline skills by the client
+  // facade; this validates inline skills passed directly.
+  const skills = await resolveSkillItems(agentOptions.skills);
+  const hasSupportFiles = skillsHaveSupportFiles(skills);
+  if (hasSupportFiles && pushSkillSupportFiles === undefined) {
+    throw new Error(
+      "Skill support files (scripts/, references/) require the Node.js " +
+        "package root; the portable client seeds SKILL.md-only skills.",
+    );
+  }
+  const body = await createAgentBody(agentOptions, skills);
   const agent = await client.agents.create(body as AgentCreateParams);
   if (typeof agent.id !== "string" || agent.id.length === 0) {
     throw new Error("Cloud create agent response did not include an agent id.");
+  }
+  // SKILL.md contents rode the create request as memory blocks; support
+  // files (scripts, references) have no block representation and go to the
+  // agent's memory git repo in one follow-up commit.
+  if (hasSupportFiles && pushSkillSupportFiles) {
+    if (typeof client.apiKey !== "string" || client.apiKey.length === 0) {
+      throw new Error(
+        `Agent ${agent.id} was created, but skill support files need an API ` +
+          "key to push to the agent's memory repo and none is configured.",
+      );
+    }
+    await pushSkillSupportFiles(
+      { apiBaseUrl: client.baseURL, apiKey: client.apiKey, agentId: agent.id },
+      skills,
+    );
   }
   return agent.id;
 }
