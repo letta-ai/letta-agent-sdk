@@ -64,7 +64,7 @@ export async function createPresenter(
   
   return createAgentSession({
     model: config.model,
-    systemPrompt: PRESENTER_SYSTEM_PROMPT,
+    instructions: PRESENTER_SYSTEM_PROMPT,
     allowedTools: ['Read', 'Write'],
     permissionMode: 'unrestricted',
   }, client);

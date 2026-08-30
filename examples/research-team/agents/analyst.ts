@@ -65,7 +65,7 @@ export async function createAnalyst(
   
   return createAgentSession({
     model: 'haiku',
-    systemPrompt: ANALYST_SYSTEM_PROMPT,
+    instructions: ANALYST_SYSTEM_PROMPT,
     allowedTools: ['Glob', 'Read', 'Write'],
     permissionMode: 'unrestricted',
   }, client);

@@ -34,25 +34,14 @@ type ExampleCreateOptions = Omit<
   | "memory"
   | "persona"
   | "systemInfoReminder"
->;
+  | "systemPrompt"
+> & {
+  /** Instructions appended to the maintained default harness prompt. */
+  instructions?: string;
+};
 
-// Keep the examples on the current personality and MemFS model. The omitted
-// fields are legacy creation options or internal controls that would distract
-// from the session APIs demonstrated here.
-
-const MEMFS_GUIDANCE = `## Persistent memory
-This agent has a git-backed memory filesystem. Use memory files for durable
-knowledge instead of memory blocks. Keep stable identity and behavior in
-system/ files. Keep project notes, learned preferences, and history in focused
-Markdown files under reference/. Never store secrets in memory.`;
-
-function withMemfsGuidance(
-  systemPrompt: CreateAgentOptions["systemPrompt"],
-): CreateAgentOptions["systemPrompt"] {
-  return typeof systemPrompt === "string"
-    ? `${systemPrompt}\n\n${MEMFS_GUIDANCE}`
-    : systemPrompt;
-}
+// Keep legacy creation-memory fields and internal controls out of the examples.
+// Role instructions append to the maintained harness instead of replacing it.
 
 function sessionOptionsFrom(
   options: ExampleCreateOptions,
@@ -78,8 +67,10 @@ export async function createExampleAgent(
     personality: options.personality,
     model: options.model,
     embedding: options.embedding,
-    systemPrompt: withMemfsGuidance(options.systemPrompt),
-    memfs: options.memfs ?? true,
+    systemPrompt: options.instructions === undefined
+      ? undefined
+      : { type: "preset", preset: "default", append: options.instructions },
+    memfs: options.memfs,
     name: options.name,
     description: options.description,
     hidden: options.hidden,

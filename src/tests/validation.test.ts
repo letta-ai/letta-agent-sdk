@@ -135,6 +135,22 @@ describe("validation", () => {
     }
   });
 
+  test("accepts current managed prompt presets and append configuration", () => {
+    for (const preset of [
+      "default",
+      "letta",
+      "source-claude",
+      "source-codex",
+      "source-gemini",
+    ] as const) {
+      expect(() =>
+        validateCreateAgentOptions({
+          systemPrompt: { type: "preset", preset, append: "Role instructions" },
+        }),
+      ).not.toThrow();
+    }
+  });
+
   test("rejects invalid agent skill source", () => {
     expect(() =>
       validateCreateAgentOptions({

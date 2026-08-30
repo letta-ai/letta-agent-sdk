@@ -110,7 +110,7 @@ export async function getOrCreateAgent(state: ReleaseNotesState): Promise<LettaC
   console.log(`${COLORS.system}Creating new release notes agent...${COLORS.reset}`);
   const session = await createAgentSession({
     model: DEFAULT_CONFIG.model,
-    systemPrompt: SYSTEM_PROMPT,
+    instructions: SYSTEM_PROMPT,
     allowedTools: ['Bash', 'Read', 'Write', 'Glob'],
     permissionMode: 'unrestricted',
   }, client);

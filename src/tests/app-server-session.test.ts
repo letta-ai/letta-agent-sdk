@@ -94,4 +94,28 @@ describe("createAgentBody", () => {
       })).system,
     ).toBe("You are a focused research assistant.");
   });
+
+  test("resolves current and legacy managed prompt presets", async () => {
+    expect((await createAgentBody({ systemPrompt: "default" })).system).toBe(
+      buildSystemPrompt("default", "memfs"),
+    );
+    expect((await createAgentBody({ systemPrompt: "letta-codex" })).system).toBe(
+      buildSystemPrompt("letta", "memfs"),
+    );
+    expect(
+      (await createAgentBody({ memfs: false, systemPrompt: "source-codex" }))
+        .system,
+    ).toBe(buildSystemPrompt("source-codex", "standard"));
+  });
+
+  test("appends instructions to the managed prompt", async () => {
+    const append = "Write concise release notes.";
+    const body = await createAgentBody({
+      systemPrompt: { type: "preset", preset: "default", append },
+    });
+
+    expect(body.system).toBe(
+      `${buildSystemPrompt("default", "memfs")}\n\n${append}`,
+    );
+  });
 });

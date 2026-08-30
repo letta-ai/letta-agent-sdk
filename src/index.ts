@@ -224,11 +224,13 @@ export {
  *
  * @example
  * ```typescript
- * // Create an agent with a git-backed memory filesystem.
+ * // Add role instructions without replacing the maintained harness prompt.
  * const agentId = await createAgent({
- *   memfs: true,
- *   systemPrompt: `You are a helpful coding assistant. Keep durable project
- *     notes in focused Markdown files under reference/.`,
+ *   systemPrompt: {
+ *     type: 'preset',
+ *     preset: 'default',
+ *     append: 'You are a helpful coding assistant for the docs project.',
+ *   },
  *   model: 'claude-sonnet-4',
  *   tags: ['project:docs']
  * });

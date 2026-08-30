@@ -79,7 +79,7 @@ export async function createResearcher(
   
   return createAgentSession({
     model: 'haiku',
-    systemPrompt: RESEARCHER_SYSTEM_PROMPT,
+    instructions: RESEARCHER_SYSTEM_PROMPT,
     allowedTools: ['Glob', 'Read', 'Write'],
     permissionMode: 'unrestricted',
   }, client);

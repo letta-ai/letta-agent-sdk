@@ -70,7 +70,7 @@ export async function createFacultyMember(
   
   return createAgentSession({
     model: config.model,
-    systemPrompt: getFacultySystemPrompt(faculty),
+    instructions: getFacultySystemPrompt(faculty),
     allowedTools: ['Read', 'Write'],
     permissionMode: 'unrestricted',
   }, client);

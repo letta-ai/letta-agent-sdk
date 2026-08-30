@@ -41,7 +41,7 @@ Keep durable messaging lessons in reference/candidate-lessons.md.`;
 export async function createCandidateAgent(): Promise<LettaCodeSession> {
   return createAgentSession({
     model: CONFIG.model,
-    systemPrompt: CANDIDATE_PROMPT,
+    instructions: CANDIDATE_PROMPT,
     permissionMode: 'unrestricted',
   }, client);
 }
@@ -89,7 +89,7 @@ Keep durable changes to your preferences in reference/voter-profile.md.`;
 export async function createVoterAgent(persona: VoterPersona): Promise<LettaCodeSession> {
   return createAgentSession({
     model: CONFIG.model,
-    systemPrompt: buildVoterPrompt(persona),
+    instructions: buildVoterPrompt(persona),
     permissionMode: 'unrestricted',
   }, client);
 }
@@ -125,7 +125,7 @@ Keep durable response patterns in reference/focus-group-patterns.md.`;
 export async function createAnalystAgent(): Promise<LettaCodeSession> {
   return createAgentSession({
     model: CONFIG.model,
-    systemPrompt: ANALYST_PROMPT,
+    instructions: ANALYST_PROMPT,
     permissionMode: 'unrestricted',
   }, client);
 }

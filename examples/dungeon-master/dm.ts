@@ -185,7 +185,7 @@ export async function createDM(state: GameState): Promise<LettaCodeSession> {
     name: 'Dungeon Master',
     description: 'Runs file-backed tabletop role-playing campaigns.',
     baseTools: [],
-    systemPrompt: `You are a Dungeon Master who designs and runs tabletop role-playing campaigns.
+    instructions: `You are a Dungeon Master who designs and runs tabletop role-playing campaigns.
 
 ## Role
 - Create a small game system in ${PATHS.rulebook}.

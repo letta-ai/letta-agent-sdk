@@ -168,13 +168,23 @@ export interface EffectiveDreamingSettings {
  * Available system prompt presets.
  */
 export type SystemPromptPreset =
-  | "default" // Alias for letta-claude
-  | "letta-claude" // Full Letta Code prompt (Claude-optimized)
-  | "letta-codex" // Full Letta Code prompt (Codex-optimized)
-  | "letta-gemini" // Full Letta Code prompt (Gemini-optimized)
-  | "claude" // Basic Claude (no skills/memory instructions)
-  | "codex" // Basic Codex
-  | "gemini"; // Basic Gemini
+  | "default"
+  | "letta"
+  | "source-claude"
+  | "source-codex"
+  | "source-gemini"
+  /** @deprecated Use `letta`. */
+  | "letta-claude"
+  /** @deprecated Use `letta`. */
+  | "letta-codex"
+  /** @deprecated Use `letta`. */
+  | "letta-gemini"
+  /** @deprecated Use `source-claude`. */
+  | "claude"
+  /** @deprecated Use `source-codex`. */
+  | "codex"
+  /** @deprecated Use `source-gemini`. */
+  | "gemini";
 
 /**
  * System prompt preset configuration.

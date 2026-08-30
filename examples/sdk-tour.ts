@@ -10,7 +10,10 @@
  * Run with: bun examples/sdk-tour.ts [example]
  */
 
-import { LettaAgentClient } from '../src/index.js';
+import {
+  LettaAgentClient,
+  type CreateAgentOptions,
+} from '../src/index.js';
 
 const client = new LettaAgentClient({ backend: 'local' });
 
@@ -218,7 +221,7 @@ async function testOptions() {
 
   // Set a system prompt preset when you create the agent.
   console.log('Testing systemPrompt preset...');
-  const systemPromptAgentId = await client.createAgent({ systemPrompt: 'letta-claude' });
+  const systemPromptAgentId = await client.createAgent({ systemPrompt: 'default' });
   const sysPromptSession = client.createSession(systemPromptAgentId, {
     permissionMode: 'unrestricted',
   });
@@ -475,7 +478,10 @@ async function testPermissionCallback() {
 async function testSystemPrompt() {
   console.log('=== System Prompts ===\n');
 
-  async function runWithSystemPrompt(msg: string, systemPrompt: any): Promise<string> {
+  async function runWithSystemPrompt(
+    msg: string,
+    systemPrompt: CreateAgentOptions['systemPrompt'],
+  ): Promise<string> {
     const agentId = await client.createAgent({ systemPrompt });
     const session = client.resumeSession(agentId, { permissionMode: 'unrestricted' });
     await session.send(msg);
@@ -491,16 +497,16 @@ async function testSystemPrompt() {
   console.log('Testing preset system prompt...');
   const presetResult = await runWithSystemPrompt(
     'What kind of agent are you? One sentence.',
-    { type: 'preset', preset: 'letta-claude' }
+    { type: 'preset', preset: 'default' }
   );
-  console.log(`  preset (letta-claude): ${presetResult ? 'PASS' : 'FAIL'}`);
+  console.log(`  preset (default): ${presetResult ? 'PASS' : 'FAIL'}`);
   console.log(`    Response: ${presetResult.slice(0, 80)}...`);
 
   // Test 2: Preset with append
   console.log('Testing preset with append...');
   const appendResult = await runWithSystemPrompt(
     'Say hello',
-    { type: 'preset', preset: 'letta-claude', append: 'Always end your responses with "🎉"' }
+    { type: 'preset', preset: 'default', append: 'Always end your responses with "🎉"' }
   );
   const hasEmoji = appendResult.includes('🎉');
   console.log(`  preset with append: ${hasEmoji ? 'PASS' : 'CHECK'}`);
@@ -518,13 +524,13 @@ async function testSystemPrompt() {
   console.log(`  custom string: ${customResult ? 'PASS' : 'FAIL'}`);
   console.log(`    Response: ${customResult.slice(0, 80)}...`);
 
-  // Test 4: Basic preset (claude - no skills/memory)
-  console.log('Testing basic preset (claude)...');
+  // Test 4: Source-faithful preset (no Letta skills or memory guidance)
+  console.log('Testing source-faithful Claude preset...');
   const basicResult = await runWithSystemPrompt(
     'Hello, just say hi back',
-    { type: 'preset', preset: 'claude' }
+    { type: 'preset', preset: 'source-claude' }
   );
-  console.log(`  basic preset (claude): ${basicResult ? 'PASS' : 'FAIL'}`);
+  console.log(`  source-claude preset: ${basicResult ? 'PASS' : 'FAIL'}`);
 
   console.log();
 }
@@ -536,11 +542,8 @@ async function testSystemPrompt() {
 async function testMemfs() {
   console.log('=== Memory Filesystem ===\n');
 
-  const agentId = await client.createAgent({
-    memfs: true,
-    systemPrompt: `Use focused Markdown files under reference/ for durable
-knowledge. Never store secrets in memory.`,
-  });
+  // Omitting systemPrompt keeps the default harness and its MemFS guidance.
+  const agentId = await client.createAgent();
   await using session = client.resumeSession(agentId, {
     permissionMode: 'unrestricted',
   });
