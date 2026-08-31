@@ -4,6 +4,8 @@ import type { ManagementTransport } from "./management.js";
 import { createLocalAppServerSession } from "./local-app-server-session.js";
 import { startLocalAppServer } from "./local-app-server.js";
 import type { AgentFreeQueryOptions } from "./query-types.js";
+import type { SkillNodeSupport } from "./skill-loading.js";
+import { loadSkillDirectory, pushSkillSupportFiles } from "./skill-node.js";
 import type {
   CreateAgentOptions,
   LettaCodeClientSessionOptions,
@@ -12,6 +14,10 @@ import type {
 } from "./types.js";
 
 export class LettaAgentClient extends LettaAgentClientBase {
+  protected override skillNodeSupport(): SkillNodeSupport {
+    return { loadSkillDirectory, pushSkillSupportFiles };
+  }
+
   protected override createLocalManagementTransport(): ManagementTransport {
     const localOptions = (
       this.options as LettaCodeLocalClientOptions

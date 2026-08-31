@@ -209,6 +209,12 @@ export type MemoryItem =
   | CreateBlock // Custom block: { label, value, description? }
   | BlockReference; // Shared block reference: { blockId }
 
+// Skill seeding types (AgentSkill, SkillItem) live beside their
+// implementation in skill-loading.ts and are re-exported from the package
+// root.
+import type { SkillItem } from "./skill-loading.js";
+export type { AgentSkill, SkillItem } from "./skill-loading.js";
+
 /**
  * Default memory block preset names.
  */
@@ -408,105 +414,28 @@ export type LettaCodeClientOptions =
   | LettaCodeRemoteClientOptions
   | LettaCodeCloudClientOptions;
 
-export interface Repository {
-  id: string;
-  name: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CreateRepositoryParams {
-  name: string;
-}
-
-export interface ListRepositoriesParams {
-  limit?: number;
-  offset?: number;
-}
-
-export interface ListRepositoriesResult {
-  repositories: Repository[];
-  hasNextPage: boolean;
-}
-
-export interface RepositoryResource {
-  type: "repository";
-  repositoryId: string;
-  /**
-   * Whether to trigger a system-prompt recompile after attaching (and after
-   * detaching on cleanup) so the session's conversation does not retain
-   * stale repository projections. Defaults to `true`.
-   */
-  recompile?: boolean;
-}
-
-export interface RepositoryFileEntry {
-  path: string;
-  type: "file" | "directory";
-}
-
-export interface ListRepositoryFilesParams {
-  pathPrefix?: string;
-  depth?: number;
-  ref?: string;
-}
-
-export interface ListRepositoryFilesResult {
-  files: RepositoryFileEntry[];
-  ref: string;
-}
-
-export interface CreateRepositoryFileParams {
-  path: string;
-  content: string;
-}
-
-export interface RepositoryFile {
-  path: string;
-  content: string;
-  contentSha256: string;
-  ref?: string;
-}
-
-export interface UpdateRepositoryFileParams {
-  path: string;
-  content?: string;
-  newPath?: string;
-  precondition?: {
-    contentSha256: string;
-  };
-}
-
-export interface RepositoryFileMutationResult {
-  path: string;
-  contentSha256: string;
-  commitSha: string;
-}
-
-export interface DeleteRepositoryFileParams {
-  path: string;
-}
-
-export interface DeleteRepositoryFileResult {
-  success: boolean;
-  commitSha: string;
-}
-
-export interface RepositoryVersion {
-  sha: string;
-  message: string;
-  timestamp: string;
-  author_name: string | null;
-}
-
-export interface ListRepositoryVersionsParams {
-  path?: string;
-  limit?: number;
-}
-
-export interface GetRepositoryVersionParams {
-  path: string;
-}
+// Letta-hosted repository API types live beside their implementation in
+// repository-types.ts and are re-exported here for compatibility.
+import type { RepositoryResource } from "./repository-types.js";
+export type {
+  Repository,
+  CreateRepositoryParams,
+  ListRepositoriesParams,
+  ListRepositoriesResult,
+  RepositoryResource,
+  RepositoryFileEntry,
+  ListRepositoryFilesParams,
+  ListRepositoryFilesResult,
+  CreateRepositoryFileParams,
+  RepositoryFile,
+  UpdateRepositoryFileParams,
+  RepositoryFileMutationResult,
+  DeleteRepositoryFileParams,
+  DeleteRepositoryFileResult,
+  RepositoryVersion,
+  ListRepositoryVersionsParams,
+  GetRepositoryVersionParams,
+} from "./repository-types.js";
 
 // ═══════════════════════════════════════════════════════════════
 // SESSION OPTIONS
@@ -950,6 +879,19 @@ export interface CreateAgentOptions {
    * @deprecated Prefer `memfs` and let the agent maintain memory files.
    */
   memory?: MemoryItem[];
+
+  /**
+   * Skills to seed into the agent's memory filesystem at creation. Each item
+   * is a path to a skill directory containing SKILL.md (Node runtimes only)
+   * or an inline {@link AgentSkill}.
+   *
+   * SKILL.md instructions ride the create request itself (as the memory
+   * block labeled `skills/{name}`) and are present from the agent's first
+   * turn. Skill support files (scripts, references) are pushed to the
+   * agent's memory repo immediately after creation; that second step
+   * currently requires the Cloud backend. Requires memfs (the default).
+   */
+  skills?: SkillItem[];
 
   /** @deprecated Prefer a personality preset or a system memory file. */
   persona?: string;

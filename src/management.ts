@@ -15,6 +15,8 @@ import type {
   ConversationsClient,
   ConversationMessagesResult,
   CreateConversationOptions,
+  EnqueueMessageOptions,
+  EnqueueMessageResult,
   ForkConversationOptions,
   LettaAgent,
   LettaConversation,
@@ -25,7 +27,7 @@ import type {
   UpdateConversationOptions,
   ConversationMessagesOptions,
 } from "./management-types.js";
-import type { ListModelsResult } from "./types.js";
+import type { ListModelsResult, SendMessage } from "./types.js";
 
 export interface ManagementTransport {
   listAgents(query: AgentListParams): Promise<LettaAgent[]>;
@@ -57,6 +59,12 @@ export interface ManagementTransport {
     conversationId: string,
     query: MessageListParams,
   ): Promise<ConversationMessagesResult>;
+  /** Cloud only. Non-cloud transports reject with a backend error. */
+  enqueueConversationMessage(
+    conversationId: string,
+    message: SendMessage,
+    options: EnqueueMessageOptions,
+  ): Promise<EnqueueMessageResult>;
 }
 
 type TransportProvider = () => ManagementTransport;
@@ -227,5 +235,24 @@ export function createConversationsClient(
         conversationId,
         conversationMessagesQuery(options),
       ),
+    enqueue: async (conversationId, message, options = {}) => {
+      assertNonEmptyId(conversationId, "conversation id");
+      if (conversationId.trim() === "default" && !options.agentId) {
+        throw new Error(
+          'enqueue("default", ...) requires options.agentId to identify the agent.',
+        );
+      }
+      if (options.agentId !== undefined) {
+        assertNonEmptyId(options.agentId, "agent id");
+      }
+      if (options.clientMessageId !== undefined) {
+        assertNonEmptyId(options.clientMessageId, "client message id");
+      }
+      return await transport().enqueueConversationMessage(
+        conversationId,
+        message,
+        options,
+      );
+    },
   };
 }

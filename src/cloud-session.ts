@@ -7,6 +7,11 @@ import {
 } from "@letta-ai/letta-code/app-server-client";
 import { createAgentBody } from "./agent-creation.js";
 import {
+  resolveSkillItems,
+  skillsHaveSupportFiles,
+  type SkillFilesPusher,
+} from "./skill-loading.js";
+import {
   AppServerRuntimeController,
   agentToolNames,
   createExternalToolCallHandler,
@@ -66,6 +71,7 @@ const DEFAULT_SANDBOX_READY_TIMEOUT_MS = 120_000;
 const DEFAULT_SANDBOX_READY_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_REPOSITORY_ATTACH_TIMEOUT_MS = 10_000;
 const DEFAULT_REPOSITORY_ATTACH_POLL_INTERVAL_MS = 250;
+const INITIAL_CLOUD_TRANSPORT_ATTEMPTS = 2;
 const SDK_AGENT_ORIGIN = "@letta-ai/letta-agent-sdk";
 
 type CloudRuntimeStartResponse = ProtocolMessage & {
@@ -308,11 +314,37 @@ function externalToolsByName(tools: AnyAgentTool[] | undefined): Map<string, Any
 export async function createCloudAgent(
   client: Letta,
   agentOptions: CreateAgentOptions,
+  pushSkillSupportFiles?: SkillFilesPusher,
 ): Promise<string> {
-  const body = await createAgentBody(agentOptions);
+  // Directory paths were already resolved to inline skills by the client
+  // facade; this validates inline skills passed directly.
+  const skills = await resolveSkillItems(agentOptions.skills);
+  const hasSupportFiles = skillsHaveSupportFiles(skills);
+  if (hasSupportFiles && pushSkillSupportFiles === undefined) {
+    throw new Error(
+      "Skill support files (scripts/, references/) require the Node.js " +
+        "package root; the portable client seeds SKILL.md-only skills.",
+    );
+  }
+  const body = await createAgentBody(agentOptions, skills);
   const agent = await client.agents.create(body as AgentCreateParams);
   if (typeof agent.id !== "string" || agent.id.length === 0) {
     throw new Error("Cloud create agent response did not include an agent id.");
+  }
+  // SKILL.md contents rode the create request as memory blocks; support
+  // files (scripts, references) have no block representation and go to the
+  // agent's memory git repo in one follow-up commit.
+  if (hasSupportFiles && pushSkillSupportFiles) {
+    if (typeof client.apiKey !== "string" || client.apiKey.length === 0) {
+      throw new Error(
+        `Agent ${agent.id} was created, but skill support files need an API ` +
+          "key to push to the agent's memory repo and none is configured.",
+      );
+    }
+    await pushSkillSupportFiles(
+      { apiBaseUrl: client.baseURL, apiKey: client.apiKey, agentId: agent.id },
+      skills,
+    );
   }
   return agent.id;
 }
@@ -416,34 +448,10 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     runtime: RuntimeScope,
     connectionId: string,
   ): Promise<RuntimeSessionInit> {
-    const apiKey = getCloudApiKey(this.cloudOptions);
-    const url = buildCloudStatusWebSocketUrl({
-      apiBaseUrl: this.cloudOptions.apiBaseUrl,
-      connectionId,
-      agentId: runtime.agent_id,
-      conversationId: runtime.conversation_id,
-      apiKey,
-      authMode: this.cloudOptions.webSocketAuth ?? "header",
-    });
-    const client = applyUniqueRequestIds(createAppServerClient({
-      url,
-      WebSocket: createCloudStatusTransportConstructor({
-        url,
-        WebSocket: getWebSocketConstructor(this.cloudOptions.WebSocket),
-        ...((this.cloudOptions.webSocketAuth ?? "header") === "header"
-          ? { headers: cloudWebSocketHeaders(this.cloudOptions) }
-          : {}),
-        pingIntervalMs:
-          this.cloudOptions.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS,
-        runtime,
-      }),
-      requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
-    }));
+    const client = await this.connectCloudTransport(runtime, connectionId);
     const options = this.currentOptions();
-    this.installTransportHandlers(client);
 
     try {
-      await client.connect();
       const response = await this.startCloudRuntime(client, runtime);
       if (!response.success || !response.runtime) {
         throw new Error(response.error ?? "Failed to start Cloud status runtime");
@@ -491,6 +499,84 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       client.close();
       throw error;
     }
+  }
+
+  private createCloudTransportClient(
+    runtime: RuntimeScope,
+    connectionId: string,
+  ): AppServerClient {
+    const apiKey = getCloudApiKey(this.cloudOptions);
+    const url = buildCloudStatusWebSocketUrl({
+      apiBaseUrl: this.cloudOptions.apiBaseUrl,
+      connectionId,
+      agentId: runtime.agent_id,
+      conversationId: runtime.conversation_id,
+      apiKey,
+      authMode: this.cloudOptions.webSocketAuth ?? "header",
+    });
+    return applyUniqueRequestIds(createAppServerClient({
+      url,
+      WebSocket: createCloudStatusTransportConstructor({
+        url,
+        WebSocket: getWebSocketConstructor(this.cloudOptions.WebSocket),
+        ...((this.cloudOptions.webSocketAuth ?? "header") === "header"
+          ? { headers: cloudWebSocketHeaders(this.cloudOptions) }
+          : {}),
+        pingIntervalMs:
+          this.cloudOptions.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS,
+        runtime,
+      }),
+      requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
+    }));
+  }
+
+  private async connectCloudTransport(
+    runtime: RuntimeScope,
+    initialConnectionId: string,
+  ): Promise<AppServerClient> {
+    let connectionId = initialConnectionId;
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt < INITIAL_CLOUD_TRANSPORT_ATTEMPTS; attempt++) {
+      const client = this.createCloudTransportClient(runtime, connectionId);
+      this.installTransportHandlers(client);
+
+      try {
+        await client.connect();
+        this.connectionId = connectionId;
+        return client;
+      } catch (error) {
+        lastError = error;
+        console.warn(
+          JSON.stringify({
+            event: "cloud_status_transport_connection_failed",
+            attempt: attempt + 1,
+            max_attempts: INITIAL_CLOUD_TRANSPORT_ATTEMPTS,
+            will_retry:
+              attempt + 1 < INITIAL_CLOUD_TRANSPORT_ATTEMPTS,
+            connection_id: connectionId,
+            agent_id: runtime.agent_id,
+            conversation_id: runtime.conversation_id,
+            error_name: error instanceof Error ? error.name : null,
+            error_message:
+              error instanceof Error ? error.message : String(error),
+          }),
+        );
+        this.cleanupTransportHandlers();
+        client.close();
+      }
+
+      if (attempt + 1 < INITIAL_CLOUD_TRANSPORT_ATTEMPTS) {
+        const resolved = await this.resolveRecoveryConnection(runtime);
+        connectionId = resolved.connectionId;
+      }
+    }
+
+    const detail = lastError instanceof Error ? lastError.message : String(lastError);
+    throw new Error(
+      `Cloud status WebSocket failed to open for connection ${connectionId}: ${detail}`,
+      { cause: lastError },
+    );
   }
 
   private installTransportHandlers(client: AppServerClient): void {
