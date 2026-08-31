@@ -171,6 +171,10 @@ export class RemoteTurnCoordinator {
         this.handleLoopStatusMessage(message);
         return;
       }
+      if (message.type === "update_loop_status" && statusRunIds.length === 0) {
+        trailingUsageTurn.deferredMessages.push(message);
+        return;
+      }
       const isTurnScoped =
         deferredDelta !== null ||
         message.type === "update_loop_status" ||

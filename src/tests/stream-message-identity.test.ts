@@ -1136,6 +1136,74 @@ describe("remote turn terminal receipts", () => {
     coordinator.close();
   });
 
+  test("does not treat empty-run loop status as successor evidence", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "finished",
+        run_id: "run-empty-status",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-empty-status",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-empty-status",
+        run_id: "run-empty-status",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "update_loop_status",
+        runtime,
+        loop_status: {
+          status: "WAITING_ON_INPUT",
+          active_run_ids: [],
+        },
+      },
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "usage_statistics",
+        total_tokens: 12,
+      }),
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "stream_event",
+      event: { message_type: "usage_statistics", total_tokens: 12 },
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "loop_status",
+      status: "WAITING_ON_INPUT",
+      activeRunIds: [],
+    });
+    coordinator.close();
+  });
+
   test("activates a queued turn from its terminal receipt", async () => {
     const coordinator = new RemoteTurnCoordinator({
       label: "test",
