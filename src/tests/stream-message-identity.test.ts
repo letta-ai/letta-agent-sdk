@@ -936,6 +936,138 @@ describe("remote turn terminal receipts", () => {
     expect(await coordinator.nextMessage()).toBeNull();
   });
 
+  test("defers successor errors and loop status during the prior turn's usage grace", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "first",
+        run_id: "run-first-before-error",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-first-before-error",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-first-before-error",
+        run_id: "run-first-before-error",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "error_message",
+        error: "second failed",
+        run_id: "run-second-error",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "update_loop_status",
+        runtime,
+        loop_status: {
+          status: "WAITING_ON_INPUT",
+          active_run_ids: ["run-second-error"],
+        },
+      },
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      runIds: ["run-first-before-error"],
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "error",
+      runId: "run-second-error",
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: false,
+      runIds: ["run-second-error"],
+    });
+    coordinator.close();
+  });
+
+  test("drains deferred canonical terminals before transport close", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.trackSentTurn(runtime);
+    for (const [ordinal, runId] of [
+      ["first", "run-first-before-close"],
+      ["second", "run-second-before-close"],
+    ] as const) {
+      coordinator.handleProtocolMessage(
+        streamDelta(runtime, {
+          message_type: "assistant_message",
+          content: ordinal,
+          run_id: runId,
+        }),
+        runtime,
+      );
+      coordinator.handleProtocolMessage(
+        streamDelta(runtime, {
+          message_type: "stop_reason",
+          stop_reason: "end_turn",
+          run_id: runId,
+        }),
+        runtime,
+      );
+      coordinator.handleProtocolMessage(
+        {
+          type: "turn_finished",
+          runtime,
+          turn_id: `turn-${ordinal}-before-close`,
+          run_id: runId,
+          stop_reason: "end_turn",
+        },
+        runtime,
+      );
+    }
+    coordinator.closeWithError("socket closed");
+
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "assistant",
+      content: "first",
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      runIds: ["run-first-before-close"],
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "assistant",
+      content: "second",
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      runIds: ["run-second-before-close"],
+    });
+    expect(await coordinator.nextMessage()).toBeNull();
+  });
+
   test("activates a queued turn from its terminal receipt", async () => {
     const coordinator = new RemoteTurnCoordinator({
       label: "test",

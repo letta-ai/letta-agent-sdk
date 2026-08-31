@@ -143,6 +143,15 @@ export class RemoteTurnCoordinator {
       return;
     }
 
+    if (message.type === "update_queue") {
+      const sdkMessage: SDKQueueUpdateMessage = {
+        type: "queue_update",
+        queue: queueItems(message),
+      };
+      this.enqueue(sdkMessage);
+      return;
+    }
+
     const deferredDelta = streamDeltaRecord(message);
     const deferredMessageType = deferredDelta
       ? streamDeltaMessageType(deferredDelta)
@@ -151,30 +160,16 @@ export class RemoteTurnCoordinator {
       ? this.activeTurn
       : null;
     if (trailingUsageTurn) {
-      const successorEvidence =
-        deferredMessageType === "assistant_message" ||
-        deferredMessageType === "reasoning_message" ||
-        deferredMessageType === "tool_call_message" ||
-        deferredMessageType === "tool_return_message" ||
-        deferredMessageType === "stop_reason" ||
-        turnFinishedRecord(message) !== null;
       if (
-        successorEvidence ||
+        deferredMessageType !== "usage_statistics" ||
         (deferredMessageType === "usage_statistics" && trailingUsageTurn.deferredTurnEvidence)
       ) {
         trailingUsageTurn.deferredMessages.push(message);
-        if (successorEvidence) trailingUsageTurn.deferredTurnEvidence = true;
+        if (deferredMessageType !== "usage_statistics") {
+          trailingUsageTurn.deferredTurnEvidence = true;
+        }
         return;
       }
-    }
-
-    if (message.type === "update_queue") {
-      const sdkMessage: SDKQueueUpdateMessage = {
-        type: "queue_update",
-        queue: queueItems(message),
-      };
-      this.enqueue(sdkMessage);
-      return;
     }
 
     if (message.type === "update_loop_status") {
@@ -228,18 +223,18 @@ export class RemoteTurnCoordinator {
    */
   closeWithError(detail: string): void {
     if (this.closed) return;
+    let completedCanonicalTurn = false;
+    while (this.activeTurn?.pendingTerminal && this.activeTurn.pendingTerminalTimeout) {
+      this.completeActiveTurn(this.activeTurn.pendingTerminal);
+      completedCanonicalTurn = true;
+    }
     const active = this.activeTurn;
     if (active) {
-      if (active.pendingTerminal && active.pendingTerminalTimeout) {
-        this.completeActiveTurn(active.pendingTerminal);
-        this.close();
-        return;
-      }
       this.failTurn(active, detail, {
         errorCode: "stream_closed",
         recoverable: true,
       });
-    } else {
+    } else if (!completedCanonicalTurn) {
       this.enqueue({
         type: "error",
         message: detail,
