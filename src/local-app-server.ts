@@ -99,7 +99,7 @@ export function buildLocalAppServerArgs(
   return [
     cliPath,
     ...(options.backend !== undefined ? ["--backend", options.backend] : []),
-    "app-server",
+    "server",
     "--listen",
     options.listen ?? DEFAULT_LISTEN_URL,
   ];

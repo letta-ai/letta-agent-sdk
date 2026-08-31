@@ -732,6 +732,24 @@ describe("LettaAgentClient", () => {
     );
   });
 
+  test("rejects agent-free queries on the SDK-owned local harness backend", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({ backend: "local" });
+
+    await expect(async () => {
+      for await (const _message of client.query({
+        prompt: "hello",
+        options: {
+          model: "openai/gpt-5.6-luna",
+          system: "Answer directly.",
+        },
+      })) {
+        // The query must fail before starting an App Server.
+      }
+    }).toThrow('query() requires the API-backed App Server');
+    expect(FakeAppServerSocket.instances).toHaveLength(0);
+  });
+
   test("restricts filesystem confinement to SDK-owned local app-server processes", () => {
     const localClient = new LettaAgentClient({ backend: "local" });
     expect(() =>

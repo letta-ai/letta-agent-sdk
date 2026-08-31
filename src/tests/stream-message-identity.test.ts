@@ -507,6 +507,7 @@ describe("remote turn terminal receipts", () => {
       expect(await coordinator.nextMessage()).toMatchObject({
         type: "result",
         success: false,
+        error: "terminal failure",
         errorCode: "error",
         errorDetail: "terminal failure",
         stopReason,

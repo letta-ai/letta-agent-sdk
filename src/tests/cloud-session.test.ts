@@ -2881,7 +2881,7 @@ describe("CloudEnvironmentSession", () => {
     expect(result).toMatchObject({
       type: "result",
       success: false,
-      error: "error",
+      error: "cloud turn failed",
       errorCode: "error",
       errorDetail: "cloud turn failed",
       conversationId: "default",
@@ -2912,7 +2912,7 @@ describe("CloudEnvironmentSession", () => {
     expect(result).toMatchObject({
       type: "result",
       success: false,
-      error: "error",
+      error: "delayed cloud turn failed",
       errorCode: "error",
       errorDetail: "delayed cloud turn failed",
       conversationId: "default",

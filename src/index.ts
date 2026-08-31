@@ -335,7 +335,10 @@ export async function prompt(
 
 /** Run an agent-free query in a new ephemeral conversation. */
 export function query(params: QueryParams): Query {
-  return new LettaAgentClient().query(params);
+  return new LettaAgentClient({
+    backend: "local",
+    appServer: { harnessBackend: "api" },
+  }).query(params);
 }
 
 // ═══════════════════════════════════════════════════════════════

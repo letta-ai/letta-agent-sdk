@@ -1,14 +1,15 @@
 # Stateless conversations
 
-Use `query()` when you need one model turn but do not need an agent, memory, or
-a resumable conversation. Each call creates an ephemeral conversation, streams
-its messages, and closes the runtime when iteration ends.
+Use `query()` when you need one model turn but do not need an agent or memory.
+Each call creates an ephemeral conversation, streams its messages, and closes
+the runtime when iteration ends. Stateless means agent-free, not storage-free:
+the conversation and its messages remain persisted and archived in Letta Cloud.
 
 This example includes three patterns:
 
 1. stream a direct answer;
 2. collect and parse a structured result;
-3. run several independent queries concurrently.
+3. run several independent queries with the same client.
 
 No example creates an agent.
 

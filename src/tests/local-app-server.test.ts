@@ -9,7 +9,7 @@ describe("buildLocalAppServerArgs", () => {
   test("starts the app-server on an ephemeral loopback port by default", () => {
     expect(buildLocalAppServerArgs("/path/to/letta.js")).toEqual([
       "/path/to/letta.js",
-      "app-server",
+      "server",
       "--listen",
       "ws://127.0.0.1:0",
     ]);
@@ -23,7 +23,7 @@ describe("buildLocalAppServerArgs", () => {
       "/path/to/letta.js",
       "--backend",
       "api",
-      "app-server",
+      "server",
       "--listen",
       "ws://127.0.0.1:1234",
     ]);
@@ -39,7 +39,7 @@ describe("buildLocalAppServerProcess", () => {
     expect(processSpec.command).toBe(process.execPath);
     expect(processSpec.args).toEqual([
       "/path/to/letta.js",
-      "app-server",
+      "server",
       "--listen",
       "ws://127.0.0.1:0",
     ]);
@@ -71,7 +71,7 @@ describe("buildLocalAppServerProcess", () => {
     expect(confinementInput.launcher).toEqual([
       process.execPath,
       "/path/to/letta.js",
-      "app-server",
+      "server",
       "--listen",
       "ws://127.0.0.1:0",
     ]);

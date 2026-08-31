@@ -8,7 +8,7 @@ Run `bun install` from the repository root before you start. The examples import
 
 | Example | What it teaches | Backend | Side effects |
 | --- | --- | --- | --- |
-| [`stateless-conversations/`](./stateless-conversations) | Streaming, structured results, and concurrent one-turn questions without an agent | Local App Server + API backend | Creates ephemeral conversations; does not create agents |
+| [`stateless-conversations/`](./stateless-conversations) | Streaming, structured results, and independent one-turn questions without an agent | Local App Server + API backend | Persists archived ephemeral conversations; does not create agents |
 | [`sdk-tour.ts`](./sdk-tour.ts) | Agent creation, streaming, conversations, tools, permissions, and MemFS | Local | Creates local agents and can run tools |
 | [`custom-tools/`](./custom-tools) | Tools that execute in your SDK process for a Cloud agent | Cloud | Creates a Cloud agent and runs local functions |
 | [`dungeon-master/`](./dungeon-master) | One persistent agent with visible files and resumable state | Local | Writes a rulebook, campaign files, and `state.json` |

@@ -614,12 +614,16 @@ export class RemoteTurnCoordinator {
     const errorCode = approvalConflict
       ? "approval_conflict"
       : (turn.errorCode ?? toSdkErrorCode(stopReason));
+    const publicError =
+      errorCode && errorCode !== "error"
+        ? errorCode
+        : (turn.detail ?? stopReason ?? "error");
 
     return {
       type: "result",
       success,
       result: success ? tracker?.assistantText || undefined : undefined,
-      error: success ? undefined : (errorCode ?? stopReason ?? "error"),
+      error: success ? undefined : publicError,
       errorCode: success ? undefined : (errorCode ?? "error"),
       approvalConflict: approvalConflict || undefined,
       recoverable: approvalConflict

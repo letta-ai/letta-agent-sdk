@@ -86,27 +86,26 @@ async function extractStructuredData(): Promise<void> {
   console.log(request);
 }
 
-async function runQueriesConcurrently(): Promise<void> {
-  console.log("\n3. Run independent queries concurrently\n");
+async function runIndependentQueries(): Promise<void> {
+  console.log("\n3. Run independent queries\n");
 
   const questions = [
     "Name the largest ocean on Earth.",
     "Name the smallest prime number.",
     "Name the chemical symbol for gold.",
   ];
-  const answers = await Promise.all(
-    questions.map(async (prompt) => {
-      const { result } = await collectQuery({
-        prompt,
-        options: {
-          model: "openai/gpt-5.6-luna",
-          system: "Answer with only the requested name, number, or symbol.",
-          allowedTools: [],
-        },
-      });
-      return result.result;
-    }),
-  );
+  const answers = [];
+  for (const prompt of questions) {
+    const { result } = await collectQuery({
+      prompt,
+      options: {
+        model: "openai/gpt-5.6-luna",
+        system: "Answer with only the requested name, number, or symbol.",
+        allowedTools: [],
+      },
+    });
+    answers.push(result.result);
+  }
 
   for (const [index, question] of questions.entries()) {
     console.log(`${question} ${answers[index]}`);
@@ -115,4 +114,4 @@ async function runQueriesConcurrently(): Promise<void> {
 
 await streamDirectAnswer();
 await extractStructuredData();
-await runQueriesConcurrently();
+await runIndependentQueries();
