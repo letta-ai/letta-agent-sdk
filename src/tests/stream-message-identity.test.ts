@@ -736,6 +736,99 @@ describe("remote turn terminal receipts", () => {
     coordinator.close();
   });
 
+  test("defers a queued successor arriving during the prior turn's usage grace", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "first",
+        run_id: "run-first-grace",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-first-grace",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-first-grace",
+        run_id: "run-first-grace",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "second",
+        run_id: "run-second-during-grace",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-second-during-grace",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "usage_statistics",
+        total_tokens: 222,
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-second-during-grace",
+        run_id: "run-second-during-grace",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "assistant",
+      content: "first",
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      result: "first",
+      runIds: ["run-first-grace"],
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "assistant",
+      content: "second",
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "stream_event",
+      event: { message_type: "usage_statistics", total_tokens: 222 },
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      result: "second",
+      runIds: ["run-second-during-grace"],
+    });
+    coordinator.close();
+  });
+
   test("activates a queued turn from its terminal receipt", async () => {
     const coordinator = new RemoteTurnCoordinator({
       label: "test",

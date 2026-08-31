@@ -822,7 +822,7 @@ describe("CloudEnvironmentSession", () => {
     );
   });
 
-  test("settles from hosted turn_finished when usage follows on another channel", async () => {
+  test("keeps hosted usage after stop ahead of the terminal result", async () => {
     resetFakeCloud();
     FakeCloudSocket.scenario = "usage_after_stop";
     const requests: RecordedRequest[] = [];
@@ -844,9 +844,17 @@ describe("CloudEnvironmentSession", () => {
 
       expect(messages.map((message) => message.type)).toEqual([
         "assistant",
+        "stream_event",
         "result",
       ]);
       expect(messages[1]).toMatchObject({
+        type: "stream_event",
+        event: {
+          message_type: "usage_statistics",
+          step_count: 3,
+        },
+      });
+      expect(messages[2]).toMatchObject({
         type: "result",
         success: true,
         runIds: ["run-cloud-usage"],

@@ -43,6 +43,7 @@ type RemoteTurnCoordinatorConfig = {
 };
 
 const MAX_RECENTLY_SETTLED_RUN_IDS = 256;
+const TRAILING_USAGE_GRACE_MS = 100;
 
 /**
  * Owns the portable session's turn correlation and stream queue.
@@ -102,6 +103,8 @@ export class RemoteTurnCoordinator {
       observedTurnEvidence: false,
       observedRequiresApprovalStop: false,
       pendingTerminal: null,
+      pendingTerminalTimeout: null,
+      deferredMessages: [],
       abortRequested: false,
       timeout: null,
     };
@@ -116,6 +119,7 @@ export class RemoteTurnCoordinator {
 
   removeTrackedTurn(turn: TurnTracker): void {
     if (turn.timeout) clearTimeout(turn.timeout);
+    if (turn.pendingTerminalTimeout) clearTimeout(turn.pendingTerminalTimeout);
     if (this.activeTurn === turn) {
       this.activeTurn = null;
       return;
@@ -135,6 +139,21 @@ export class RemoteTurnCoordinator {
     if (statusRecord) {
       const status = toSessionDeviceStatus(statusRecord);
       if (status) this.onDeviceStatus(status);
+      return;
+    }
+
+    const deferredDelta = streamDeltaRecord(message);
+    const deferredMessageType = deferredDelta
+      ? streamDeltaMessageType(deferredDelta)
+      : undefined;
+    if (
+      this.activeTurn?.pendingTerminalTimeout &&
+      (
+        deferredMessageType !== "usage_statistics" ||
+        this.activeTurn.deferredMessages.length > 0
+      )
+    ) {
+      this.activeTurn.deferredMessages.push(message);
       return;
     }
 
@@ -221,8 +240,12 @@ export class RemoteTurnCoordinator {
     if (this.closed) return;
     this.closed = true;
     if (this.activeTurn?.timeout) clearTimeout(this.activeTurn.timeout);
+    if (this.activeTurn?.pendingTerminalTimeout) {
+      clearTimeout(this.activeTurn.pendingTerminalTimeout);
+    }
     for (const turn of this.pendingTurns) {
       if (turn.timeout) clearTimeout(turn.timeout);
+      if (turn.pendingTerminalTimeout) clearTimeout(turn.pendingTerminalTimeout);
     }
     this.activeTurn = null;
     this.pendingTurns.length = 0;
@@ -282,9 +305,17 @@ export class RemoteTurnCoordinator {
       clearTimeout(active.timeout);
       active.timeout = null;
     }
+    if (active.pendingTerminalTimeout) {
+      clearTimeout(active.pendingTerminalTimeout);
+      active.pendingTerminalTimeout = null;
+    }
+    const deferredMessages = active.deferredMessages.splice(0);
     this.rememberSettledRunIds(active.runIds);
     this.enqueue(this.resultFromTurn(turn, active));
     this.activeTurn = null;
+    for (const message of deferredMessages) {
+      this.handleProtocolMessage(message, active.runtime);
+    }
   }
 
   private rememberSettledRunIds(runIds: Iterable<string>): void {
@@ -385,6 +416,15 @@ export class RemoteTurnCoordinator {
       ...(success ? {} : { errorCode: errorCode ?? "error" }),
       ...(finished.error ? { detail: finished.error } : {}),
     } satisfies RuntimeTurnResult;
+    if (active.pendingTerminal) {
+      active.pendingTerminal = terminal;
+      if (active.timeout) {
+        clearTimeout(active.timeout);
+        active.timeout = null;
+      }
+      this.schedulePendingTerminal(active);
+      return;
+    }
     this.completeActiveTurn(terminal);
   }
 
@@ -401,8 +441,8 @@ export class RemoteTurnCoordinator {
         active.observedRequiresApprovalStop = true;
         return;
       }
-      // Keep the stop reason as a fallback until the correlated
-      // turn_finished receipt provides canonical completion.
+      // Hosted streams send final usage after stop_reason. Keep result last so
+      // consumers that stop at result cannot miss the accounting event.
       active.pendingTerminal = {
         runtime: active.runtime,
         stopReason,
@@ -412,9 +452,9 @@ export class RemoteTurnCoordinator {
     }
 
     if (messageType === "usage_statistics" && active.pendingTerminal) {
-      // Usage frames carry no run id, so they cannot safely settle a turn when
-      // several sends are queued. The correlated turn_finished receipt owns
-      // completion; usage remains observable in the stream.
+      if (active.pendingTerminalTimeout) {
+        this.completeActiveTurn(active.pendingTerminal);
+      }
       return;
     }
 
@@ -428,6 +468,15 @@ export class RemoteTurnCoordinator {
         errorCode: sdkMessage.errorCode,
       });
     }
+  }
+
+  private schedulePendingTerminal(active: TurnTracker): void {
+    if (active.pendingTerminalTimeout) return;
+    active.pendingTerminalTimeout = setTimeout(() => {
+      if (this.activeTurn !== active || !active.pendingTerminal) return;
+      this.completeActiveTurn(active.pendingTerminal);
+    }, TRAILING_USAGE_GRACE_MS);
+    (active.pendingTerminalTimeout as { unref?: () => void }).unref?.();
   }
 
   private transformStreamDelta(
