@@ -39,6 +39,7 @@ class FakeAppServerSocket {
     | "delayedApprovalRequest"
     | "manualApprovalWait"
     | "queuedSecond"
+    | "terminalWithoutUsage"
     | "hang" = "normal";
   static failNextRuntimeStart = false;
   static deferReflectionSettingsResponse = false;
@@ -683,6 +684,25 @@ function fakeAppServerHandle(
       },
     };
     emitStream(assistantDelta);
+    if (FakeAppServerSocket.inputScenario === "terminalWithoutUsage") {
+      emitStream({
+        type: "stream_delta",
+        runtime,
+        delta: {
+          message_type: "stop_reason",
+          stop_reason: "end_turn",
+          run_id: "run-1",
+        },
+      });
+      emitStream({
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-run-1",
+        run_id: "run-1",
+        stop_reason: "end_turn",
+      });
+      return;
+    }
     emitSuccessfulTerminal("run-1");
   }
 }
@@ -1042,6 +1062,30 @@ describe("LettaAgentClient", () => {
       expect(payload).not.toHaveProperty("supports_control_response");
       expect(payload).not.toHaveProperty("source");
     } finally {
+      session.close();
+    }
+  });
+
+  test("result-only turns settle when terminal usage is absent", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.inputScenario = "terminalWithoutUsage";
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "http://127.0.0.1:4500",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    const session = client.createSession("agent-123");
+    try {
+      const result = await asAdvanced(session).sendAndWaitForResult("hello");
+      expect(result).toMatchObject({
+        type: "result",
+        success: true,
+        result: "hello from app-server",
+        runIds: ["run-1"],
+      });
+    } finally {
+      FakeAppServerSocket.inputScenario = "normal";
       session.close();
     }
   });

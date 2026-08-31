@@ -413,6 +413,144 @@ describe("remote turn terminal receipts", () => {
     coordinator.close();
   });
 
+  test("settles after turn_finished when trailing usage never arrives", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "done without usage",
+        run_id: "run-no-usage",
+        id: "message-no-usage",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-no-usage",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-no-usage",
+        run_id: "run-no-usage",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "assistant",
+      content: "done without usage",
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      result: "done without usage",
+      runIds: ["run-no-usage"],
+    });
+    expect(coordinator.hasInFlightTurn()).toBe(false);
+    coordinator.close();
+  });
+
+  test("does not let the request timeout override a canonical terminal", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      requestTimeoutMs: 5,
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "finished",
+        run_id: "run-short-timeout",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-short-timeout",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-short-timeout",
+        run_id: "run-short-timeout",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      result: "finished",
+    });
+    coordinator.close();
+  });
+
+  test("drops usage that arrives after the fallback result", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "finished",
+        run_id: "run-late-usage",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-late-usage",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-late-usage",
+        run_id: "run-late-usage",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "result" });
+
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "usage_statistics",
+        total_tokens: 12,
+      }),
+      runtime,
+    );
+    const next = coordinator.nextMessage();
+    coordinator.close();
+    expect(await next).toBeNull();
+  });
+
   test("ignores a turn_finished receipt for a different active run", async () => {
     const coordinator = new RemoteTurnCoordinator({
       label: "test",
