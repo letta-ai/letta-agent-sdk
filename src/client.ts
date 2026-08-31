@@ -3,6 +3,7 @@ import { AppServerManagementTransport } from "./app-server-management.js";
 import type { ManagementTransport } from "./management.js";
 import { createLocalAppServerSession } from "./local-app-server-session.js";
 import { startLocalAppServer } from "./local-app-server.js";
+import type { AgentFreeQueryOptions } from "./query-types.js";
 import type { SkillNodeSupport } from "./skill-loading.js";
 import { loadSkillDirectory, pushSkillSupportFiles } from "./skill-node.js";
 import type {
@@ -54,6 +55,9 @@ export class LettaAgentClient extends LettaAgentClientBase {
     );
     const initMsg = await session.initialize();
     session.close();
+    if (!initMsg.agentId) {
+      throw new Error("Local App Server agent creation did not return an agent id.");
+    }
     return initMsg.agentId;
   }
 
@@ -71,6 +75,35 @@ export class LettaAgentClient extends LettaAgentClientBase {
         options,
       },
     );
+  }
+
+  protected override createLocalAgentFreeSession(
+    queryOptions: AgentFreeQueryOptions,
+    sessionOptions: LettaCodeClientSessionOptions,
+  ): LettaCodeSession {
+    const localOptions = this.options as LettaCodeLocalClientOptions;
+    if (
+      localOptions.appServer?.url === undefined &&
+      (localOptions.appServer?.harnessBackend ?? "local") === "local"
+    ) {
+      throw new Error(
+        'query() requires the API-backed App Server. Set appServer.harnessBackend to "api" or connect to an API-backed remote App Server.',
+      );
+    }
+    return createLocalAppServerSession(localOptions.appServer, {
+      kind: "agent-free",
+      createConversation: {
+        model: queryOptions.model,
+        system: queryOptions.system,
+        ...(queryOptions.modelSettings !== undefined
+          ? { modelSettings: queryOptions.modelSettings }
+          : {}),
+        ...(queryOptions.contextWindowLimit !== undefined
+          ? { contextWindowLimit: queryOptions.contextWindowLimit }
+          : {}),
+      },
+      options: sessionOptions,
+    });
   }
 
   protected override resumeLocalSession(

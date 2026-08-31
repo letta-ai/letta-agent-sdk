@@ -39,6 +39,7 @@ import type {
   SDKResultMessage,
   SendMessage,
 } from "./types.js";
+import type { Query, QueryParams } from "./query-types.js";
 import { validateCreateSessionOptions, validateCreateAgentOptions } from "./validation.js";
 
 // Re-export types
@@ -154,6 +155,11 @@ export type {
   McpSseServerConfig,
   McpServers,
 } from "./types.js";
+export type {
+  AgentFreeQueryOptions,
+  Query,
+  QueryParams,
+} from "./query-types.js";
 export type * from "./sandbox-files.js";
 export type {
   AgentRepositoriesClient,
@@ -325,6 +331,14 @@ export async function prompt(
   } finally {
     session.close();
   }
+}
+
+/** Run an agent-free query in a new ephemeral conversation. */
+export function query(params: QueryParams): Query {
+  return new LettaAgentClient({
+    backend: "local",
+    appServer: { harnessBackend: "api" },
+  }).query(params);
 }
 
 // ═══════════════════════════════════════════════════════════════

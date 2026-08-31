@@ -32,6 +32,12 @@ import type {
   ConversationsClient,
   ModelsClient,
 } from "./management-types.js";
+import { createQuery } from "./query.js";
+import type {
+  AgentFreeQueryOptions,
+  Query,
+  QueryParams,
+} from "./query-types.js";
 import type {
   CreateAgentOptions,
   CreateSessionOptions,
@@ -92,6 +98,28 @@ function hasCreateAgentEnvironment(options: CreateAgentOptions): boolean {
 
 function looksLikeConversationId(id: string): boolean {
   return id.startsWith("conv-") || id.startsWith("local-conv-");
+}
+
+function agentFreeSessionOptions(
+  options: AgentFreeQueryOptions,
+): LettaCodeClientSessionOptions {
+  const {
+    system: _system,
+    modelSettings: _modelSettings,
+    contextWindowLimit: _contextWindowLimit,
+    ...sessionOptions
+  } = options;
+  return sessionOptions;
+}
+
+function validateAgentFreeQueryOptions(options: AgentFreeQueryOptions): void {
+  if (typeof options.model !== "string" || options.model.length === 0) {
+    throw new Error("query() requires a non-empty model.");
+  }
+  if (typeof options.system !== "string") {
+    throw new Error("query() requires a system prompt.");
+  }
+  validateCreateSessionOptions(agentFreeSessionOptions(options));
 }
 
 type OneShotSession = LettaCodeSession & {
@@ -247,6 +275,9 @@ export class LettaAgentClientBase {
       });
       const initMsg = await session.initialize();
       session.close();
+      if (!initMsg.agentId) {
+        throw new Error("App Server agent creation did not return an agent id.");
+      }
       return initMsg.agentId;
     }
     if (this.backend === "cloud") {
@@ -371,6 +402,79 @@ export class LettaAgentClientBase {
     }
   }
 
+  /** Run one prompt in a new agent-free ephemeral conversation. */
+  query(params: QueryParams): Query {
+    validateAgentFreeQueryOptions(params.options);
+    return createQuery((options) => this.createAgentFreeSession(options), params);
+  }
+
+  private async createAgentFreeSession(
+    options: AgentFreeQueryOptions,
+  ): Promise<LettaCodeSession> {
+    validateAgentFreeQueryOptions(options);
+    const sessionOptions = agentFreeSessionOptions(options);
+    this.assertSessionBackend("query", sessionOptions);
+
+    if (this.backend === "remote") {
+      return new AppServerSession(this.appServerSessionOptions(), {
+        kind: "agent-free",
+        createConversation: {
+          model: options.model,
+          system: options.system,
+          ...(options.modelSettings !== undefined
+            ? { modelSettings: options.modelSettings }
+            : {}),
+          ...(options.contextWindowLimit !== undefined
+            ? { contextWindowLimit: options.contextWindowLimit }
+            : {}),
+        },
+        options: sessionOptions,
+      });
+    }
+    if (this.backend === "cloud") {
+      const computer = options.computer ?? options.environment ?? this.computer;
+      if (computer === undefined) {
+        throw new Error(
+          "Cloud query() requires an explicit computer; managed sandboxes are agent-scoped.",
+        );
+      }
+      const conversation = await this.getCloudClient().post<unknown>(
+        "/v1/conversations/ephemeral",
+        {
+          body: {
+            model: options.model,
+            system: options.system,
+            ...(options.modelSettings !== undefined
+              ? { model_settings: options.modelSettings }
+              : {}),
+            ...(options.contextWindowLimit !== undefined
+              ? { context_window_limit: options.contextWindowLimit }
+              : {}),
+          },
+        },
+      );
+      if (
+        !conversation ||
+        typeof conversation !== "object" ||
+        typeof (conversation as { id?: unknown }).id !== "string"
+      ) {
+        throw new Error(
+          "Cloud ephemeral conversation response did not include a conversation id.",
+        );
+      }
+      return new CloudEnvironmentSession(
+        this.cloudOptions(),
+        {
+          kind: "agent-free",
+          conversationId: (conversation as { id: string }).id,
+          options: sessionOptions,
+        },
+        this.getCloudClient(),
+      );
+    }
+    return this.createLocalAgentFreeSession(options, sessionOptions);
+  }
+
   private assertSessionBackend(
     action: string,
     options: LettaCodeClientSessionOptions,
@@ -480,6 +584,13 @@ export class LettaAgentClientBase {
   protected createLocalSession(
     _agentId: string,
     _options: LettaCodeClientSessionOptions,
+  ): LettaCodeSession {
+    throw this.localBackendUnavailableError();
+  }
+
+  protected createLocalAgentFreeSession(
+    _queryOptions: AgentFreeQueryOptions,
+    _sessionOptions: LettaCodeClientSessionOptions,
   ): LettaCodeSession {
     throw this.localBackendUnavailableError();
   }

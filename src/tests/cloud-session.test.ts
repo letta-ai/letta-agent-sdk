@@ -91,6 +91,20 @@ function createCloudFetchMock(
       return Promise.resolve(jsonResponse({ id: "conv-created", agent_id: parsed.searchParams.get("agent_id") }));
     }
 
+    if (
+      parsed.pathname === "/v1/conversations/ephemeral" &&
+      method === "POST"
+    ) {
+      const body = bodyOf(init) as { model?: string } | undefined;
+      return Promise.resolve(
+        jsonResponse({
+          id: "conv-ephemeral",
+          agent_id: null,
+          model: body?.model,
+        }),
+      );
+    }
+
     if (parsed.pathname === "/v1/conversations/conv-1" && method === "GET") {
       return Promise.resolve(jsonResponse({ id: "conv-1", agent_id: "agent-from-conv" }));
     }
@@ -369,7 +383,12 @@ class FakeCloudSocket {
   private fakeDeviceHandle(command: Record<string, unknown>): void {
     if (command.type === "runtime_start") {
       const runtime = {
-        agent_id: typeof command.agent_id === "string" ? command.agent_id : "agent-1",
+        agent_id:
+          command.agent_id === undefined
+            ? null
+            : typeof command.agent_id === "string"
+              ? command.agent_id
+              : "agent-1",
         conversation_id: typeof command.conversation_id === "string" ? command.conversation_id : "default",
       };
       this.serverMessage({
@@ -377,8 +396,14 @@ class FakeCloudSocket {
         request_id: command.request_id,
         success: true,
         runtime,
-        agent: { id: runtime.agent_id, model: "anthropic/claude-sonnet-4" },
-        conversation: { id: runtime.conversation_id, agent_id: runtime.agent_id },
+        agent: runtime.agent_id
+          ? { id: runtime.agent_id, model: "anthropic/claude-sonnet-4" }
+          : null,
+        conversation: {
+          id: runtime.conversation_id,
+          agent_id: runtime.agent_id,
+          model: "openai/gpt-5.6-luna",
+        },
       });
       return;
     }
@@ -722,6 +747,81 @@ function resetFakeCloud(): void {
 }
 
 describe("CloudEnvironmentSession", () => {
+  test("query rejects agent-scoped managed sandboxes before creating a conversation", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+    });
+
+    await expect(async () => {
+      for await (const _message of client.query({
+        prompt: "hello",
+        options: {
+          model: "openai/gpt-5.6-luna",
+          system: "Answer directly.",
+        },
+      })) {
+        // The query must fail before opening a stream.
+      }
+    }).toThrow("requires an explicit computer");
+    expect(requests).toHaveLength(0);
+  });
+
+  test("query creates an ephemeral conversation without an agent", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      computer: { connectionId: "conn-explicit" },
+    });
+
+    const messages = [];
+    for await (const message of client.query({
+      prompt: "What is 2 + 2?",
+      options: {
+        model: "openai/gpt-5.6-luna",
+        system: "Answer with one number.",
+        modelSettings: { parallel_tool_calls: false },
+        contextWindowLimit: 64_000,
+      },
+    })) {
+      messages.push(message);
+    }
+
+    expect(requests).toContainEqual(
+      expect.objectContaining({
+        method: "POST",
+        url: "https://api.test/v1/conversations/ephemeral",
+        body: {
+          model: "openai/gpt-5.6-luna",
+          system: "Answer with one number.",
+          model_settings: { parallel_tool_calls: false },
+          context_window_limit: 64_000,
+        },
+      }),
+    );
+    const runtimeStart = FakeCloudSocket.allSent().find(
+      (command) => command.type === "runtime_start",
+    );
+    expect(runtimeStart).toMatchObject({
+      conversation_id: "conv-ephemeral",
+    });
+    expect(runtimeStart).not.toHaveProperty("agent_id");
+    expect(messages).toContainEqual(
+      expect.objectContaining({ type: "result", success: true }),
+    );
+  });
+
   test("keeps hosted usage after stop ahead of the terminal result", async () => {
     resetFakeCloud();
     FakeCloudSocket.scenario = "usage_after_stop";
@@ -2781,7 +2881,7 @@ describe("CloudEnvironmentSession", () => {
     expect(result).toMatchObject({
       type: "result",
       success: false,
-      error: "error",
+      error: "cloud turn failed",
       errorCode: "error",
       errorDetail: "cloud turn failed",
       conversationId: "default",
@@ -2812,7 +2912,7 @@ describe("CloudEnvironmentSession", () => {
     expect(result).toMatchObject({
       type: "result",
       success: false,
-      error: "error",
+      error: "delayed cloud turn failed",
       errorCode: "error",
       errorDetail: "delayed cloud turn failed",
       conversationId: "default",

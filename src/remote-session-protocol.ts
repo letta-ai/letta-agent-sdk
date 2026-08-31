@@ -23,7 +23,7 @@ import type {
 } from "./types.js";
 
 export type RuntimeScope = {
-  agent_id: string;
+  agent_id: string | null;
   conversation_id: string;
 };
 
@@ -35,6 +35,17 @@ export type ProtocolMessage = Record<string, unknown> & {
 
 export type RuntimeSessionMode =
   | { kind: "create-agent"; options: CreateAgentOptions }
+  | {
+      kind: "agent-free";
+      conversationId?: string;
+      createConversation?: {
+        model: string;
+        system: string;
+        modelSettings?: Record<string, unknown>;
+        contextWindowLimit?: number | null;
+      };
+      options: LettaCodeClientSessionOptions;
+    }
   | {
       kind: "session";
       agentId?: string;

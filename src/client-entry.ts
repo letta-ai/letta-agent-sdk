@@ -54,3 +54,4 @@ export type {
 } from "./transcript-accumulator.js";
 export { createReactNativeWebSocketConstructor } from "./websocket.js";
 export type * from "./types.js";
+export type * from "./query-types.js";

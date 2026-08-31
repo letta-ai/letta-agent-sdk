@@ -657,8 +657,16 @@ export class AppServerSession extends RemoteClientSessionCore {
           clientToolset,
         ),
         runtime: response.runtime,
-        model: typeof response.agent?.model === "string" ? response.agent.model : "",
-        modelSettings: objectRecord(response.agent?.model_settings) ?? null,
+        model:
+          typeof response.agent?.model === "string"
+            ? response.agent.model
+            : typeof response.conversation?.model === "string"
+              ? response.conversation.model
+              : "",
+        modelSettings:
+          objectRecord(response.agent?.model_settings) ??
+          objectRecord(response.conversation?.model_settings) ??
+          null,
         ...(availableTools !== undefined ? { tools: availableTools } : {}),
         ...(skillSources !== undefined ? { skillSources: [...skillSources] } : {}),
       };
@@ -760,6 +768,31 @@ export class AppServerSession extends RemoteClientSessionCore {
           ? { memfs: false }
           : {}),
       };
+      return command as RuntimeStartCommand;
+    }
+
+    if (this.mode.kind === "agent-free") {
+      if (this.mode.createConversation) {
+        const create = this.mode.createConversation;
+        command.create_conversation = {
+          body: {
+            model: create.model,
+            system: create.system,
+            ...(create.modelSettings !== undefined
+              ? { model_settings: create.modelSettings }
+              : {}),
+            ...(create.contextWindowLimit !== undefined
+              ? { context_window_limit: create.contextWindowLimit }
+              : {}),
+          },
+        };
+      } else if (this.mode.conversationId) {
+        command.conversation_id = this.mode.conversationId;
+      } else {
+        throw new Error(
+          "Agent-free sessions require a conversation to create or resume.",
+        );
+      }
       return command as RuntimeStartCommand;
     }
 
