@@ -287,6 +287,13 @@ describe("remote turn terminal receipts", () => {
       runtime,
     );
     coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "usage_statistics",
+        total_tokens: 1,
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
       {
         type: "turn_finished",
         runtime,
@@ -294,13 +301,6 @@ describe("remote turn terminal receipts", () => {
         run_id: "run-1",
         stop_reason: "end_turn",
       },
-      runtime,
-    );
-    coordinator.handleProtocolMessage(
-      streamDelta(runtime, {
-        message_type: "usage_statistics",
-        total_tokens: 1,
-      }),
       runtime,
     );
     expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
@@ -390,6 +390,16 @@ describe("remote turn terminal receipts", () => {
         total_tokens: 120,
         step_count: 3,
       }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-usage",
+        run_id: "run-usage",
+        stop_reason: "end_turn",
+      },
       runtime,
     );
 
@@ -504,7 +514,7 @@ describe("remote turn terminal receipts", () => {
     coordinator.close();
   });
 
-  test("drops usage that arrives after the fallback result", async () => {
+  test("leaves usage after a completed result unassigned", async () => {
     const coordinator = new RemoteTurnCoordinator({
       label: "test",
       onDeviceStatus: () => {},
@@ -546,9 +556,12 @@ describe("remote turn terminal receipts", () => {
       }),
       runtime,
     );
-    const next = coordinator.nextMessage();
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "stream_event",
+      event: { message_type: "usage_statistics", total_tokens: 12 },
+    });
+    expect(coordinator.hasInFlightTurn()).toBe(false);
     coordinator.close();
-    expect(await next).toBeNull();
   });
 
   test("does not apply late usage from a settled turn to its queued successor", async () => {
@@ -626,9 +639,99 @@ describe("remote turn terminal receipts", () => {
       content: "second",
     });
     expect(await coordinator.nextMessage()).toMatchObject({
+      type: "stream_event",
+      event: { message_type: "usage_statistics", total_tokens: 111 },
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
       type: "result",
       result: "second",
       runIds: ["run-second-late-usage"],
+    });
+    coordinator.close();
+  });
+
+  test("preserves the queued successor's usage when the prior turn emits none", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "first",
+        run_id: "run-first-no-usage",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-first-no-usage",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-first-no-usage",
+        run_id: "run-first-no-usage",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "result" });
+
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "second",
+        run_id: "run-second-with-usage",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-second-with-usage",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "usage_statistics",
+        total_tokens: 222,
+      }),
+      runtime,
+    );
+    expect(coordinator.hasInFlightTurn()).toBe(true);
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-second-with-usage",
+        run_id: "run-second-with-usage",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "assistant",
+      content: "second",
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "stream_event",
+      event: { message_type: "usage_statistics", total_tokens: 222 },
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      result: "second",
+      runIds: ["run-second-with-usage"],
     });
     coordinator.close();
   });

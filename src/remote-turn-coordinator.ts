@@ -43,7 +43,6 @@ type RemoteTurnCoordinatorConfig = {
 };
 
 const MAX_RECENTLY_SETTLED_RUN_IDS = 256;
-const TRAILING_USAGE_GRACE_MS = 100;
 
 /**
  * Owns the portable session's turn correlation and stream queue.
@@ -67,7 +66,6 @@ export class RemoteTurnCoordinator {
   private clientMessageCounter = 0;
   private closed = false;
   private _activeTurnStartedAt = 0;
-  private discardNextUncorrelatedUsage = false;
 
   constructor(config: RemoteTurnCoordinatorConfig) {
     this.label = config.label;
@@ -104,7 +102,6 @@ export class RemoteTurnCoordinator {
       observedTurnEvidence: false,
       observedRequiresApprovalStop: false,
       pendingTerminal: null,
-      pendingTerminalTimeout: null,
       abortRequested: false,
       timeout: null,
     };
@@ -119,7 +116,6 @@ export class RemoteTurnCoordinator {
 
   removeTrackedTurn(turn: TurnTracker): void {
     if (turn.timeout) clearTimeout(turn.timeout);
-    if (turn.pendingTerminalTimeout) clearTimeout(turn.pendingTerminalTimeout);
     if (this.activeTurn === turn) {
       this.activeTurn = null;
       return;
@@ -171,13 +167,6 @@ export class RemoteTurnCoordinator {
       messageType === "usage_statistics" || messageType === "stop_reason"
         ? this.activeTurn
         : this.activateNextTurnFromProtocol();
-    if (
-      messageType === "usage_statistics" &&
-      this.discardNextUncorrelatedUsage
-    ) {
-      this.discardNextUncorrelatedUsage = false;
-      return;
-    }
     if (active) {
       active.observedTurnEvidence = true;
       const runId = streamDeltaRunId(delta);
@@ -232,12 +221,8 @@ export class RemoteTurnCoordinator {
     if (this.closed) return;
     this.closed = true;
     if (this.activeTurn?.timeout) clearTimeout(this.activeTurn.timeout);
-    if (this.activeTurn?.pendingTerminalTimeout) {
-      clearTimeout(this.activeTurn.pendingTerminalTimeout);
-    }
     for (const turn of this.pendingTurns) {
       if (turn.timeout) clearTimeout(turn.timeout);
-      if (turn.pendingTerminalTimeout) clearTimeout(turn.pendingTerminalTimeout);
     }
     this.activeTurn = null;
     this.pendingTurns.length = 0;
@@ -296,10 +281,6 @@ export class RemoteTurnCoordinator {
     if (active.timeout) {
       clearTimeout(active.timeout);
       active.timeout = null;
-    }
-    if (active.pendingTerminalTimeout) {
-      clearTimeout(active.pendingTerminalTimeout);
-      active.pendingTerminalTimeout = null;
     }
     this.rememberSettledRunIds(active.runIds);
     this.enqueue(this.resultFromTurn(turn, active));
@@ -404,18 +385,6 @@ export class RemoteTurnCoordinator {
       ...(success ? {} : { errorCode: errorCode ?? "error" }),
       ...(finished.error ? { detail: finished.error } : {}),
     } satisfies RuntimeTurnResult;
-    if (active.pendingTerminal) {
-      active.pendingTerminal = terminal;
-      // A correlated turn_finished is canonical completion evidence. The
-      // request itself can no longer time out while we briefly wait for the
-      // optional trailing usage frame.
-      if (active.timeout) {
-        clearTimeout(active.timeout);
-        active.timeout = null;
-      }
-      this.schedulePendingTerminal(active);
-      return;
-    }
     this.completeActiveTurn(terminal);
   }
 
@@ -432,8 +401,8 @@ export class RemoteTurnCoordinator {
         active.observedRequiresApprovalStop = true;
         return;
       }
-      // Hosted streams send final usage after stop_reason. Keep result last so
-      // consumers that stop at result cannot miss the accounting event.
+      // Keep the stop reason as a fallback until the correlated
+      // turn_finished receipt provides canonical completion.
       active.pendingTerminal = {
         runtime: active.runtime,
         stopReason,
@@ -443,7 +412,9 @@ export class RemoteTurnCoordinator {
     }
 
     if (messageType === "usage_statistics" && active.pendingTerminal) {
-      this.completeActiveTurn(active.pendingTerminal);
+      // Usage frames carry no run id, so they cannot safely settle a turn when
+      // several sends are queued. The correlated turn_finished receipt owns
+      // completion; usage remains observable in the stream.
       return;
     }
 
@@ -457,16 +428,6 @@ export class RemoteTurnCoordinator {
         errorCode: sdkMessage.errorCode,
       });
     }
-  }
-
-  private schedulePendingTerminal(active: TurnTracker): void {
-    if (active.pendingTerminalTimeout) return;
-    active.pendingTerminalTimeout = setTimeout(() => {
-      if (this.activeTurn !== active || !active.pendingTerminal) return;
-      this.discardNextUncorrelatedUsage = true;
-      this.completeActiveTurn(active.pendingTerminal);
-    }, TRAILING_USAGE_GRACE_MS);
-    (active.pendingTerminalTimeout as { unref?: () => void }).unref?.();
   }
 
   private transformStreamDelta(
