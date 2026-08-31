@@ -105,6 +105,7 @@ export class RemoteTurnCoordinator {
       pendingTerminal: null,
       pendingTerminalTimeout: null,
       deferredMessages: [],
+      deferredTurnEvidence: false,
       abortRequested: false,
       timeout: null,
     };
@@ -146,15 +147,25 @@ export class RemoteTurnCoordinator {
     const deferredMessageType = deferredDelta
       ? streamDeltaMessageType(deferredDelta)
       : undefined;
-    if (
-      this.activeTurn?.pendingTerminalTimeout &&
-      (
-        deferredMessageType !== "usage_statistics" ||
-        this.activeTurn.deferredMessages.length > 0
-      )
-    ) {
-      this.activeTurn.deferredMessages.push(message);
-      return;
+    const trailingUsageTurn = this.activeTurn?.pendingTerminalTimeout
+      ? this.activeTurn
+      : null;
+    if (trailingUsageTurn) {
+      const successorEvidence =
+        deferredMessageType === "assistant_message" ||
+        deferredMessageType === "reasoning_message" ||
+        deferredMessageType === "tool_call_message" ||
+        deferredMessageType === "tool_return_message" ||
+        deferredMessageType === "stop_reason" ||
+        turnFinishedRecord(message) !== null;
+      if (
+        successorEvidence ||
+        (deferredMessageType === "usage_statistics" && trailingUsageTurn.deferredTurnEvidence)
+      ) {
+        trailingUsageTurn.deferredMessages.push(message);
+        if (successorEvidence) trailingUsageTurn.deferredTurnEvidence = true;
+        return;
+      }
     }
 
     if (message.type === "update_queue") {
@@ -219,6 +230,11 @@ export class RemoteTurnCoordinator {
     if (this.closed) return;
     const active = this.activeTurn;
     if (active) {
+      if (active.pendingTerminal && active.pendingTerminalTimeout) {
+        this.completeActiveTurn(active.pendingTerminal);
+        this.close();
+        return;
+      }
       this.failTurn(active, detail, {
         errorCode: "stream_closed",
         recoverable: true,

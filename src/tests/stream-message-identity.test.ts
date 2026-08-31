@@ -829,6 +829,113 @@ describe("remote turn terminal receipts", () => {
     coordinator.close();
   });
 
+  test("keeps global queue updates and trailing usage ahead of the result", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "finished",
+        run_id: "run-queue-before-usage",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-queue-before-usage",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-queue-before-usage",
+        run_id: "run-queue-before-usage",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "update_queue",
+        runtime,
+        queue: [],
+      },
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "usage_statistics",
+        total_tokens: 12,
+      }),
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "queue_update",
+      queue: [],
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "stream_event",
+      event: { message_type: "usage_statistics", total_tokens: 12 },
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+    });
+    coordinator.close();
+  });
+
+  test("keeps a canonical terminal successful when the transport closes during usage grace", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "finished",
+        run_id: "run-close-during-grace",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-close-during-grace",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-close-during-grace",
+        run_id: "run-close-during-grace",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+    coordinator.closeWithError("socket closed");
+
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+      result: "finished",
+    });
+    expect(await coordinator.nextMessage()).toBeNull();
+  });
+
   test("activates a queued turn from its terminal receipt", async () => {
     const coordinator = new RemoteTurnCoordinator({
       label: "test",

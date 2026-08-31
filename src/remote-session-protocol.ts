@@ -153,6 +153,7 @@ export type TurnTracker = {
   pendingTerminal: RuntimeTurnResult | null;
   pendingTerminalTimeout: ReturnType<typeof setTimeout> | null;
   deferredMessages: ProtocolMessage[];
+  deferredTurnEvidence: boolean;
   abortRequested: boolean;
   timeout: ReturnType<typeof setTimeout> | null;
 };
