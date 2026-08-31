@@ -1204,6 +1204,62 @@ describe("remote turn terminal receipts", () => {
     coordinator.close();
   });
 
+  test("does not treat stream ping as successor evidence", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "assistant_message",
+        content: "finished",
+        run_id: "run-ping-during-grace",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "stop_reason",
+        stop_reason: "end_turn",
+        run_id: "run-ping-during-grace",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      {
+        type: "turn_finished",
+        runtime,
+        turn_id: "turn-ping-during-grace",
+        run_id: "run-ping-during-grace",
+        stop_reason: "end_turn",
+      },
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, { message_type: "ping" }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "usage_statistics",
+        total_tokens: 12,
+      }),
+      runtime,
+    );
+
+    expect(await coordinator.nextMessage()).toMatchObject({ type: "assistant" });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "stream_event",
+      event: { message_type: "usage_statistics", total_tokens: 12 },
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "result",
+      success: true,
+    });
+    coordinator.close();
+  });
+
   test("activates a queued turn from its terminal receipt", async () => {
     const coordinator = new RemoteTurnCoordinator({
       label: "test",

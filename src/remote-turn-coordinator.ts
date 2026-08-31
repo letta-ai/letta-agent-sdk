@@ -176,7 +176,7 @@ export class RemoteTurnCoordinator {
         return;
       }
       const isTurnScoped =
-        deferredDelta !== null ||
+        (deferredDelta !== null && deferredMessageType !== "ping") ||
         message.type === "update_loop_status" ||
         turnFinishedRecord(message) !== null;
       if (
