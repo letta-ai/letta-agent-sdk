@@ -160,12 +160,27 @@ export class RemoteTurnCoordinator {
       ? this.activeTurn
       : null;
     if (trailingUsageTurn) {
+      const statusRunIds = message.type === "update_loop_status"
+        ? loopStatusRunIds(message)
+        : [];
+      const belongsToTerminalTurn =
+        message.type === "update_loop_status" &&
+        statusRunIds.length > 0 &&
+        statusRunIds.every((runId) => trailingUsageTurn.runIds.has(runId));
+      if (belongsToTerminalTurn) {
+        this.handleLoopStatusMessage(message);
+        return;
+      }
+      const isTurnScoped =
+        deferredDelta !== null ||
+        message.type === "update_loop_status" ||
+        turnFinishedRecord(message) !== null;
       if (
-        deferredMessageType !== "usage_statistics" ||
+        (isTurnScoped && deferredMessageType !== "usage_statistics") ||
         (deferredMessageType === "usage_statistics" && trailingUsageTurn.deferredTurnEvidence)
       ) {
         trailingUsageTurn.deferredMessages.push(message);
-        if (deferredMessageType !== "usage_statistics") {
+        if (isTurnScoped && deferredMessageType !== "usage_statistics") {
           trailingUsageTurn.deferredTurnEvidence = true;
         }
         return;
