@@ -45,6 +45,32 @@ await session.send(message);
 measures the tracked turn and excludes session initialization; measure `ready()`
 separately when startup latency matters.
 
+## Recover an archived conversation
+
+Archiving does not delete a conversation. Use the management API to include
+archived conversations in a listing, restore the intended conversation, and
+then resume it by ID:
+
+```typescript
+const archived = await client.conversations.list({
+  archiveStatus: "archived",
+  summarySearch: "project handoff", // Optional: narrow the listing.
+});
+
+const conversation = archived.find(({ summary }) =>
+  summary?.includes("project handoff")
+);
+if (!conversation) throw new Error("Archived conversation not found");
+
+await client.conversations.update(conversation.id, { archived: false });
+
+await using session = client.resumeSession(conversation.id);
+await session.send("Continue where we left off.");
+```
+
+The same `client.conversations` management surface is available for Cloud and
+App Server backends; no separate recovery API is required.
+
 For a simple question that should not create or use an agent, call `query()`.
 It creates an agent-free ephemeral conversation from the supplied model and
 system prompt, streams the turn, and closes the runtime when iteration ends:
