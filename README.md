@@ -63,9 +63,7 @@ for await (const message of client.query({
 
 `query()` requires an API-backed App Server. For `backend: "local"`, set
 `appServer.harnessBackend: "api"`; the default local harness backend does not
-store agent-free conversations. Stateless means agent-free, not storage-free:
-the ephemeral conversation and its messages remain persisted and archived in
-Letta Cloud.
+store agent-free conversations.
 
 Cloud queries require an explicit connected computer. Local and remote clients
 run the ephemeral conversation through their App Server.

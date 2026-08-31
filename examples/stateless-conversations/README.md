@@ -2,8 +2,7 @@
 
 Use `query()` when you need one model turn but do not need an agent or memory.
 Each call creates an ephemeral conversation, streams its messages, and closes
-the runtime when iteration ends. Stateless means agent-free, not storage-free:
-the conversation and its messages remain persisted and archived in Letta Cloud.
+the runtime when iteration ends.
 
 This example includes three patterns:
 
