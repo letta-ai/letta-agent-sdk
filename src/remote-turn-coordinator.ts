@@ -173,8 +173,7 @@ export class RemoteTurnCoordinator {
         : this.activateNextTurnFromProtocol();
     if (
       messageType === "usage_statistics" &&
-      this.discardNextUncorrelatedUsage &&
-      !active?.pendingTerminal
+      this.discardNextUncorrelatedUsage
     ) {
       this.discardNextUncorrelatedUsage = false;
       return;
@@ -373,9 +372,10 @@ export class RemoteTurnCoordinator {
     stopReason: string;
     error?: string;
   }): void {
-    const active = this.activeTurn;
-    if (!active || !finished.runId) return;
+    if (!finished.runId) return;
     if (this.settledRunIds.has(finished.runId)) return;
+    const active = this.activeTurn ?? this.activateNextTurnFromProtocol();
+    if (!active) return;
     if (
       active.runIds.size > 0 &&
       !active.runIds.has(finished.runId)
