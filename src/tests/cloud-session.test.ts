@@ -1088,7 +1088,11 @@ describe("CloudEnvironmentSession", () => {
     const session = client.resumeSession("conv-1", {
       sandbox: {
         githubRepositories: [
-          { owner: "letta-ai", repo: "letta-docs" },
+          {
+            owner: "letta-ai",
+            repo: "letta-docs",
+            commit: "a".repeat(40),
+          },
           { owner: "letta-ai", repo: "letta-code" },
         ],
       },
@@ -1102,7 +1106,11 @@ describe("CloudEnvironmentSession", () => {
         body: {
           conversationId: "conv-1",
           githubRepositories: [
-            { owner: "letta-ai", repo: "letta-docs" },
+            {
+              owner: "letta-ai",
+              repo: "letta-docs",
+              commit: "a".repeat(40),
+            },
             { owner: "letta-ai", repo: "letta-code" },
           ],
         },
@@ -2829,6 +2837,19 @@ describe("CloudEnvironmentSession", () => {
         githubRepositories: [{ owner: "letta-ai", repo: "letta/code" }],
       },
     })).toThrow("githubRepositories[0].repo");
+
+    expect(() => new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock([]),
+      WebSocket: FakeCloudSocket,
+      sandbox: {
+        githubRepositories: [
+          { owner: "letta-ai", repo: "letta-code", commit: "main" },
+        ],
+      },
+    })).toThrow("githubRepositories[0].commit");
 
     const clientWithEnvironment = new LettaAgentClient({
       backend: "cloud",
