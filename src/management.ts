@@ -30,6 +30,7 @@ import type {
 import type { ListModelsResult, SendMessage } from "./types.js";
 
 export interface ManagementTransport {
+  close(): Promise<void>;
   listAgents(query: AgentListParams): Promise<LettaAgent[]>;
   retrieveAgent(agentId: string): Promise<LettaAgent>;
   updateAgent(
