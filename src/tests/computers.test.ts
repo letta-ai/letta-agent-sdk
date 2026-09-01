@@ -45,6 +45,22 @@ function cloudClient(fetchMock: typeof fetch): LettaAgentClient {
 }
 
 describe("client.computers", () => {
+  test("a pre-obtained namespace rejects requests after client close", async () => {
+    let calls = 0;
+    const client = cloudClient(
+      createFetchMock(() => {
+        calls += 1;
+        return jsonResponse({ connections: [], hasNextPage: false });
+      }),
+    );
+    const computers = client.computers;
+
+    await client.close();
+
+    await expect(computers.list()).rejects.toThrow("LettaAgentClient is closed");
+    expect(calls).toBe(0);
+  });
+
   test("lists computers with filters and normalizes product-facing fields", async () => {
     const requests: URL[] = [];
     const client = cloudClient(

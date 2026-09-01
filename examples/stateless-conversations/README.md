@@ -28,7 +28,7 @@ stored by Letta Cloud, while the App Server executes on your machine.
 ```typescript
 import { LettaAgentClient } from "@letta-ai/letta-agent-sdk";
 
-const client = new LettaAgentClient({
+await using client = new LettaAgentClient({
   backend: "local",
   appServer: { harnessBackend: "api" },
 });

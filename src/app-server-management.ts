@@ -51,6 +51,7 @@ type ActiveConnection = {
   client: AppServerClient;
   ownedConnection: OwnedConnection | null;
   detachDisconnect: () => void;
+  closePromise: Promise<void> | null;
 };
 
 function ensureResponse<T>(
@@ -76,8 +77,35 @@ export class AppServerManagementTransport
 {
   private connectionPromise: Promise<ActiveConnection> | null = null;
   private closingConnections = new Set<Promise<void>>();
+  private closed = false;
+  private closePromise: Promise<void> | null = null;
 
   constructor(private readonly options: AppServerManagementOptions) {}
+
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closed = true;
+    const connectionPromise = this.connectionPromise;
+    this.connectionPromise = null;
+    const close = (async () => {
+      if (connectionPromise) {
+        let connection: ActiveConnection | null = null;
+        try {
+          connection = await connectionPromise;
+        } catch {
+          // Connection startup already owns cleanup on failure.
+        }
+        if (connection) {
+          await this.trackClosingConnection(connection);
+        }
+      }
+      if (this.closingConnections.size > 0) {
+        await Promise.all([...this.closingConnections]);
+      }
+    })();
+    this.closePromise = close;
+    return close;
+  }
 
   async listAgents(query: AgentListParams): Promise<LettaAgent[]> {
     const response = await this.request<AgentListResponseMessage>(
@@ -255,9 +283,11 @@ export class AppServerManagementTransport
     body: Record<string, unknown>,
     responseType: string,
   ): Promise<TResponse> {
+    this.assertOpen();
     if (this.closingConnections.size > 0) {
       await Promise.all([...this.closingConnections]);
     }
+    this.assertOpen();
     // Concurrent requests share the same connect promise and request-id
     // counter, while connection identity keeps this pool independent from
     // session clients using the same app-server.
@@ -279,6 +309,7 @@ export class AppServerManagementTransport
   }
 
   private acquireConnection(): Promise<ActiveConnection> {
+    this.assertOpen();
     if (this.connectionPromise) return this.connectionPromise;
     const promise: Promise<ActiveConnection> = this.openConnection().then(
       (connection) => {
@@ -287,6 +318,10 @@ export class AppServerManagementTransport
         connection.detachDisconnect = connection.client.onDisconnect(() => {
           this.discardConnection(promise, connection);
         });
+        if (this.closed) {
+          void this.trackClosingConnection(connection);
+          throw new Error("Management transport is closed");
+        }
         return connection;
       },
       (error) => {
@@ -344,7 +379,12 @@ export class AppServerManagementTransport
       client,
       ownedConnection,
       detachDisconnect: () => {},
+      closePromise: null,
     };
+  }
+
+  private assertOpen(): void {
+    if (this.closed) throw new Error("Management transport is closed");
   }
 
   private discardConnection(
@@ -371,7 +411,12 @@ export class AppServerManagementTransport
 }
 
 async function closeConnection(connection: ActiveConnection): Promise<void> {
-  connection.detachDisconnect();
-  connection.client.close();
-  connection.ownedConnection?.close();
+  if (connection.closePromise) return connection.closePromise;
+  const close = Promise.resolve().then(() => {
+    connection.detachDisconnect();
+    connection.client.close();
+    connection.ownedConnection?.close();
+  });
+  connection.closePromise = close;
+  return close;
 }

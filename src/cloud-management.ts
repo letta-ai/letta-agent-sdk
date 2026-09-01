@@ -120,6 +120,10 @@ function toOrderRelativeCursors(query: MessageListParams): MessageListParams {
 export class CloudManagementTransport implements ManagementTransport {
   constructor(private readonly client: Letta) {}
 
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+
   async listAgents(query: AgentListParams): Promise<LettaAgent[]> {
     const page = await this.client.agents.list(query);
     return page.items;

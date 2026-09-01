@@ -32,6 +32,11 @@ for await (const message of session.stream()) {
 }
 ```
 
+Local and remote management clients can use `await using client = new
+LettaAgentClient(...)`, or call `await client.close()` explicitly. Client
+disposal closes its pooled management connection and any local App Server it
+started. Sessions are independently owned and must still be closed separately.
+
 Latency-sensitive applications can initialize the runtime and transport before
 the first user action without fetching transcript history or invoking the model:
 

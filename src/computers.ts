@@ -95,13 +95,17 @@ function toComputer(environment: RemoteEnvironmentConnection): Computer {
 export class ComputersClientImpl implements ComputersClient {
   private readonly environments: RemoteEnvironmentClient;
 
-  constructor(client: Letta) {
+  constructor(
+    client: Letta,
+    private readonly assertOpen: () => void = () => {},
+  ) {
     this.environments = new RemoteEnvironmentClient({}, client);
   }
 
   async list(
     options: ListComputersOptions = {},
   ): Promise<ListComputersResult> {
+    this.assertOpen();
     const result = await this.environments.listEnvironments(options);
     return {
       computers: result.connections.map(toComputer),
@@ -110,6 +114,7 @@ export class ComputersClientImpl implements ComputersClient {
   }
 
   async get(deviceId: string): Promise<Computer> {
+    this.assertOpen();
     if (typeof deviceId !== "string" || deviceId.trim().length === 0) {
       throw new Error("Invalid deviceId. Expected a non-empty string.");
     }
@@ -119,6 +124,7 @@ export class ComputersClientImpl implements ComputersClient {
   }
 
   async resolve(selector: ComputerSelector): Promise<ResolvedComputer> {
+    this.assertOpen();
     const result = await this.environments.resolveEnvironment(
       selectorToRemoteTarget(selector),
     );

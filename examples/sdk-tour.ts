@@ -12,7 +12,7 @@
 
 import { LettaAgentClient } from '../src/index.js';
 
-const client = new LettaAgentClient({ backend: 'local' });
+await using client = new LettaAgentClient({ backend: 'local' });
 
 async function main() {
   const example = process.argv[2] || 'basic';
@@ -721,4 +721,4 @@ async function testConversations() {
   console.log();
 }
 
-main().catch(console.error);
+await main().catch(console.error);

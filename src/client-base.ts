@@ -136,7 +136,7 @@ type OneShotSession = LettaCodeSession & {
  * `cloud` uses agents hosted on Letta Cloud, with an explicit remote
  * environment or SDK-managed sandbox.
  */
-export class LettaAgentClientBase {
+export class LettaAgentClientBase implements AsyncDisposable {
   readonly backend: LettaCodeBackend;
   readonly computer: ComputerSelector | undefined;
   /** @deprecated Use `computer`. */
@@ -150,6 +150,8 @@ export class LettaAgentClientBase {
   private agentRepositoriesClient: AgentRepositoriesClient | null = null;
   private cloudClient: Letta | null = null;
   private managementTransport: ManagementTransport | null = null;
+  private closed = false;
+  private closePromise: Promise<void> | null = null;
 
   constructor(options: LettaCodeClientOptions = {}) {
     const backend = options.backend ?? "local";
@@ -239,15 +241,18 @@ export class LettaAgentClientBase {
    * it belongs to the client/session execution context.
    */
   get repositories(): RepositoriesClient {
+    this.assertOpen();
     return this.getRepositoriesClient();
   }
 
   /** Discover and resolve computers registered with this Letta Cloud account. */
   get computers(): ComputersClient {
+    this.assertOpen();
     return this.getComputersClient();
   }
 
   async createAgent(options: CreateAgentOptions = {}): Promise<string> {
+    this.assertOpen();
     if (hasCreateAgentEnvironment(options)) {
       throw new Error(
         "createAgent() does not accept environment. Set a client default or pass environment to resumeSession()/createSession().",
@@ -299,6 +304,7 @@ export class LettaAgentClientBase {
     agentId: string,
     options: LettaCodeClientSessionOptions = {},
   ): LettaCodeSession {
+    this.assertOpen();
     if (typeof agentId !== "string" || agentId.length === 0) {
       throw new Error("createSession() requires a non-empty agent id.");
     }
@@ -339,6 +345,7 @@ export class LettaAgentClientBase {
     id: string,
     options: LettaCodeClientSessionOptions = {},
   ): LettaCodeSession {
+    this.assertOpen();
     const sessionOptions = stripCloudExecutionOptions(options);
     validateCreateSessionOptions(sessionOptions);
     this.assertSessionBackend("resumeSession", options);
@@ -393,6 +400,7 @@ export class LettaAgentClientBase {
     agentId: string,
     options: LettaCodeClientSessionOptions = {},
   ): Promise<SDKResultMessage> {
+    this.assertOpen();
     const session = this.createSession(agentId, options);
 
     try {
@@ -404,6 +412,7 @@ export class LettaAgentClientBase {
 
   /** Run one prompt in a new agent-free ephemeral conversation. */
   query(params: QueryParams): Query {
+    this.assertOpen();
     validateAgentFreeQueryOptions(params.options);
     return createQuery((options) => this.createAgentFreeSession(options), params);
   }
@@ -411,6 +420,7 @@ export class LettaAgentClientBase {
   private async createAgentFreeSession(
     options: AgentFreeQueryOptions,
   ): Promise<LettaCodeSession> {
+    this.assertOpen();
     validateAgentFreeQueryOptions(options);
     const sessionOptions = agentFreeSessionOptions(options);
     this.assertSessionBackend("query", sessionOptions);
@@ -627,7 +637,10 @@ export class LettaAgentClientBase {
     if (this.backend !== "cloud") {
       throw new Error('client.computers is only available with backend: "cloud".');
     }
-    this.computersClient ??= new ComputersClientImpl(this.getCloudClient());
+    this.computersClient ??= new ComputersClientImpl(
+      this.getCloudClient(),
+      () => this.assertOpen(),
+    );
     return this.computersClient;
   }
 
@@ -638,6 +651,7 @@ export class LettaAgentClientBase {
     this.repositoriesClient ??= new RepositoriesClient(
       this.cloudOptions(),
       this.getCloudClient(),
+      () => this.assertOpen(),
     );
     return this.repositoriesClient;
   }
@@ -671,6 +685,7 @@ export class LettaAgentClientBase {
   }
 
   private getManagementTransport(): ManagementTransport {
+    this.assertOpen();
     if (this.managementTransport) return this.managementTransport;
     if (this.backend === "remote") {
       this.managementTransport = new AppServerManagementTransport(
@@ -684,6 +699,30 @@ export class LettaAgentClientBase {
       this.managementTransport = this.createLocalManagementTransport();
     }
     return this.managementTransport;
+  }
+
+  /**
+   * Release resources owned directly by this client, including its pooled
+   * management connection and any local App Server started for that pool.
+   * Sessions have independent lifecycles and must be closed separately.
+   */
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closed = true;
+    const transport = this.managementTransport;
+    this.managementTransport = null;
+    const close = transport?.close() ?? Promise.resolve();
+    this.closePromise = close;
+    return close;
+  }
+
+  /** Async-disposal alias for close(). */
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.close();
+  }
+
+  private assertOpen(): void {
+    if (this.closed) throw new Error("LettaAgentClient is closed");
   }
 
   private cloudOptions(): LettaCodeCloudClientOptions {

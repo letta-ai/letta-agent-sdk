@@ -1167,6 +1167,18 @@ class MultiClientAppServerSocket extends ManagementSocket {
   }
 }
 
+class DeferredConnectManagementSocket extends ManagementSocket {
+  static pending: DeferredConnectManagementSocket[] = [];
+
+  protected override handleConnect(): void {
+    DeferredConnectManagementSocket.pending.push(this);
+  }
+
+  open(): void {
+    super.handleConnect();
+  }
+}
+
 describe("app-server management connection lifecycle", () => {
   const url = "ws://remote.test/ws";
 
@@ -1175,6 +1187,141 @@ describe("app-server management connection lifecycle", () => {
       (socket) => socket.readyState !== 3,
     );
   }
+
+  test("closes the pooled socket and SDK-owned App Server", async () => {
+    ManagementSocket.instances = [];
+    let ownedCloseCount = 0;
+    const transport = new AppServerManagementTransport({
+      connect: async () => ({
+        url,
+        close: () => {
+          ownedCloseCount += 1;
+        },
+      }),
+      WebSocket: ManagementSocket,
+    });
+
+    await transport.listAgents({});
+    expect(openSockets()).toHaveLength(1);
+
+    await transport.close();
+    expect(openSockets()).toHaveLength(0);
+    expect(ownedCloseCount).toBe(1);
+
+    await transport.close();
+    expect(ownedCloseCount).toBe(1);
+  });
+
+  test("closing before first use does not start an App Server", async () => {
+    let connectCount = 0;
+    const transport = new AppServerManagementTransport({
+      connect: async () => {
+        connectCount += 1;
+        return { url, close: () => {} };
+      },
+      WebSocket: ManagementSocket,
+    });
+
+    await transport.close();
+    expect(connectCount).toBe(0);
+    await expect(transport.listAgents({})).rejects.toThrow(
+      "Management transport is closed",
+    );
+  });
+
+  test("closing during startup cleans up the connection once it opens", async () => {
+    ManagementSocket.instances = [];
+    DeferredConnectManagementSocket.pending = [];
+    let ownedCloseCount = 0;
+    const transport = new AppServerManagementTransport({
+      connect: async () => ({
+        url,
+        close: () => {
+          ownedCloseCount += 1;
+        },
+      }),
+      WebSocket: DeferredConnectManagementSocket,
+    });
+
+    const request = transport.listAgents({});
+    while (DeferredConnectManagementSocket.pending.length === 0) {
+      await Bun.sleep(1);
+    }
+    const close = transport.close();
+    DeferredConnectManagementSocket.pending[0]?.open();
+
+    await expect(request).rejects.toThrow("Management transport is closed");
+    await close;
+    expect(ownedCloseCount).toBe(1);
+    expect(openSockets()).toHaveLength(0);
+  });
+
+  test("closing rejects an active request and cleans up once", async () => {
+    MultiClientAppServerSocket.reset();
+    MultiClientAppServerSocket.agentListResponseDelayMs = 100;
+    let ownedCloseCount = 0;
+    const transport = new AppServerManagementTransport({
+      connect: async () => ({
+        url,
+        close: () => {
+          ownedCloseCount += 1;
+        },
+      }),
+      WebSocket: MultiClientAppServerSocket,
+    });
+
+    const request = transport.listAgents({});
+    while (MultiClientAppServerSocket.agentListRequests === 0) {
+      await Bun.sleep(1);
+    }
+    await transport.close();
+
+    await expect(request).rejects.toThrow("App-server client closed");
+    expect(ownedCloseCount).toBe(1);
+    expect(openSockets()).toHaveLength(0);
+  });
+
+  test("client close releases management without closing an independent session", async () => {
+    MultiClientAppServerSocket.reset();
+    const client = new PortableLettaAgentClient({
+      backend: "remote",
+      url,
+      WebSocket: MultiClientAppServerSocket,
+    });
+
+    await client.agents.list();
+    const managementSockets = new Set(ManagementSocket.instances);
+    const session = client.resumeSession("conv-1");
+    await asAdvanced(session).initialize();
+    const sessionSockets = ManagementSocket.instances.filter(
+      (socket) => !managementSockets.has(socket),
+    );
+    expect(sessionSockets.length).toBeGreaterThan(0);
+
+    await client.close();
+    expect(sessionSockets.every((socket) => socket.readyState === 1)).toBe(true);
+    expect(() => client.agents.list()).toThrow(
+      "LettaAgentClient is closed",
+    );
+
+    session.close();
+  });
+
+  test("a lazy query cannot create a session after client close", async () => {
+    const client = new PortableLettaAgentClient({
+      backend: "remote",
+      url,
+      WebSocket: ManagementSocket,
+    });
+    const query = client.query({
+      prompt: "hello",
+      options: { model: "test/model", system: "Be concise." },
+    });
+
+    await client.close();
+
+    await expect(query.next()).rejects.toThrow("LettaAgentClient is closed");
+  });
 
   test("keeps the management connection pooled while idle", async () => {
     ManagementSocket.instances = [];

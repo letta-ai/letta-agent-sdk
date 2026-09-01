@@ -91,8 +91,8 @@ The underlying SDK operation is an ordinary resume:
 ```typescript
 import { LettaAgentClient } from '@letta-ai/letta-agent-sdk';
 
-const client = new LettaAgentClient({ backend: 'local' });
-const researcher = client.resumeSession('agent-xxx', {
+await using client = new LettaAgentClient({ backend: 'local' });
+await using researcher = client.resumeSession('agent-xxx', {
   allowedTools: ['Read', 'Write'],
   permissionMode: 'unrestricted',
 });

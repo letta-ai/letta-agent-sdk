@@ -61,6 +61,7 @@ export class RepositoriesClient {
   constructor(
     options: LettaCodeCloudClientOptions,
     private readonly client: Letta = createCloudClient(options),
+    private readonly assertOpen: () => void = () => {},
   ) {}
 
   async create(params: CreateRepositoryParams): Promise<Repository> {
@@ -252,6 +253,7 @@ export class RepositoriesClient {
     method: string,
     body: unknown,
   ): Promise<unknown> {
+    this.assertOpen();
     const options = body !== undefined ? { body } : undefined;
     switch (method) {
       case "GET":

@@ -117,10 +117,12 @@ After running a seminar, the agents can be "teleported" into other contexts:
 ```typescript
 import { LettaAgentClient } from '@letta-ai/letta-agent-sdk';
 
-const client = new LettaAgentClient({ backend: 'local' });
+await using client = new LettaAgentClient({ backend: 'local' });
 
 // Get agent ID from --status
-const drChen = client.resumeSession('agent-xxx', { permissionMode: 'unrestricted' });
+await using drChen = client.resumeSession('agent-xxx', {
+  permissionMode: 'unrestricted',
+});
 
 // Dr. Chen remembers all past seminars!
 await drChen.send('What patterns have you noticed in economics presentations?');

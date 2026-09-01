@@ -41,6 +41,19 @@ function cloudClient(fetchMock: typeof fetch): LettaAgentClient {
 }
 
 describe("RepositoriesClient.delete", () => {
+  test("a pre-obtained namespace rejects requests after client close", async () => {
+    const requests: RecordedRequest[] = [];
+    const client = cloudClient(
+      createFetchMock(requests, () => jsonResponse({ repositories: [] })),
+    );
+    const repositories = client.repositories;
+
+    await client.close();
+
+    await expect(repositories.list()).rejects.toThrow("LettaAgentClient is closed");
+    expect(requests).toHaveLength(0);
+  });
+
   test("issues DELETE /v1/repositories/:id and resolves on success", async () => {
     const requests: RecordedRequest[] = [];
     const client = cloudClient(

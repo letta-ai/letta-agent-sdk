@@ -18,7 +18,7 @@ if (!process.env.LETTA_API_KEY) {
   throw new Error("Set LETTA_API_KEY to run the stateless conversation examples.");
 }
 
-const client = new LettaAgentClient({
+await using client = new LettaAgentClient({
   backend: "local",
   appServer: {
     harnessBackend: "api",

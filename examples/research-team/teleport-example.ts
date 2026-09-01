@@ -129,8 +129,8 @@ async function main() {
   console.log('Try it yourself:\n');
   console.log('   // In your own code:');
   console.log('   import { LettaAgentClient } from "@letta-ai/letta-agent-sdk";');
-  console.log('   const client = new LettaAgentClient({ backend: "local" });');
-  console.log(`   const agent = client.resumeSession("${teamState.agentIds.researcher}");`);
+  console.log('   await using client = new LettaAgentClient({ backend: "local" });');
+  console.log(`   await using agent = client.resumeSession("${teamState.agentIds.researcher}");`);
   console.log('   await agent.send("Your question here");');
   console.log('');
 }
