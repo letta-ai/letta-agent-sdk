@@ -109,7 +109,7 @@ async function main() {
     throw new Error("Set LETTA_API_KEY to run the Cloud custom-tools example.");
   }
 
-  const client = new LettaAgentClient({
+  await using client = new LettaAgentClient({
     backend: "cloud",
     apiKey: process.env.LETTA_API_KEY,
   });
