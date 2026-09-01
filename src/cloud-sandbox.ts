@@ -2,6 +2,8 @@
 export interface GitHubRepositoryRef {
   owner: string;
   repo: string;
+  /** Exact commit to check out after cloning. Omit to use the default branch tip. */
+  commit?: string;
 }
 
 export interface LettaCodeCloudSandboxOptions {
@@ -36,6 +38,7 @@ const MAX_TTL_MINUTES = 60;
 const MAX_GITHUB_REPOSITORIES = 10;
 const GITHUB_OWNER_PATTERN = /^[A-Za-z0-9-]+$/;
 const GITHUB_REPOSITORY_PATTERN = /^[A-Za-z0-9._-]+$/;
+const GITHUB_COMMIT_PATTERN = /^[0-9a-fA-F]{40}$/;
 
 function validatePositiveInteger(value: number | undefined, name: string): void {
   if (value !== undefined && (!Number.isInteger(value) || value <= 0)) {
@@ -103,6 +106,15 @@ export function validateCloudSandboxOptions(
       ) {
         throw new Error(
           `Invalid ${name}.githubRepositories[${index}].repo.`,
+        );
+      }
+      if (
+        repository.commit !== undefined &&
+        (typeof repository.commit !== "string" ||
+          !GITHUB_COMMIT_PATTERN.test(repository.commit))
+      ) {
+        throw new Error(
+          `Invalid ${name}.githubRepositories[${index}].commit. Expected a full Git commit SHA.`,
         );
       }
     }
