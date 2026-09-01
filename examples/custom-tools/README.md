@@ -51,7 +51,7 @@ const myTool: AnyAgentTool = {
   },
 };
 
-await using client = new LettaAgentClient({ backend: "cloud" });
+const client = new LettaAgentClient({ backend: "cloud" });
 await using session = client.resumeSession(agentId, {
   tools: [myTool],
 });

@@ -15,7 +15,7 @@ npm install @letta-ai/letta-agent-sdk
 ```typescript
 import { LettaAgentClient } from "@letta-ai/letta-agent-sdk";
 
-await using client = new LettaAgentClient({ backend: "cloud" });
+const client = new LettaAgentClient({ backend: "cloud" });
 
 // Create the agent once...
 const agentId = await client.createAgent({
@@ -32,9 +32,10 @@ for await (const message of session.stream()) {
 }
 ```
 
-Client disposal closes its pooled management connection and any local App
-Server started for management calls. Sessions are independently owned and must
-still be closed or disposed separately.
+Local and remote management clients can use `await using client = new
+LettaAgentClient(...)`, or call `await client.close()` explicitly. Client
+disposal closes its pooled management connection and any local App Server it
+started. Sessions are independently owned and must still be closed separately.
 
 Latency-sensitive applications can initialize the runtime and transport before
 the first user action without fetching transcript history or invoking the model:
