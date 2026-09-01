@@ -20,7 +20,7 @@
  *   LETTA_API_KEY=... bun examples/workflows/plan-panel.ts "task description"
  */
 
-import { agent, parallel, phase, log, printSummary, setWorkflowClient, sandboxRepo } from './runtime.js';
+import { agent, reason, parallel, phase, log, printSummary, setWorkflowClient, sandboxRepo } from './runtime.js';
 import type { AgentOptions } from './runtime.js';
 import { LettaAgentClient } from '../../src/index.js';
 
@@ -132,7 +132,9 @@ if (drafts.length < ANGLES.length) {
 }
 
 phase('Judge');
-const verdict = await agent<{
+// The judge only reasons over the drafts it is given — no tools, no
+// repository access — so it runs as an agent-free query, not a worker agent.
+const verdict = await reason<{
   scores: Array<{ angle: string; score: number; strengths: string; weaknesses: string }>;
   winner: string;
 }>(
