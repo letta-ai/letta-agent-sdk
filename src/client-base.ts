@@ -637,7 +637,10 @@ export class LettaAgentClientBase implements AsyncDisposable {
     if (this.backend !== "cloud") {
       throw new Error('client.computers is only available with backend: "cloud".');
     }
-    this.computersClient ??= new ComputersClientImpl(this.getCloudClient());
+    this.computersClient ??= new ComputersClientImpl(
+      this.getCloudClient(),
+      () => this.assertOpen(),
+    );
     return this.computersClient;
   }
 
@@ -648,6 +651,7 @@ export class LettaAgentClientBase implements AsyncDisposable {
     this.repositoriesClient ??= new RepositoriesClient(
       this.cloudOptions(),
       this.getCloudClient(),
+      () => this.assertOpen(),
     );
     return this.repositoriesClient;
   }

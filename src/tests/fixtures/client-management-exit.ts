@@ -11,3 +11,4 @@ await using client = new LettaAgentClient({
 const models = await client.models.list();
 console.log(`MODELS=${models.entries.length}`);
 console.log("CALL_COMPLETE");
+await Bun.sleep(500);
