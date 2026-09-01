@@ -85,6 +85,7 @@ function stripCloudExecutionOptions(
   delete sessionOptions.environment;
   delete sessionOptions.sandbox;
   delete sessionOptions.filesystemConfinement;
+  delete sessionOptions.workspaceSandbox;
   return sessionOptions;
 }
 
@@ -492,6 +493,14 @@ export class LettaAgentClientBase {
         `Invalid filesystemConfinement '${String(options.filesystemConfinement)}'. Valid value: memory.`,
       );
     }
+    if (
+      options.workspaceSandbox !== undefined &&
+      (!options.workspaceSandbox.root || !options.workspaceSandbox.isolationRoot)
+    ) {
+      throw new Error(
+        `${action}() workspaceSandbox requires non-empty root and isolationRoot paths.`,
+      );
+    }
     const effectiveComputer =
       options.computer ?? options.environment ?? this.computer;
     if (this.backend === "local") {
@@ -542,6 +551,11 @@ export class LettaAgentClientBase {
       if (options.filesystemConfinement !== undefined) {
         throw new Error(
           `${action}() filesystemConfinement is only supported with backend: "local".`,
+        );
+      }
+      if (options.workspaceSandbox !== undefined) {
+        throw new Error(
+          `${action}() workspaceSandbox is only supported by local and remote app servers.`,
         );
       }
       const cloudOptions = this.cloudOptions();
