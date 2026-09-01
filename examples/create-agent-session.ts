@@ -42,9 +42,11 @@ type ExampleCreateOptions = Omit<
 
 const MEMFS_GUIDANCE = `## Persistent memory
 This agent has a git-backed memory filesystem. Use memory files for durable
-knowledge instead of memory blocks. Keep stable identity and behavior in
-system/ files. Keep project notes, learned preferences, and history in focused
-Markdown files under reference/. Never store secrets in memory.`;
+knowledge instead of memory blocks. Root MEMORY.md is the discovery index;
+other root Markdown files are always-loaded core memory, so keep stable
+identity and behavior there. Keep project notes, learned preferences, and
+history in focused Markdown files under child directories indexed by their
+own MEMORY.md. Never store secrets in memory.`;
 
 function withMemfsGuidance(
   systemPrompt: CreateAgentOptions["systemPrompt"],

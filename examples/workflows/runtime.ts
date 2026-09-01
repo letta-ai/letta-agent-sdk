@@ -5,12 +5,18 @@
  * Claude Code dynamic-workflow contract (https://code.claude.com/docs/en/workflows):
  *
  * - agent(task, opts)          spawn one worker agent, resolve to its result
+ * - reason(task, opts)         run one tool-less stage as an agent-free query
  * - parallel(thunks)           run tasks concurrently, barrier until all settle
  * - pipeline(items, ...stages) run each item through stages independently
  * - phase(title) / log(msg)    progress narration
  *
- * agent() resolves to null on failure instead of rejecting, so fan-outs
- * degrade per-item: filter results with .filter(Boolean).
+ * agent() and reason() resolve to null on failure instead of rejecting, so
+ * fan-outs degrade per-item: filter results with .filter(Boolean).
+ *
+ * Use agent() for stages that need tools, a sandbox, or server-side tools;
+ * use reason() for stages that only think over text (judges, synthesizers,
+ * extractors). reason() runs on stateless conversations with agent_id: null —
+ * no agent is created or deleted.
  */
 
 import { LettaAgentClient } from '../../src/index.js';
@@ -19,6 +25,7 @@ import type {
   LettaCodeClientSessionOptions,
   LettaCodeCloudSandboxOptions,
   PermissionMode,
+  SDKResultMessage,
 } from '../../src/index.js';
 
 const DEFAULT_MODEL = process.env.LETTA_WORKFLOW_MODEL ?? 'haiku';
@@ -78,6 +85,24 @@ let workflowClient = new LettaAgentClient();
 /** Route workers through a different client, e.g. cloud with managed sandboxes. */
 export function setWorkflowClient(client: LettaAgentClient): void {
   workflowClient = client;
+}
+
+// Agent-free queries run over the Letta API through a local app-server, so
+// they need LETTA_API_KEY regardless of where the tool-using workers run.
+// The letta-code local backend has no ephemeral-conversation support.
+let queryClient: LettaAgentClient | null = null;
+
+function getQueryClient(): LettaAgentClient {
+  if (!process.env.LETTA_API_KEY) {
+    throw new Error(
+      'reason() runs agent-free queries against the Letta API; set LETTA_API_KEY.',
+    );
+  }
+  queryClient ??= new LettaAgentClient({
+    backend: 'local',
+    appServer: { harnessBackend: 'api', requestTimeoutMs: 300_000 },
+  });
+  return queryClient;
 }
 
 /**
@@ -217,6 +242,86 @@ export async function agent<T = string>(
     if (agentId) {
       pendingCleanup.push(workflowClient.agents.delete(agentId).catch(() => {}));
     }
+  }
+}
+
+export interface ReasonOptions {
+  /** Display label for progress lines (defaults to a prompt prefix). */
+  label?: string;
+  /** JSON schema for structured output; reason() returns the parsed value. */
+  schema?: object;
+  model?: string;
+  /** System prompt for the ephemeral conversation. */
+  system?: string;
+}
+
+/**
+ * Run one tool-less stage as an agent-free query.
+ *
+ * Each call creates a stateless conversation (agent_id: null) via
+ * client.query(), streams it to completion, and resolves to the final text
+ * (or the parsed value when `schema` is set). No agent is created or
+ * deleted. Use this for judges, synthesizers, extractors, and any other
+ * stage that only reasons over text it is given.
+ */
+export async function reason<T = string>(
+  task: string,
+  opts: ReasonOptions = {},
+): Promise<T | null> {
+  const label = opts.label ?? task.replace(/\s+/g, ' ').slice(0, 60);
+  await slots.acquire();
+  const started = Date.now();
+  try {
+    const client = getQueryClient();
+    const system =
+      opts.system ??
+      'You are one stage of a scripted workflow. Your final message is parsed by a script, not read by a human. Return only the requested output, no preamble.';
+    const prompt = opts.schema
+      ? `${task}\n\nRespond with ONLY a JSON instance conforming to this JSON Schema — the data itself, no markdown fences, no prose, and no schema keywords like "type", "properties", or "required":\n${JSON.stringify(opts.schema)}`
+      : task;
+
+    let result: SDKResultMessage | undefined;
+    for await (const message of client.query({
+      prompt,
+      options: {
+        model: opts.model ?? DEFAULT_MODEL,
+        system,
+        allowedTools: [],
+      },
+    })) {
+      if (message.type === 'result') result = message;
+    }
+
+    stats.agents++;
+    stats.costUsd += result?.totalCostUsd ?? 0;
+
+    if (!result?.success || typeof result.result !== 'string') {
+      stats.failures++;
+      const detail = result?.error ?? result?.errorCode ?? 'no output';
+      console.log(`${COLORS.fail}✗${COLORS.reset} ${label} ${COLORS.dim}(${detail})${COLORS.reset}`);
+      return null;
+    }
+
+    let value: unknown = result.result.trim();
+    if (opts.schema) {
+      try {
+        value = extractJson(result.result);
+      } catch {
+        stats.failures++;
+        console.log(`${COLORS.fail}✗${COLORS.reset} ${label} ${COLORS.dim}(unparseable reply)${COLORS.reset}`);
+        return null;
+      }
+    }
+
+    const seconds = ((Date.now() - started) / 1000).toFixed(1);
+    console.log(`${COLORS.ok}✓${COLORS.reset} ${currentPhase ? `[${currentPhase}] ` : ''}${label} ${COLORS.dim}(${seconds}s)${COLORS.reset}`);
+    return value as T;
+  } catch (error) {
+    stats.failures++;
+    console.log(`${COLORS.fail}✗${COLORS.reset} ${label} ${COLORS.dim}(${error instanceof Error ? error.message : String(error)})${COLORS.reset}`);
+    return null;
+  } finally {
+    slots.release();
   }
 }
 

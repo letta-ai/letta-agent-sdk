@@ -5,11 +5,14 @@ Script-orchestrated multi-agent workflows built on the Letta Agent SDK, followin
 `runtime.ts` provides the primitives:
 
 - `agent(task, opts)` — spawn one ephemeral worker agent, resolve to its final text (or a parsed value when `opts.schema` is set). Resolves to `null` on failure instead of rejecting.
+- `reason(task, opts)` — run one tool-less stage as an agent-free query on a stateless conversation (`agent_id: null`). No agent is created or deleted. Requires `LETTA_API_KEY`.
 - `parallel(thunks)` — run tasks concurrently with a barrier.
 - `pipeline(items, ...stages)` — run each item through stages independently, no barrier between stages.
 - `phase(title)` / `log(msg)` — progress narration.
 
-Workers are hidden agents created without memfs, run as one-shot conversations with `permissionMode: 'unrestricted'`, and are deleted when they finish. Concurrency is capped (`LETTA_WORKFLOW_CONCURRENCY`, default 4); the model defaults to `haiku` (`LETTA_WORKFLOW_MODEL`), and any Letta model handle works per-agent, so a single workflow can mix providers.
+Pick the primitive by what the stage needs. A stage that reads or edits files, runs commands, or uses server-side tools is a worker: `agent()` creates an ephemeral agent without memfs, runs the task as a one-shot conversation with `permissionMode: 'unrestricted'`, and deletes the agent when it finishes. A stage that only reasons over text the script hands it — judges, extractors, synthesizers without repository access — should be `reason()`: the SDK's `query()` API runs it in an ephemeral stateless conversation, so nothing is created that has to be cleaned up.
+
+Concurrency is capped across both (`LETTA_WORKFLOW_CONCURRENCY`, default 4); the model defaults to `haiku` (`LETTA_WORKFLOW_MODEL`), and any Letta model handle works per-stage, so a single workflow can mix providers.
 
 ## Choosing a backend
 
