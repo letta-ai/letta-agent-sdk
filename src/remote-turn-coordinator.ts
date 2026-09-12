@@ -492,9 +492,6 @@ export class RemoteTurnCoordinator {
     }
 
     if (messageType === "usage_statistics" && active.pendingTerminal) {
-      if (active.pendingTerminalTimeout) {
-        this.completeActiveTurn(active.pendingTerminal);
-      }
       return;
     }
 

@@ -619,10 +619,23 @@ class FakeCloudSocket {
       runtime,
       delta: {
         message_type: "usage_statistics",
+        prompt_tokens: 10,
+        completion_tokens: 2,
+        total_tokens: 12,
+        step_count: 1,
+      },
+    });
+    this.serverMessageTo("stream", {
+      type: "stream_delta",
+      seq: 504,
+      event_seq: 4,
+      runtime,
+      delta: {
+        message_type: "usage_statistics",
         prompt_tokens: 100,
         completion_tokens: 20,
         total_tokens: 120,
-        step_count: 3,
+        step_count: 1,
       },
     });
   }
@@ -845,24 +858,32 @@ describe("CloudEnvironmentSession", () => {
       expect(messages.map((message) => message.type)).toEqual([
         "assistant",
         "stream_event",
+        "stream_event",
         "result",
       ]);
       expect(messages[1]).toMatchObject({
         type: "stream_event",
         event: {
           message_type: "usage_statistics",
-          step_count: 3,
+          total_tokens: 12,
         },
       });
       expect(messages[2]).toMatchObject({
+        type: "stream_event",
+        event: {
+          message_type: "usage_statistics",
+          total_tokens: 120,
+        },
+      });
+      expect(messages[3]).toMatchObject({
         type: "result",
         success: true,
         runIds: ["run-cloud-usage"],
         usage: {
-          promptTokens: 100,
-          completionTokens: 20,
-          totalTokens: 120,
-          stepCount: 3,
+          promptTokens: 110,
+          completionTokens: 22,
+          totalTokens: 132,
+          stepCount: 2,
         },
       });
     } finally {
