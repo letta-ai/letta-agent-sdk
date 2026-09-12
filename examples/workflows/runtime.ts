@@ -58,7 +58,7 @@ export interface AgentOptions {
   canUseTool?: CanUseToolCallback;
 }
 
-export const stats = { agents: 0, failures: 0, costUsd: 0 };
+export const stats = { agents: 0, failures: 0, totalTokens: 0 };
 
 class Semaphore {
   private queue: Array<() => void> = [];
@@ -191,13 +191,13 @@ export async function agent<T = string>(
 
     let result = await workflowClient.prompt(instruction, agentId, sessionOptions);
     stats.agents++;
-    stats.costUsd += result.totalCostUsd ?? 0;
+    stats.totalTokens += result.usage?.totalTokens ?? 0;
 
     // Turns fail transiently often enough that one retry is worth it: in a
     // fan-out, a single unlucky worker otherwise drops a whole file or claim.
     if (!result.success && result.recoverable !== false) {
       result = await workflowClient.prompt(instruction, agentId, sessionOptions);
-      stats.costUsd += result.totalCostUsd ?? 0;
+      stats.totalTokens += result.usage?.totalTokens ?? 0;
     }
 
     if (!result.success || !result.result) {
@@ -219,7 +219,7 @@ export async function agent<T = string>(
           agentId,
           sessionOptions,
         );
-        stats.costUsd += result.totalCostUsd ?? 0;
+        stats.totalTokens += result.usage?.totalTokens ?? 0;
         try {
           value = extractJson(result.result ?? '');
         } catch {
@@ -293,7 +293,7 @@ export async function reason<T = string>(
     }
 
     stats.agents++;
-    stats.costUsd += result?.totalCostUsd ?? 0;
+    stats.totalTokens += result?.usage?.totalTokens ?? 0;
 
     if (!result?.success || typeof result.result !== 'string') {
       stats.failures++;
@@ -359,8 +359,8 @@ export async function pipeline(items: any[], ...stages: Stage[]): Promise<any[]>
 /** Print run totals and wait for worker-agent deletions. Call once at the end of a workflow script. */
 export async function printSummary(): Promise<void> {
   await Promise.allSettled(pendingCleanup);
-  const cost = stats.costUsd > 0 ? `, $${stats.costUsd.toFixed(4)}` : '';
+  const tokens = stats.totalTokens > 0 ? `, ${stats.totalTokens} tokens` : '';
   console.log(
-    `\n${COLORS.dim}${stats.agents} agents, ${stats.failures} failures${cost}${COLORS.reset}`,
+    `\n${COLORS.dim}${stats.agents} agents, ${stats.failures} failures${tokens}${COLORS.reset}`,
   );
 }

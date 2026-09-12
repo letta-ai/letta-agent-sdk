@@ -594,6 +594,13 @@ class FakeCloudSocket {
         run_id: "run-cloud-usage",
       },
     });
+    this.serverMessageTo("control", {
+      type: "turn_finished",
+      runtime,
+      turn_id: "turn-cloud-usage",
+      run_id: "run-cloud-usage",
+      stop_reason: "end_turn",
+    });
     this.serverMessageTo("stream", {
       type: "stream_delta",
       seq: 502,
@@ -604,13 +611,6 @@ class FakeCloudSocket {
         stop_reason: "end_turn",
         run_id: "run-cloud-usage",
       },
-    });
-    this.serverMessageTo("control", {
-      type: "turn_finished",
-      runtime,
-      turn_id: "turn-cloud-usage",
-      run_id: "run-cloud-usage",
-      stop_reason: "end_turn",
     });
     this.serverMessageTo("stream", {
       type: "stream_delta",
@@ -822,7 +822,7 @@ describe("CloudEnvironmentSession", () => {
     );
   });
 
-  test("keeps hosted usage after stop ahead of the terminal result", async () => {
+  test("keeps hosted usage when turn_finished arrives before stream metadata", async () => {
     resetFakeCloud();
     FakeCloudSocket.scenario = "usage_after_stop";
     const requests: RecordedRequest[] = [];

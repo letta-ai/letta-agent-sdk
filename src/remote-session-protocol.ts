@@ -518,6 +518,45 @@ export function normalizeUsageStatistics(
   return Object.keys(usage).length > 0 ? usage : undefined;
 }
 
+function sumUsageCounter(
+  current: number | undefined,
+  next: number | undefined,
+): number | undefined {
+  return next === undefined ? current : (current ?? 0) + next;
+}
+
+export function mergeTokenUsage(
+  current: SDKTokenUsage | undefined,
+  next: SDKTokenUsage,
+): SDKTokenUsage {
+  const usage: SDKTokenUsage = {
+    promptTokens: sumUsageCounter(current?.promptTokens, next.promptTokens),
+    completionTokens: sumUsageCounter(
+      current?.completionTokens,
+      next.completionTokens,
+    ),
+    totalTokens: sumUsageCounter(current?.totalTokens, next.totalTokens),
+    cachedInputTokens: sumUsageCounter(
+      current?.cachedInputTokens,
+      next.cachedInputTokens,
+    ),
+    cacheWriteTokens: sumUsageCounter(
+      current?.cacheWriteTokens,
+      next.cacheWriteTokens,
+    ),
+    reasoningTokens: sumUsageCounter(
+      current?.reasoningTokens,
+      next.reasoningTokens,
+    ),
+    stepCount: sumUsageCounter(current?.stepCount, next.stepCount),
+    contextTokens: next.contextTokens ?? current?.contextTokens,
+  };
+  for (const key of Object.keys(usage) as Array<keyof SDKTokenUsage>) {
+    if (usage[key] === undefined) delete usage[key];
+  }
+  return usage;
+}
+
 function loopStatusRecord(message: ProtocolMessage): Record<string, unknown> | null {
   if (message.type !== "update_loop_status") return null;
   const loopStatus = message.loop_status;

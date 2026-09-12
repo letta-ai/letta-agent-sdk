@@ -1056,7 +1056,7 @@ export type SDKErrorCode =
 
 type LettaUsageStatistics = LettaStreamingResponse.LettaUsageStatistics;
 
-/** Token usage reported for one completed turn. */
+/** Token usage accumulated across all model steps in one completed turn. */
 export interface SDKTokenUsage {
   promptTokens?: NonNullable<LettaUsageStatistics["prompt_tokens"]>;
   completionTokens?: NonNullable<LettaUsageStatistics["completion_tokens"]>;
@@ -1064,6 +1064,7 @@ export interface SDKTokenUsage {
   cachedInputTokens?: NonNullable<LettaUsageStatistics["cached_input_tokens"]>;
   cacheWriteTokens?: NonNullable<LettaUsageStatistics["cache_write_tokens"]>;
   reasoningTokens?: NonNullable<LettaUsageStatistics["reasoning_tokens"]>;
+  /** Latest context window estimate reported during the turn. */
   contextTokens?: NonNullable<LettaUsageStatistics["context_tokens"]>;
   stepCount?: NonNullable<LettaUsageStatistics["step_count"]>;
 }

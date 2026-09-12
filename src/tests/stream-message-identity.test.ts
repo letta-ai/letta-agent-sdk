@@ -377,7 +377,7 @@ describe("remote turn terminal receipts", () => {
     coordinator.close();
   });
 
-  test("keeps trailing usage ahead of the terminal result", async () => {
+  test("accumulates usage events and keeps them ahead of the terminal result", async () => {
     const coordinator = new RemoteTurnCoordinator({
       label: "test",
       onDeviceStatus: () => {},
@@ -389,6 +389,20 @@ describe("remote turn terminal receipts", () => {
         content: "done",
         run_id: "run-usage",
         id: "message-usage",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "usage_statistics",
+        prompt_tokens: 10,
+        completion_tokens: 2,
+        total_tokens: 12,
+        cached_input_tokens: 4,
+        cache_write_tokens: 1,
+        reasoning_tokens: 1,
+        context_tokens: 50,
+        step_count: 1,
       }),
       runtime,
     );
@@ -411,7 +425,7 @@ describe("remote turn terminal receipts", () => {
         cache_write_tokens: 5,
         reasoning_tokens: 7,
         context_tokens: 90,
-        step_count: 3,
+        step_count: 1,
       }),
       runtime,
     );
@@ -434,7 +448,14 @@ describe("remote turn terminal receipts", () => {
       type: "stream_event",
       event: {
         message_type: "usage_statistics",
-        step_count: 3,
+        total_tokens: 12,
+      },
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "stream_event",
+      event: {
+        message_type: "usage_statistics",
+        total_tokens: 120,
       },
     });
     expect(await coordinator.nextMessage()).toMatchObject({
@@ -443,14 +464,14 @@ describe("remote turn terminal receipts", () => {
       result: "done",
       runIds: ["run-usage"],
       usage: {
-        promptTokens: 100,
-        completionTokens: 20,
-        totalTokens: 120,
-        cachedInputTokens: 40,
-        cacheWriteTokens: 5,
-        reasoningTokens: 7,
+        promptTokens: 110,
+        completionTokens: 22,
+        totalTokens: 132,
+        cachedInputTokens: 44,
+        cacheWriteTokens: 6,
+        reasoningTokens: 8,
         contextTokens: 90,
-        stepCount: 3,
+        stepCount: 2,
       },
     });
     coordinator.close();
