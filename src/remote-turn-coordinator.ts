@@ -16,6 +16,7 @@ import {
   isFailureStopReason,
   loopStatusRunIds,
   loopStatusValue,
+  normalizeUsageStatistics,
   normalizeCallerOtid,
   queueItems,
   sameRuntime,
@@ -465,6 +466,10 @@ export class RemoteTurnCoordinator {
     const active = this.activeTurn;
     if (!active) return;
     const messageType = streamDeltaMessageType(delta);
+    if (messageType === "usage_statistics") {
+      const usage = normalizeUsageStatistics(delta);
+      if (usage) active.usage = { ...active.usage, ...usage };
+    }
     if (messageType === "stop_reason") {
       const stopReason = streamDeltaStopReason(delta) ?? null;
       if (stopReason === "requires_approval") {
@@ -719,6 +724,7 @@ export class RemoteTurnCoordinator {
       stopReason,
       durationMs:
         Date.now() - (tracker?.startedAt || this._activeTurnStartedAt),
+      ...(tracker?.usage ? { usage: tracker.usage } : {}),
       conversationId: turn.runtime.conversation_id,
       runIds: turn.runIds.length > 0 ? turn.runIds : undefined,
     };

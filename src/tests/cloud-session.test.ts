@@ -858,6 +858,12 @@ describe("CloudEnvironmentSession", () => {
         type: "result",
         success: true,
         runIds: ["run-cloud-usage"],
+        usage: {
+          promptTokens: 100,
+          completionTokens: 20,
+          totalTokens: 120,
+          stepCount: 3,
+        },
       });
     } finally {
       session.close();

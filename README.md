@@ -50,6 +50,11 @@ await session.send(message);
 measures the tracked turn and excludes session initialization; measure `ready()`
 separately when startup latency matters.
 
+`SDKResultMessage.usage` contains normalized token counts when the runtime reports
+a `usage_statistics` event. Use `result.usage?.totalTokens` for one-shot token
+accounting. The SDK does not derive dollar cost from token counts. `totalCostUsd`
+remains undefined while the runtime omits cost data.
+
 For a simple question that should not create or use an agent, call `query()`.
 It creates an agent-free ephemeral conversation from the supplied model and
 system prompt, streams the turn, and closes the runtime when iteration ends:

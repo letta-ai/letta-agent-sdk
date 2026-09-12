@@ -1035,6 +1035,12 @@ describe("LettaAgentClient", () => {
       expect(result.success).toBe(true);
       expect(result.result).toBe("hello from app-server");
       expect(result.runIds).toEqual(["run-1"]);
+      expect(result.usage).toEqual({
+        promptTokens: 10,
+        completionTokens: 2,
+        totalTokens: 12,
+        stepCount: 1,
+      });
 
       expect(fakeControlSocket().sent[0]).toMatchObject({
         type: "runtime_start",
@@ -1084,6 +1090,7 @@ describe("LettaAgentClient", () => {
         result: "hello from app-server",
         runIds: ["run-1"],
       });
+      expect(result).not.toHaveProperty("usage");
     } finally {
       FakeAppServerSocket.inputScenario = "normal";
       session.close();
