@@ -61,6 +61,7 @@ jobs:
 
           cascade_id="letta-code-v${latest_version}-sdk-sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           gh workflow run release.yml \
+            --repo "$GITHUB_REPOSITORY" \
             --ref main \
             -f version_type=patch \
             -f prerelease= \
