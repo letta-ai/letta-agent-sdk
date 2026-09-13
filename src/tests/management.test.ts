@@ -362,6 +362,73 @@ async function exerciseManagementApi(
 }
 
 describe("portable management namespaces", () => {
+  test("lists and restores archived conversations over Cloud", async () => {
+    const requests: RecordedRequest[] = [];
+    const client = new PortableLettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createManagementFetch(requests),
+    });
+
+    await expect(
+      client.conversations.list({ archiveStatus: "archived" }),
+    ).resolves.toHaveLength(1);
+    await expect(
+      client.conversations.update("conv-1", { archived: false }),
+    ).resolves.toMatchObject({ id: "conv-1", archived: false });
+
+    expect(requests.map(({ url, method, body }) => ({
+      path: url.pathname,
+      query: Object.fromEntries(url.searchParams),
+      method,
+      body,
+    }))).toEqual([
+      {
+        path: "/v1/conversations/",
+        query: { archive_status: "archived" },
+        method: "GET",
+        body: undefined,
+      },
+      {
+        path: "/v1/conversations/conv-1",
+        query: {},
+        method: "PATCH",
+        body: { archived: false },
+      },
+    ]);
+  });
+
+  test("lists and restores archived conversations over the App Server", async () => {
+    ManagementSocket.instances = [];
+    const client = new PortableLettaAgentClient({
+      backend: "remote",
+      url: "ws://remote.test/ws",
+      WebSocket: ManagementSocket,
+    });
+
+    await expect(
+      client.conversations.list({ archiveStatus: "archived" }),
+    ).resolves.toHaveLength(1);
+    await expect(
+      client.conversations.update("conv-1", { archived: false }),
+    ).resolves.toMatchObject({ id: "conv-1", archived: false });
+
+    expect(
+      ManagementSocket.instances.flatMap((socket) => socket.sent),
+    ).toEqual([
+      expect.objectContaining({
+        type: "conversation_list",
+        query: { archive_status: "archived" },
+      }),
+      expect.objectContaining({
+        type: "conversation_update",
+        conversation_id: "conv-1",
+        body: { archived: false },
+      }),
+    ]);
+  });
+
   test("forks through a selected message and archives the fork over Cloud", async () => {
     const requests: RecordedRequest[] = [];
     const client = new PortableLettaAgentClient({
