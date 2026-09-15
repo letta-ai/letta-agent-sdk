@@ -1,6 +1,6 @@
 {
   "name": "@letta-ai/letta-agent-sdk",
-  "version": "0.8.8",
+  "version": "0.8.9",
   "packageManager": "bun@1.3.14",
   "description": "SDK for programmatic control of Letta agents",
   "type": "module",
@@ -40,7 +40,7 @@
   },
   "dependencies": {
     "@letta-ai/letta-client": "^1.12.1",
-    "@letta-ai/letta-code": "0.32.10"
+    "@letta-ai/letta-code": "0.32.11"
   },
   "devDependencies": {
     "@modelcontextprotocol/server-everything": "^2026.7.4",
