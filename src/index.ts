@@ -68,6 +68,7 @@ export type {
   SDKToolResultMessage,
   SDKReasoningMessage,
   SDKResultMessage,
+  SDKTokenUsage,
   SDKErrorCode,
   SDKStreamEventMessage,
   SDKStreamEventPayload,

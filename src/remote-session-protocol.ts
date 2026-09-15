@@ -11,6 +11,7 @@ import type {
   ReasoningEffort,
   SDKErrorCode,
   SDKQueueItem,
+  SDKTokenUsage,
   SendMessage,
   SessionDeviceStatus,
   SessionDiffHunk,
@@ -147,6 +148,7 @@ export type TurnTracker = {
   queuedAt: number;
   startedAt: number;
   assistantText: string;
+  usage?: SDKTokenUsage;
   runIds: Set<string>;
   observedTurnEvidence: boolean;
   observedRequiresApprovalStop: boolean;
@@ -488,6 +490,71 @@ export function streamDeltaSeqId(
 
 export function streamDeltaStopReason(delta: Record<string, unknown>): string | null | undefined {
   return typeof delta.stop_reason === "string" ? delta.stop_reason : undefined;
+}
+
+function usageNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+export function normalizeUsageStatistics(
+  delta: Record<string, unknown>,
+): SDKTokenUsage | undefined {
+  if (streamDeltaMessageType(delta) !== "usage_statistics") return undefined;
+  const usage: SDKTokenUsage = {
+    promptTokens: usageNumber(delta.prompt_tokens),
+    completionTokens: usageNumber(delta.completion_tokens),
+    totalTokens: usageNumber(delta.total_tokens),
+    cachedInputTokens: usageNumber(delta.cached_input_tokens),
+    cacheWriteTokens: usageNumber(delta.cache_write_tokens),
+    reasoningTokens: usageNumber(delta.reasoning_tokens),
+    contextTokens: usageNumber(delta.context_tokens),
+    stepCount: usageNumber(delta.step_count),
+  };
+  for (const key of Object.keys(usage) as Array<keyof SDKTokenUsage>) {
+    if (usage[key] === undefined) delete usage[key];
+  }
+  return Object.keys(usage).length > 0 ? usage : undefined;
+}
+
+function sumUsageCounter(
+  current: number | undefined,
+  next: number | undefined,
+): number | undefined {
+  return next === undefined ? current : (current ?? 0) + next;
+}
+
+export function mergeTokenUsage(
+  current: SDKTokenUsage | undefined,
+  next: SDKTokenUsage,
+): SDKTokenUsage {
+  const usage: SDKTokenUsage = {
+    promptTokens: sumUsageCounter(current?.promptTokens, next.promptTokens),
+    completionTokens: sumUsageCounter(
+      current?.completionTokens,
+      next.completionTokens,
+    ),
+    totalTokens: sumUsageCounter(current?.totalTokens, next.totalTokens),
+    cachedInputTokens: sumUsageCounter(
+      current?.cachedInputTokens,
+      next.cachedInputTokens,
+    ),
+    cacheWriteTokens: sumUsageCounter(
+      current?.cacheWriteTokens,
+      next.cacheWriteTokens,
+    ),
+    reasoningTokens: sumUsageCounter(
+      current?.reasoningTokens,
+      next.reasoningTokens,
+    ),
+    stepCount: sumUsageCounter(current?.stepCount, next.stepCount),
+    contextTokens: next.contextTokens ?? current?.contextTokens,
+  };
+  for (const key of Object.keys(usage) as Array<keyof SDKTokenUsage>) {
+    if (usage[key] === undefined) delete usage[key];
+  }
+  return usage;
 }
 
 function loopStatusRecord(message: ProtocolMessage): Record<string, unknown> | null {
