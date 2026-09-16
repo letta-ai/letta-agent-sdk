@@ -772,7 +772,13 @@ describe("CloudEnvironmentSession", () => {
     expect(requests).toHaveLength(0);
   });
 
-  test("query creates an ephemeral conversation without an agent", async () => {
+  test.each([undefined, true, false])("query creates an ephemeral conversation without an agent (subagent=%s)", async (isSubagent) => {
+    const lineage = isSubagent === undefined
+      ? {}
+      : { parentAgentId: "agent-parent", name: "worker", isSubagent };
+    const wireLineage = isSubagent === undefined
+      ? {}
+      : { parent_agent_id: "agent-parent", name: "worker", is_subagent: isSubagent };
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
     const client = new LettaAgentClient({
@@ -786,17 +792,26 @@ describe("CloudEnvironmentSession", () => {
     });
 
     const messages = [];
-    for await (const message of client.query({
+    const query = client.query({
       prompt: "What is 2 + 2?",
       options: {
         model: "openai/gpt-5.6-luna",
         system: "Answer with one number.",
+        ...lineage,
         modelSettings: { parallel_tool_calls: false },
         contextWindowLimit: 64_000,
       },
-    })) {
+    });
+    expect(query.conversationId).toBeNull();
+    expect(query.agentId).toBeNull();
+    for await (const message of query) {
+      expect(query.conversationId).toBe("conv-ephemeral");
+      expect(query.agentId).toBeNull();
       messages.push(message);
     }
+    query.close();
+    expect(query.conversationId).toBe("conv-ephemeral");
+    expect(query.agentId).toBeNull();
 
     expect(requests).toContainEqual(
       expect.objectContaining({
@@ -805,6 +820,7 @@ describe("CloudEnvironmentSession", () => {
         body: {
           model: "openai/gpt-5.6-luna",
           system: "Answer with one number.",
+          ...wireLineage,
           model_settings: { parallel_tool_calls: false },
           context_window_limit: 64_000,
         },

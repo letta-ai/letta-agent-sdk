@@ -778,6 +778,13 @@ export class AppServerSession extends RemoteClientSessionCore {
           body: {
             model: create.model,
             system: create.system,
+            ...(create.parentAgentId !== undefined
+              ? { parent_agent_id: create.parentAgentId }
+              : {}),
+            ...(create.name !== undefined ? { name: create.name } : {}),
+            ...(create.isSubagent !== undefined
+              ? { is_subagent: create.isSubagent }
+              : {}),
             ...(create.modelSettings !== undefined
               ? { model_settings: create.modelSettings }
               : {}),

@@ -21,6 +21,12 @@ export interface AgentFreeQueryOptions
   system: string;
   /** Provider model settings persisted on the ephemeral conversation. */
   modelSettings?: Record<string, unknown>;
+  /** Invoking parent agent, persisted when the conversation is created. */
+  parentAgentId?: string;
+  /** Display name persisted on the ephemeral conversation. */
+  name?: string;
+  /** Whether the ephemeral conversation represents a subagent. */
+  isSubagent?: boolean;
   /** Optional context-window limit persisted on the ephemeral conversation. */
   contextWindowLimit?: number | null;
 }
@@ -33,6 +39,10 @@ export interface QueryParams {
 
 /** Stream returned by query(), with controls for long-running execution. */
 export interface Query extends AsyncGenerator<SDKMessage, void, unknown> {
+  /** Created conversation ID; null until initialized, retained after close. */
+  readonly conversationId: string | null;
+  /** Underlying session agent ID; null for agent-free conversations. */
+  readonly agentId: string | null;
   /** Interrupt the active turn without closing the query session. */
   interrupt(): Promise<void>;
   /** Close the query and release its underlying session. */

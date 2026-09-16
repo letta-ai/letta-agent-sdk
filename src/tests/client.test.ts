@@ -1679,26 +1679,52 @@ describe("LettaAgentClient", () => {
     });
   });
 
-  test("query creates an agent-free ephemeral conversation", async () => {
+  test.each([
+    ["remote", undefined],
+    ["remote", true],
+    ["remote", false],
+    ["local", undefined],
+    ["local", true],
+    ["local", false],
+  ] as const)("query creates an agent-free conversation (%s, subagent=%s)", async (backend, isSubagent) => {
     FakeAppServerSocket.instances = [];
-    const client = new LettaAgentClient({
-      backend: "remote",
+    const connection = {
       url: "ws://127.0.0.1:4500/ws",
       WebSocket: FakeAppServerSocket,
-    });
+    };
+    const client = new LettaAgentClient(
+      backend === "remote"
+        ? { backend, ...connection }
+        : { backend, appServer: { ...connection, harnessBackend: "api" } },
+    );
+    const lineage = isSubagent === undefined
+      ? {}
+      : { parentAgentId: "agent-parent", name: "worker", isSubagent };
+    const wireLineage = isSubagent === undefined
+      ? {}
+      : { parent_agent_id: "agent-parent", name: "worker", is_subagent: isSubagent };
 
     const messages = [];
-    for await (const message of client.query({
+    const query = client.query({
       prompt: "What is 2 + 2?",
       options: {
         model: "openai/gpt-5.6-luna",
         system: "Answer with one number.",
+        ...lineage,
         modelSettings: { parallel_tool_calls: false },
         contextWindowLimit: 64_000,
       },
-    })) {
+    });
+    expect(query.conversationId).toBeNull();
+    expect(query.agentId).toBeNull();
+    for await (const message of query) {
+      expect(query.conversationId).toBe("conv-created");
+      expect(query.agentId).toBeNull();
       messages.push(message);
     }
+    query.close();
+    expect(query.conversationId).toBe("conv-created");
+    expect(query.agentId).toBeNull();
 
     const runtimeStart = fakeControlSocket().sent.find(
       (sent) => (sent as { type?: string }).type === "runtime_start",
@@ -1709,6 +1735,7 @@ describe("LettaAgentClient", () => {
         body: {
           model: "openai/gpt-5.6-luna",
           system: "Answer with one number.",
+          ...wireLineage,
           model_settings: { parallel_tool_calls: false },
           context_window_limit: 64_000,
         },
@@ -1716,6 +1743,13 @@ describe("LettaAgentClient", () => {
     });
     expect(runtimeStart).not.toHaveProperty("agent_id");
     expect(runtimeStart).not.toHaveProperty("create_agent");
+    expect((runtimeStart as { create_conversation: { body: unknown } }).create_conversation.body).toEqual({
+      model: "openai/gpt-5.6-luna",
+      system: "Answer with one number.",
+      ...wireLineage,
+      model_settings: { parallel_tool_calls: false },
+      context_window_limit: 64_000,
+    });
     expect(messages).toContainEqual(
       expect.objectContaining({ type: "result", success: true }),
     );

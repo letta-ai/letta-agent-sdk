@@ -95,6 +95,13 @@ export class LettaAgentClient extends LettaAgentClientBase {
       createConversation: {
         model: queryOptions.model,
         system: queryOptions.system,
+        ...(queryOptions.parentAgentId !== undefined
+          ? { parentAgentId: queryOptions.parentAgentId }
+          : {}),
+        ...(queryOptions.name !== undefined ? { name: queryOptions.name } : {}),
+        ...(queryOptions.isSubagent !== undefined
+          ? { isSubagent: queryOptions.isSubagent }
+          : {}),
         ...(queryOptions.modelSettings !== undefined
           ? { modelSettings: queryOptions.modelSettings }
           : {}),

@@ -105,6 +105,9 @@ function agentFreeSessionOptions(
 ): LettaCodeClientSessionOptions {
   const {
     system: _system,
+    parentAgentId: _parentAgentId,
+    name: _name,
+    isSubagent: _isSubagent,
     modelSettings: _modelSettings,
     contextWindowLimit: _contextWindowLimit,
     ...sessionOptions
@@ -431,6 +434,13 @@ export class LettaAgentClientBase implements AsyncDisposable {
         createConversation: {
           model: options.model,
           system: options.system,
+          ...(options.parentAgentId !== undefined
+            ? { parentAgentId: options.parentAgentId }
+            : {}),
+          ...(options.name !== undefined ? { name: options.name } : {}),
+          ...(options.isSubagent !== undefined
+            ? { isSubagent: options.isSubagent }
+            : {}),
           ...(options.modelSettings !== undefined
             ? { modelSettings: options.modelSettings }
             : {}),
@@ -454,6 +464,13 @@ export class LettaAgentClientBase implements AsyncDisposable {
           body: {
             model: options.model,
             system: options.system,
+            ...(options.parentAgentId !== undefined
+              ? { parent_agent_id: options.parentAgentId }
+              : {}),
+            ...(options.name !== undefined ? { name: options.name } : {}),
+            ...(options.isSubagent !== undefined
+              ? { is_subagent: options.isSubagent }
+              : {}),
             ...(options.modelSettings !== undefined
               ? { model_settings: options.modelSettings }
               : {}),

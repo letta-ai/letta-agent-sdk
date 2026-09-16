@@ -42,6 +42,9 @@ export type RuntimeSessionMode =
         model: string;
         system: string;
         modelSettings?: Record<string, unknown>;
+        parentAgentId?: string;
+        name?: string;
+        isSubagent?: boolean;
         contextWindowLimit?: number | null;
       };
       options: LettaCodeClientSessionOptions;
