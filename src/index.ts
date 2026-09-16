@@ -30,6 +30,12 @@ import { LettaAgentClient } from "./client.js";
 import { connectMcpServers as connectNodeMcpServers } from "./mcp.js";
 import { registerMcpConnector } from "./mcp-runtime.js";
 
+export { startLocalAppServer } from "./local-app-server.js";
+export type {
+  LocalAppServerHandle,
+  StartLocalAppServerOptions,
+} from "./local-app-server.js";
+
 registerMcpConnector(connectNodeMcpServers);
 import type {
   CreateSessionOptions,

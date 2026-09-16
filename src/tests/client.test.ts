@@ -42,6 +42,7 @@ class FakeAppServerSocket {
     | "terminalWithoutUsage"
     | "hang" = "normal";
   static failNextRuntimeStart = false;
+  static supportsWorkspaceSandbox = true;
   static deferReflectionSettingsResponse = false;
   static failNextReflectionSettings = false;
   static pendingReflectionSettingsResponse: (() => void) | null = null;
@@ -173,6 +174,27 @@ function fakeAppServerHandle(
   // client's own pair so tests can run several client instances at once.
   const control = sender;
   const stream = fakeStreamPairOf(sender);
+
+  if (command.type === "app_server_info") {
+    control.serverMessage({
+      type: "app_server_info_response",
+      request_id: command.request_id,
+      success: true,
+      backend: "api",
+      letta_code_version: "test",
+      protocol_version: 1,
+      capabilities: {
+        agent_management: true,
+        conversation_management: true,
+        memory_management: true,
+        runtime_start: true,
+        runtime_workspace_sandbox:
+          FakeAppServerSocket.supportsWorkspaceSandbox,
+        split_channels: false,
+      },
+    });
+    return;
+  }
 
   if (command.type === "conversation_retrieve") {
     const conversationId = command.conversation_id as string;
@@ -859,6 +881,67 @@ describe("LettaAgentClient", () => {
         "unavailable in a stateless session",
       );
     } finally {
+      session.close();
+    }
+  });
+
+  test("sends a capability-gated runtime workspace sandbox", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+    const session = client.createSession("agent-123", {
+      cwd: "/tmp/runs/run-a",
+      workspaceSandbox: {
+        root: "/tmp/runs/run-a",
+        isolationRoot: "/tmp/runs",
+      },
+    });
+    try {
+      await asAdvanced(session).initialize();
+      expect(
+        fakeControlSocket().sent.map(
+          (command) => (command as { type: string }).type,
+        ),
+      ).toEqual(["app_server_info", "runtime_start"]);
+      expect(fakeControlSocket().sent[1]).toMatchObject({
+        workspace_sandbox: {
+          root: "/tmp/runs/run-a",
+          isolation_root: "/tmp/runs",
+        },
+      });
+    } finally {
+      session.close();
+    }
+  });
+
+  test("fails closed when the app server lacks workspace sandbox support", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.supportsWorkspaceSandbox = false;
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+    const session = client.createSession("agent-123", {
+      workspaceSandbox: {
+        root: "/tmp/runs/run-a",
+        isolationRoot: "/tmp/runs",
+      },
+    });
+    try {
+      await expect(asAdvanced(session).initialize()).rejects.toThrow(
+        "does not support runtime workspace sandboxing",
+      );
+      expect(
+        fakeControlSocket().sent.map(
+          (command) => (command as { type: string }).type,
+        ),
+      ).toEqual(["app_server_info"]);
+    } finally {
+      FakeAppServerSocket.supportsWorkspaceSandbox = true;
       session.close();
     }
   });
