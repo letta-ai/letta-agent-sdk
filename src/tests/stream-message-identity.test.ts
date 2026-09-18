@@ -1,6 +1,25 @@
 import { describe, expect, test } from "bun:test";
-import type { ProtocolMessage, RuntimeScope } from "../remote-session-protocol.js";
+import {
+  normalizeUsageStatistics,
+  type ProtocolMessage,
+  type RuntimeScope,
+} from "../remote-session-protocol.js";
 import { RemoteTurnCoordinator } from "../remote-turn-coordinator.js";
+
+describe("usage normalization", () => {
+  test("keeps valid counters and omits invalid values", () => {
+    expect(normalizeUsageStatistics({ message_type: "assistant_message" })).toBeUndefined();
+    expect(normalizeUsageStatistics({
+      message_type: "usage_statistics",
+      prompt_tokens: -1,
+      completion_tokens: "2",
+      total_tokens: 0,
+      step_count: 1.5,
+      cached_input_tokens: null,
+      reasoning_tokens: Number.NaN,
+    })).toEqual({ totalTokens: 0 });
+  });
+});
 
 describe("cooked stream message identity", () => {
   test("preserves distinct OTIDs and replay cursors on remote text slices sharing an id", async () => {
@@ -358,7 +377,7 @@ describe("remote turn terminal receipts", () => {
     coordinator.close();
   });
 
-  test("keeps trailing usage ahead of the terminal result", async () => {
+  test("accumulates usage events and keeps them ahead of the terminal result", async () => {
     const coordinator = new RemoteTurnCoordinator({
       label: "test",
       onDeviceStatus: () => {},
@@ -370,6 +389,20 @@ describe("remote turn terminal receipts", () => {
         content: "done",
         run_id: "run-usage",
         id: "message-usage",
+      }),
+      runtime,
+    );
+    coordinator.handleProtocolMessage(
+      streamDelta(runtime, {
+        message_type: "usage_statistics",
+        prompt_tokens: 10,
+        completion_tokens: 2,
+        total_tokens: 12,
+        cached_input_tokens: 4,
+        cache_write_tokens: 1,
+        reasoning_tokens: 1,
+        context_tokens: 50,
+        step_count: 1,
       }),
       runtime,
     );
@@ -388,7 +421,11 @@ describe("remote turn terminal receipts", () => {
         prompt_tokens: 100,
         completion_tokens: 20,
         total_tokens: 120,
-        step_count: 3,
+        cached_input_tokens: 40,
+        cache_write_tokens: 5,
+        reasoning_tokens: 7,
+        context_tokens: 90,
+        step_count: 1,
       }),
       runtime,
     );
@@ -411,7 +448,14 @@ describe("remote turn terminal receipts", () => {
       type: "stream_event",
       event: {
         message_type: "usage_statistics",
-        step_count: 3,
+        total_tokens: 12,
+      },
+    });
+    expect(await coordinator.nextMessage()).toMatchObject({
+      type: "stream_event",
+      event: {
+        message_type: "usage_statistics",
+        total_tokens: 120,
       },
     });
     expect(await coordinator.nextMessage()).toMatchObject({
@@ -419,6 +463,16 @@ describe("remote turn terminal receipts", () => {
       success: true,
       result: "done",
       runIds: ["run-usage"],
+      usage: {
+        promptTokens: 110,
+        completionTokens: 22,
+        totalTokens: 132,
+        cachedInputTokens: 44,
+        cacheWriteTokens: 6,
+        reasoningTokens: 8,
+        contextTokens: 90,
+        stepCount: 2,
+      },
     });
     coordinator.close();
   });

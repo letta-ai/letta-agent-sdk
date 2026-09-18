@@ -16,6 +16,8 @@ import {
   isFailureStopReason,
   loopStatusRunIds,
   loopStatusValue,
+  mergeTokenUsage,
+  normalizeUsageStatistics,
   normalizeCallerOtid,
   queueItems,
   sameRuntime,
@@ -179,12 +181,15 @@ export class RemoteTurnCoordinator {
         (deferredDelta !== null && deferredMessageType !== "ping") ||
         message.type === "update_loop_status" ||
         turnFinishedRecord(message) !== null;
+      const isTrailingTerminalMetadata =
+        deferredMessageType === "usage_statistics" ||
+        deferredMessageType === "stop_reason";
       if (
-        (isTurnScoped && deferredMessageType !== "usage_statistics") ||
-        (deferredMessageType === "usage_statistics" && trailingUsageTurn.deferredTurnEvidence)
+        (isTurnScoped && !isTrailingTerminalMetadata) ||
+        (isTrailingTerminalMetadata && trailingUsageTurn.deferredTurnEvidence)
       ) {
         trailingUsageTurn.deferredMessages.push(message);
-        if (isTurnScoped && deferredMessageType !== "usage_statistics") {
+        if (isTurnScoped && !isTrailingTerminalMetadata) {
           trailingUsageTurn.deferredTurnEvidence = true;
         }
         return;
@@ -446,7 +451,7 @@ export class RemoteTurnCoordinator {
       ...(success ? {} : { errorCode: errorCode ?? "error" }),
       ...(finished.error ? { detail: finished.error } : {}),
     } satisfies RuntimeTurnResult;
-    if (active.pendingTerminal) {
+    if (active.pendingTerminal || success) {
       active.pendingTerminal = terminal;
       if (active.timeout) {
         clearTimeout(active.timeout);
@@ -465,6 +470,10 @@ export class RemoteTurnCoordinator {
     const active = this.activeTurn;
     if (!active) return;
     const messageType = streamDeltaMessageType(delta);
+    if (messageType === "usage_statistics") {
+      const usage = normalizeUsageStatistics(delta);
+      if (usage) active.usage = mergeTokenUsage(active.usage, usage);
+    }
     if (messageType === "stop_reason") {
       const stopReason = streamDeltaStopReason(delta) ?? null;
       if (stopReason === "requires_approval") {
@@ -474,6 +483,7 @@ export class RemoteTurnCoordinator {
       // Hosted streams send final usage after stop_reason. Keep result last so
       // consumers that stop at result cannot miss the accounting event.
       active.pendingTerminal = {
+        ...(active.pendingTerminal ?? {}),
         runtime: active.runtime,
         stopReason,
         runIds: [...active.runIds],
@@ -482,9 +492,6 @@ export class RemoteTurnCoordinator {
     }
 
     if (messageType === "usage_statistics" && active.pendingTerminal) {
-      if (active.pendingTerminalTimeout) {
-        this.completeActiveTurn(active.pendingTerminal);
-      }
       return;
     }
 
@@ -719,6 +726,7 @@ export class RemoteTurnCoordinator {
       stopReason,
       durationMs:
         Date.now() - (tracker?.startedAt || this._activeTurnStartedAt),
+      ...(tracker?.usage ? { usage: tracker.usage } : {}),
       conversationId: turn.runtime.conversation_id,
       runIds: turn.runIds.length > 0 ? turn.runIds : undefined,
     };
