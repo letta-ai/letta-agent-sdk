@@ -14,7 +14,10 @@ import type {
   ListModelsResponseModelEntry,
   PermissionSuggestion,
 } from "@letta-ai/letta-code/app-server-protocol";
-import type { Message as LettaMessage } from "@letta-ai/letta-client/resources/agents/messages";
+import type {
+  LettaStreamingResponse,
+  Message as LettaMessage,
+} from "@letta-ai/letta-client/resources/agents/messages";
 import type { CreateBlock } from "@letta-ai/letta-client/resources/blocks/blocks";
 import type { LettaCodeCloudSandboxOptions } from "./cloud-sandbox.js";
 import type { ComputerSelector } from "./computers.js";
@@ -1051,6 +1054,21 @@ export type SDKErrorCode =
   | "interrupted"
   | "stream_closed";
 
+type LettaUsageStatistics = LettaStreamingResponse.LettaUsageStatistics;
+
+/** Token usage accumulated across all model steps in one completed turn. */
+export interface SDKTokenUsage {
+  promptTokens?: NonNullable<LettaUsageStatistics["prompt_tokens"]>;
+  completionTokens?: NonNullable<LettaUsageStatistics["completion_tokens"]>;
+  totalTokens?: NonNullable<LettaUsageStatistics["total_tokens"]>;
+  cachedInputTokens?: NonNullable<LettaUsageStatistics["cached_input_tokens"]>;
+  cacheWriteTokens?: NonNullable<LettaUsageStatistics["cache_write_tokens"]>;
+  reasoningTokens?: NonNullable<LettaUsageStatistics["reasoning_tokens"]>;
+  /** Latest context window estimate reported during the turn. */
+  contextTokens?: NonNullable<LettaUsageStatistics["context_tokens"]>;
+  stepCount?: NonNullable<LettaUsageStatistics["step_count"]>;
+}
+
 export interface SDKResultMessage {
   type: "result";
   success: boolean;
@@ -1070,6 +1088,9 @@ export interface SDKResultMessage {
   stopReason?: string;
   /** Duration of the tracked turn in milliseconds. Excludes session initialization. */
   durationMs: number;
+  /** Token usage reported by the runtime for this turn. */
+  usage?: SDKTokenUsage;
+  /** @deprecated The current Letta Code protocol does not report per-turn dollar cost. */
   totalCostUsd?: number;
   conversationId: string | null;
   /** Run IDs associated with this turn (if provided by the CLI). */

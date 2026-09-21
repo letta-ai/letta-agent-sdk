@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { LettaAgentClient } from "../client.js";
-import type { LettaCodeSession } from "../types.js";
+import type {
+  LettaCodeSession,
+  SDKResultMessage,
+  SDKTokenUsage,
+} from "../types.js";
 
 type AssertTrue<T extends true> = T;
 type AssertFalse<T extends false> = T;
@@ -30,6 +34,12 @@ type HasClientKey<K extends PropertyKey> =
   K extends keyof LettaAgentClient ? true : false;
 type _ClientHasClose = AssertTrue<HasClientKey<"close">>;
 type _ClientHasAsyncDispose = AssertTrue<HasClientKey<typeof Symbol.asyncDispose>>;
+type _ResultHasUsage = AssertTrue<
+  "usage" extends keyof SDKResultMessage ? true : false
+>;
+type _UsageHasTotalTokens = AssertTrue<
+  "totalTokens" extends keyof SDKTokenUsage ? true : false
+>;
 
 describe("public LettaCodeSession type", () => {
   test("keeps the canonical public session surface", () => {
