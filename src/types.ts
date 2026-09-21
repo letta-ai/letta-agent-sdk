@@ -109,9 +109,15 @@ export type MessageContentItem = TextContent | ImageContent;
  */
 export type SendMessage = string | MessageContentItem[];
 
-/**
- * Per-turn options accepted by `send()`.
- */
+/** JSON Schema output requested for each turn in a session. */
+export interface JsonSchemaOutputFormat {
+  type: "json_schema";
+  schema: Record<string, unknown>;
+}
+
+export type OutputFormat = JsonSchemaOutputFormat;
+
+/** Per-turn options accepted by `send()`. */
 export interface SendOptions {
   /**
    * Caller-supplied offline threading id (OTID) for this user message.
@@ -585,6 +591,8 @@ export interface ClientToolsetConfig {
  * For creating new agents with custom memory/persona, use createAgent().
  */
 export interface CreateSessionOptions {
+  /** Require the final assistant response to match this JSON Schema. */
+  outputFormat?: OutputFormat;
   /**
    * Model for the session target. New and named conversations receive a
    * conversation override. The default conversation updates the agent default.
@@ -1049,12 +1057,15 @@ export type SDKErrorCode =
   | "llm_api_error"
   | "max_steps"
   | "interrupted"
-  | "stream_closed";
+  | "stream_closed"
+  | "structured_output_error";
 
 export interface SDKResultMessage {
   type: "result";
   success: boolean;
   result?: string;
+  /** Parsed and schema-validated final response when outputFormat is configured. */
+  structuredOutput?: unknown;
   /** Legacy error string (kept for compatibility). Prefer errorCode. */
   error?: string;
   /** Canonical typed error code for machine handling. */

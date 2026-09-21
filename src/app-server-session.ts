@@ -377,6 +377,22 @@ export function registerAppServerControlRequestHandler(config: {
   });
 }
 
+export async function assertStructuredOutputsSupported(
+  client: AppServerClient,
+  options: LettaCodeClientSessionOptions,
+): Promise<void> {
+  if (options.outputFormat === undefined) return;
+  const info = await client.info();
+  const capabilities = info.capabilities as typeof info.capabilities & {
+    structured_outputs?: boolean;
+  };
+  if (capabilities.structured_outputs !== true) {
+    throw new Error(
+      "This Letta Code harness does not support outputFormat. Upgrade to a version that advertises structured_outputs.",
+    );
+  }
+}
+
 export class AppServerRuntimeController implements RemoteClientRuntimeController {
   constructor(
     private readonly client: AppServerClient,
@@ -424,6 +440,16 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
         ...(this.clientToolset.include !== undefined
           ? { include: [...new Set(this.clientToolset.include)] }
           : {}),
+      };
+    }
+    if (options.outputFormat !== undefined) {
+      payload.response_format = {
+        type: "json_schema",
+        json_schema: {
+          name: "response_schema",
+          schema: options.outputFormat.schema,
+          strict: true,
+        },
       };
     }
     // SDK sessions are headless: interactive user-input tools are always
@@ -630,6 +656,7 @@ export class AppServerSession extends RemoteClientSessionCore {
 
     try {
       await client.connect();
+      await assertStructuredOutputsSupported(client, options);
       const response = await this.startRuntime(client);
       if (!response.success || !response.runtime) {
         throw new Error(response.error ?? "Failed to start app-server runtime");

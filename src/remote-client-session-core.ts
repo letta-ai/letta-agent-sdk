@@ -44,6 +44,7 @@ import {
   normalizeUpdateModelInput,
   resolveDreamingSettings,
   sameContextCandidates,
+  sessionOutputFormat,
   toBaseModelHandle,
   turnSendOptions,
   type NormalizedUpdateModelInput,
@@ -107,12 +108,10 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   /**
    * Initialize the session.
    *
-   * Single-flight: the first caller starts initialization and every
-   * concurrent caller (including the lazily-initializing entry points such
-   * as send()/stream()/listMessages()) awaits the same promise, so a fresh
-   * session never opens more than one runtime connection. A failed attempt
-   * clears the memo so a later call can retry; it only releases the
-   * resources that failed attempt created.
+   * Single-flight: all concurrent callers, including lazy send/stream/list,
+   * await the same promise, so a fresh session opens one runtime connection.
+   * Failed attempts clear the memo for retry and release only resources
+   * created by that attempt.
    */
   async initialize(): Promise<SDKInitMessage> {
     if (this.closed) {
@@ -243,7 +242,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     if (!controller || !runtime) {
       throw new Error("Session transport disconnected before the turn was sent");
     }
-    const turn = this.turns.trackSentTurn(runtime, options?.otid);
+    const turn = this.turns.trackSentTurn(runtime, options?.otid, sessionOutputFormat(this.mode));
     try {
       controller.sendTurnMessage(runtime, message, turnSendOptions(turn));
     } catch (error) {

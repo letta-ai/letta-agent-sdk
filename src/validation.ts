@@ -32,6 +32,22 @@ const VALID_TOOLSET_BASES = [
   "none",
 ] as const;
 
+function validateOutputFormat(outputFormat: CreateSessionOptions["outputFormat"]): void {
+  if (outputFormat === undefined) return;
+  if (
+    !outputFormat ||
+    typeof outputFormat !== "object" ||
+    outputFormat.type !== "json_schema" ||
+    !outputFormat.schema ||
+    typeof outputFormat.schema !== "object" ||
+    Array.isArray(outputFormat.schema)
+  ) {
+    throw new Error(
+      "Invalid outputFormat. Expected { type: 'json_schema', schema: <JSON Schema object> }.",
+    );
+  }
+}
+
 const VALID_REASONING_EFFORTS = [
   "none",
   "minimal",
@@ -244,6 +260,7 @@ export function validateCreateSessionOptions(options: CreateSessionOptions): voi
   validateMcpServers(options.mcpServers);
   validateReasoningEffort(options.reasoningEffort);
   validateDreamingOptions(options.dreaming);
+  validateOutputFormat(options.outputFormat);
   validateRemovedSessionOptions(options);
 }
 

@@ -19,6 +19,19 @@ describe("validation", () => {
     ).not.toThrow();
   });
 
+  test("validates structured output options", () => {
+    expect(() =>
+      validateCreateSessionOptions({
+        outputFormat: { type: "json_schema", schema: { type: "object" } },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateCreateSessionOptions({
+        outputFormat: { type: "json_schema", schema: null },
+      } as never),
+    ).toThrow("Invalid outputFormat");
+  });
+
   test("validates keyed MCP server configurations", () => {
     expect(() =>
       validateCreateSessionOptions({
