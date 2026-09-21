@@ -54,6 +54,7 @@ export type {
   LettaCodeRemoteClientOptions,
   LettaCodeCloudClientOptions,
   LettaCodeCloudSandboxOptions,
+  LettaCodeCloudSandboxClass,
   GitHubRepositoryRef,
   LettaCodeClientOptions,
   LettaCodeClientSessionOptions,
