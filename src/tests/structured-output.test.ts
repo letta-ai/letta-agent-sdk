@@ -74,6 +74,50 @@ test("a tool boundary prevents pre-tool JSON from becoming the final output", as
   });
 });
 
+test("validates the final assistant response after a tool continuation", async () => {
+  const runtime = { agent_id: "agent-1", conversation_id: "conv-1" };
+  const coordinator = new RemoteTurnCoordinator({
+    label: "test",
+    onDeviceStatus() {},
+  });
+  coordinator.trackSentTurn(runtime, undefined, outputFormat);
+  for (const delta of [
+    {
+      id: "assistant-reused",
+      message_type: "assistant_message",
+      content: "Calling a tool",
+      run_id: "run-1",
+    },
+    {
+      id: "tool-1",
+      message_type: "tool_call_message",
+      tool_calls: [{ tool_call_id: "call-1", name: "Read", arguments: "{}" }],
+      run_id: "run-1",
+    },
+    {
+      id: "assistant-reused",
+      message_type: "assistant_message",
+      content: '{"answer":"after tool"}',
+      run_id: "run-1",
+    },
+  ]) {
+    coordinator.handleProtocolMessage({ type: "stream_delta", runtime, delta }, runtime);
+  }
+  coordinator.handleProtocolMessage({
+    type: "turn_finished",
+    runtime,
+    run_id: "run-1",
+    stop_reason: "end_turn",
+  }, runtime);
+
+  let result;
+  while (result?.type !== "result") result = await coordinator.nextMessage();
+  expect(result).toMatchObject({
+    success: true,
+    structuredOutput: { answer: "after tool" },
+  });
+});
+
 test("rejects harnesses that do not advertise structured outputs", async () => {
   const client = {
     async info() {
