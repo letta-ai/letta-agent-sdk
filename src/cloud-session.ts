@@ -55,6 +55,7 @@ import type {
 import {
   type LettaCodeCloudSandboxOptions,
   validateCloudSandboxOptions,
+  warnImplicitManagedSandbox,
 } from "./cloud-sandbox.js";
 import {
   downloadSandboxFile,
@@ -957,6 +958,13 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       throw new Error(
         "Agent-free queries require an explicit Cloud computer; managed sandboxes are agent-scoped.",
       );
+    }
+    // This method is only reached with no explicit computer/environment, so
+    // the absence of explicit sandbox options means the session is about to
+    // provision infrastructure implicitly. Warn per session initialization
+    // (no global dedup) immediately before the create-or-resume request.
+    if (this.effectiveSandboxOptions() === undefined) {
+      warnImplicitManagedSandbox();
     }
     // Scope the managed sandbox to the conversation when one exists: the
     // server treats create-with-conversationId as create-or-resume, so

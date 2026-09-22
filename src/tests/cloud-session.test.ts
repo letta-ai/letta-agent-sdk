@@ -1089,6 +1089,152 @@ describe("CloudEnvironmentSession", () => {
     session.close();
   });
 
+  test("warns once when a session implicitly creates a managed sandbox", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const emitWarning = spyOn(process, "emitWarning").mockImplementation(
+      () => {},
+    );
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+    });
+
+    const session = client.resumeSession("conv-1");
+    try {
+      await asAdvanced(session).initialize();
+
+      const implicitWarnings = emitWarning.mock.calls.filter(
+        (call) =>
+          (call[1] as { code?: string } | undefined)?.code ===
+          "LETTA_AGENT_SDK_IMPLICIT_SANDBOX",
+      );
+      expect(implicitWarnings).toHaveLength(1);
+      expect(implicitWarnings[0]?.[1]).toMatchObject({
+        type: "DeprecationWarning",
+      });
+      const message = String(implicitWarnings[0]?.[0]);
+      expect(message).toContain("implicitly creating a managed sandbox");
+      expect(message).toContain("deprecated");
+      expect(message).toContain("sandbox: {}");
+      expect(message).toContain("computer");
+      expect(message).toContain('backend: "local"');
+      // The warning precedes the create-or-resume request, but both happened
+      // by the time initialization resolved.
+      expect(requests).toContainEqual(expect.objectContaining({
+        method: "POST",
+        url: "https://api.test/v1/agents/agent-from-conv/sandboxes",
+      }));
+    } finally {
+      session.close();
+      emitWarning.mockRestore();
+    }
+  });
+
+  test("does not warn when the managed sandbox is explicit", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const emitWarning = spyOn(process, "emitWarning").mockImplementation(
+      () => {},
+    );
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: {},
+    });
+
+    const session = client.resumeSession("conv-1");
+    try {
+      await asAdvanced(session).initialize();
+
+      expect(
+        emitWarning.mock.calls.some(
+          (call) =>
+            (call[1] as { code?: string } | undefined)?.code ===
+            "LETTA_AGENT_SDK_IMPLICIT_SANDBOX",
+        ),
+      ).toBe(false);
+    } finally {
+      session.close();
+      emitWarning.mockRestore();
+    }
+  });
+
+  test("does not warn when an explicit computer is configured", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const emitWarning = spyOn(process, "emitWarning").mockImplementation(
+      () => {},
+    );
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      computer: { connectionId: "conn-explicit" },
+    });
+
+    const session = client.resumeSession("conv-1");
+    try {
+      await asAdvanced(session).initialize();
+
+      expect(
+        emitWarning.mock.calls.some(
+          (call) =>
+            (call[1] as { code?: string } | undefined)?.code ===
+            "LETTA_AGENT_SDK_IMPLICIT_SANDBOX",
+        ),
+      ).toBe(false);
+    } finally {
+      session.close();
+      emitWarning.mockRestore();
+    }
+  });
+
+  test("warns once per implicit session without global deduplication", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const emitWarning = spyOn(process, "emitWarning").mockImplementation(
+      () => {},
+    );
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+    });
+
+    const first = client.resumeSession("conv-1");
+    const second = client.resumeSession("conv-1");
+    try {
+      await asAdvanced(first).initialize();
+      await asAdvanced(second).initialize();
+
+      const implicitWarnings = emitWarning.mock.calls.filter(
+        (call) =>
+          (call[1] as { code?: string } | undefined)?.code ===
+          "LETTA_AGENT_SDK_IMPLICIT_SANDBOX",
+      );
+      expect(implicitWarnings).toHaveLength(2);
+    } finally {
+      first.close();
+      second.close();
+      emitWarning.mockRestore();
+    }
+  });
+
   test("clones configured GitHub repositories into a managed sandbox", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
