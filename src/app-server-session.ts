@@ -98,6 +98,12 @@ export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
 
 export type AppServerSessionMode = RuntimeSessionMode;
 
+function workspaceSandboxOptions(
+  options: LettaCodeClientSessionOptions | CreateAgentOptions,
+): LettaCodeClientSessionOptions["workspaceSandbox"] {
+  return "workspaceSandbox" in options ? options.workspaceSandbox : undefined;
+}
+
 export function externalToolGroups(tools: AnyAgentTool[] | undefined): Array<Record<string, unknown>> | undefined {
   if (!tools || tools.length === 0) return undefined;
   return [
@@ -630,6 +636,18 @@ export class AppServerSession extends RemoteClientSessionCore {
 
     try {
       await client.connect();
+      const workspaceSandbox = workspaceSandboxOptions(options);
+      if (workspaceSandbox !== undefined) {
+        const info = await client.info();
+        const capabilities = info.capabilities as typeof info.capabilities & {
+          runtime_workspace_sandbox?: boolean;
+        };
+        if (capabilities.runtime_workspace_sandbox !== true) {
+          throw new Error(
+            "App server does not support runtime workspace sandboxing.",
+          );
+        }
+      }
       const response = await this.startRuntime(client);
       if (!response.success || !response.runtime) {
         throw new Error(response.error ?? "Failed to start app-server runtime");
@@ -738,6 +756,13 @@ export class AppServerSession extends RemoteClientSessionCore {
     const mode = mapPermissionMode(options.permissionMode);
     if (mode) command.mode = mode;
     if (options.cwd !== undefined) command.cwd = options.cwd;
+    const workspaceSandbox = workspaceSandboxOptions(options);
+    if (workspaceSandbox !== undefined) {
+      command.workspace_sandbox = {
+        root: workspaceSandbox.root,
+        isolation_root: workspaceSandbox.isolationRoot,
+      };
+    }
     if (
       this.mode.kind === "session" &&
       this.mode.options.stateless === true
