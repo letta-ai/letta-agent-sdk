@@ -19,6 +19,8 @@ export interface AgentFreeQueryOptions
   model: string;
   /** Complete system prompt for the ephemeral conversation. */
   system: string;
+  /** Resume an existing agent-free conversation instead of creating one. Creation settings are ignored on resume. */
+  conversationId?: string;
   /** Provider model settings persisted on the ephemeral conversation. */
   modelSettings?: Record<string, unknown>;
   /** Invoking parent agent, persisted when the conversation is created. */
@@ -39,7 +41,7 @@ export interface QueryParams {
 
 /** Stream returned by query(), with controls for long-running execution. */
 export interface Query extends AsyncGenerator<SDKMessage, void, unknown> {
-  /** Created conversation ID; null until initialized, retained after close. */
+  /** Created or resumed conversation ID; null until initialized, retained after close. */
   readonly conversationId: string | null;
   /** Underlying session agent ID; null for agent-free conversations. */
   readonly agentId: string | null;

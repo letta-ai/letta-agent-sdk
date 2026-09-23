@@ -838,6 +838,38 @@ describe("CloudEnvironmentSession", () => {
     );
   });
 
+  test("query resumes an agent-free Cloud conversation without creating another", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      computer: { connectionId: "conn-explicit" },
+    });
+    const query = client.query({
+      prompt: "Continue",
+      options: {
+        conversationId: "conv-previous",
+        model: "openai/gpt-5.6-luna",
+        system: "Used only for new conversations.",
+      },
+    });
+    for await (const _message of query) {
+      expect(query.conversationId).toBe("conv-previous");
+      expect(query.agentId).toBeNull();
+    }
+    expect(requests.some((request) => request.url.endsWith("/v1/conversations/ephemeral"))).toBe(false);
+    const runtimeStart = FakeCloudSocket.allSent().find(
+      (command) => command.type === "runtime_start",
+    );
+    expect(runtimeStart).toMatchObject({ conversation_id: "conv-previous" });
+    expect(runtimeStart).not.toHaveProperty("agent_id");
+  });
+
   test("keeps hosted usage after stop ahead of the terminal result", async () => {
     resetFakeCloud();
     FakeCloudSocket.scenario = "usage_after_stop";
