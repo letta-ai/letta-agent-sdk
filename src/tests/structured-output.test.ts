@@ -4,7 +4,7 @@ import {
 } from "../app-server-session.js";
 import { RemoteTurnCoordinator } from "../remote-turn-coordinator.js";
 import { createStructuredOutputTool, parseStructuredOutput } from "../structured-output.js";
-import { streamStructuredTurns, resolveStructuredMode } from "../structured-output-session.js";
+import { streamStructuredTurns, resolveStructuredMode, registerStructuredOutputTool } from "../structured-output-session.js";
 import type { SDKMessage } from "../types.js";
 
 const outputFormat = {
@@ -128,6 +128,19 @@ test("portable tool reports validation errors to the model and accepts a retry",
   const good = await tool.execute("call-2", { answer: "ok" });
   expect(good.isError).toBeUndefined();
   expect(results).toMatchObject([{ success: false }, { success: true, value: { answer: "ok" } }]);
+});
+
+test("StructuredOutput coexists with caller tools and an explicit allowlist", () => {
+  const callerTool = {
+    name: "Lookup", label: "Lookup", description: "Look up an item",
+    parameters: { type: "object" },
+    execute: async () => ({ content: [{ type: "text" as const, text: "found" }] }),
+  };
+  const mode = { kind: "agent-free" as const,
+    options: { outputFormat, tools: [callerTool], allowedTools: ["Lookup"] } };
+  registerStructuredOutputTool(mode, () => {});
+  expect(mode.options.tools.map((tool) => tool.name)).toEqual(["Lookup", "StructuredOutput"]);
+  expect(mode.options.allowedTools).toEqual(["Lookup", "StructuredOutput"]);
 });
 
 test("catalog capability selects native only for explicitly supported resolved model", async () => {
