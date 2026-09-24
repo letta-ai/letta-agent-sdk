@@ -6,7 +6,6 @@ import type {
   GetDeviceStatusOptions,
   LettaCodeClientSessionOptions,
   LettaCodeSession,
-  LettaCodeModelEntry,
   ListModelsResult,
   ListMessagesOptions,
   ListMessagesResult,
@@ -27,6 +26,13 @@ import type {
   UpdateModelResult,
 } from "./types.js";
 import { RemoteTurnCoordinator } from "./remote-turn-coordinator.js";
+import { resolveUpdateModelPayloadFromCatalog } from "./model-update-resolution.js";
+import {
+  appendStructuredOutputInstruction,
+  registerStructuredOutputTool,
+  resolveStructuredMode,
+  streamStructuredTurns,
+} from "./structured-output-session.js";
 
 export {
   ensureSuccess,
@@ -37,14 +43,11 @@ export {
 } from "./remote-session-protocol.js";
 import {
   ensureSuccess,
-  getContextWindow,
-  getReasoningEffort,
   mapPermissionMode,
   modelPayloadWithoutReasoning,
   normalizeUpdateModelInput,
   resolveDreamingSettings,
-  sameContextCandidates,
-  toBaseModelHandle,
+  sessionOutputFormat,
   turnSendOptions,
   type NormalizedUpdateModelInput,
   type RemoteClientSessionCoreConfig,
@@ -86,6 +89,11 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   private transportDisconnectGeneration = 0;
   private readonly turns: RemoteTurnCoordinator;
   private toolNames: string[] | undefined;
+  private structuredMode: "native" | "portable" | null = null;
+  private structuredValue: unknown;
+  private structuredAccepted = false;
+  private structuredToolCallId: string | null = null;
+  private structuredDetail = "StructuredOutput was not called.";
   private deviceStatusListeners = new Set<(status: SessionDeviceStatus) => void>();
   private deviceStatusRefreshCancels = new Set<(error: Error) => void>();
 
@@ -95,11 +103,20 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   ) {
     this.label = config.label;
     this.requestTimeoutMs = config.requestTimeoutMs;
+    registerStructuredOutputTool(mode, (checked, toolCallId) => {
+      if (!checked.success) this.structuredDetail = checked.detail;
+      else if (!this.structuredAccepted) {
+        this.structuredAccepted = true;
+        this.structuredToolCallId = toolCallId;
+        this.structuredValue = checked.value;
+      }
+    });
     this.turns = new RemoteTurnCoordinator({
       label: config.label,
       requestTimeoutMs: config.requestTimeoutMs,
       autoHandlesToolApprovals:
-        mode.kind === "session" && typeof mode.options.canUseTool === "function",
+        sessionOutputFormat(mode) !== undefined ||
+        (mode.kind === "session" && typeof mode.options.canUseTool === "function"),
       onDeviceStatus: (status) => this.emitDeviceStatus(status),
     });
   }
@@ -107,12 +124,10 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   /**
    * Initialize the session.
    *
-   * Single-flight: the first caller starts initialization and every
-   * concurrent caller (including the lazily-initializing entry points such
-   * as send()/stream()/listMessages()) awaits the same promise, so a fresh
-   * session never opens more than one runtime connection. A failed attempt
-   * clears the memo so a later call can retry; it only releases the
-   * resources that failed attempt created.
+   * Single-flight: all concurrent callers, including lazy send/stream/list,
+   * await the same promise, so a fresh session opens one runtime connection.
+   * Failed attempts clear the memo for retry and release only resources
+   * created by that attempt.
    */
   async initialize(): Promise<SDKInitMessage> {
     if (this.closed) {
@@ -237,15 +252,29 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     }
 
     await this.beforeTurn();
+    const format = sessionOutputFormat(this.mode);
+    if (format && this.structuredMode === null) {
+      this.structuredMode = await resolveStructuredMode(this.controller, this._model);
+    }
+    if (format) {
+      this.structuredAccepted = false;
+      this.structuredToolCallId = null;
+      this.structuredValue = undefined;
+      this.structuredDetail = "StructuredOutput was not called.";
+    }
 
     const controller = this.controller;
     const runtime = this.runtime;
     if (!controller || !runtime) {
       throw new Error("Session transport disconnected before the turn was sent");
     }
-    const turn = this.turns.trackSentTurn(runtime, options?.otid);
+    const turn = this.turns.trackSentTurn(runtime, options?.otid, this.structuredMode === "native" ? format : undefined);
     try {
-      controller.sendTurnMessage(runtime, message, turnSendOptions(turn));
+      controller.sendTurnMessage(runtime,
+        this.structuredMode === "portable"
+          ? appendStructuredOutputInstruction(message)
+          : message,
+        turnSendOptions(turn));
     } catch (error) {
       this.turns.removeTrackedTurn(turn);
       throw error;
@@ -277,6 +306,19 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
   }
 
   async *stream(): AsyncGenerator<SDKMessage> {
+    const format = sessionOutputFormat(this.mode);
+    if (format) {
+      yield* streamStructuredTurns({
+        nextMessage: () => this.turns.nextMessage(),
+        send: (message) => this.send(message),
+        abort: () => this.abort(),
+        format,
+        mode: () => this.structuredMode,
+        accepted: () => ({ valid: this.structuredAccepted, value: this.structuredValue,
+          detail: this.structuredDetail, toolCallId: this.structuredToolCallId }),
+      });
+      return;
+    }
     while (true) {
       const msg = await this.turns.nextMessage();
       if (!msg) break;
@@ -789,64 +831,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     }
 
     const catalog = await this.controller.listModels();
-    const byId = new Map(catalog.entries.map((entry) => [entry.id, entry]));
-    const aliases = catalog.byokProviderAliases;
-
-    let baseEntry: LettaCodeModelEntry | undefined;
-    let explicitHandle: string | undefined;
-    let targetHandle: string | undefined;
-
-    if (input.modelId !== undefined) {
-      baseEntry = byId.get(input.modelId);
-      explicitHandle = input.modelHandle;
-      targetHandle = baseEntry?.handle ?? toBaseModelHandle(input.modelHandle, aliases);
-    } else if (input.modelHandle !== undefined) {
-      explicitHandle = input.modelHandle;
-      targetHandle = toBaseModelHandle(input.modelHandle, aliases);
-    } else if (input.model !== undefined) {
-      baseEntry = byId.get(input.model);
-      if (baseEntry) {
-        targetHandle = baseEntry.handle;
-      } else {
-        explicitHandle = input.model;
-        targetHandle = toBaseModelHandle(input.model, aliases);
-      }
-    } else {
-      explicitHandle = this._model || undefined;
-      targetHandle = toBaseModelHandle(this._model || undefined, aliases);
-    }
-
-    if (!targetHandle) {
-      throw new Error("reasoningEffort requires a current model or explicit model/modelId/modelHandle.");
-    }
-
-    const candidates = catalog.entries.filter(
-      (entry) => entry.handle === targetHandle || entry.handle === explicitHandle,
-    );
-    if (candidates.length === 0) {
-      throw new Error(
-        `reasoningEffort requires a model from listModels(); no catalog entry found for ${targetHandle}.`,
-      );
-    }
-
-    const contextWindow =
-      getContextWindow(baseEntry?.updateArgs) ?? getContextWindow(this._modelSettings);
-    const scopedCandidates = sameContextCandidates(candidates, contextWindow);
-    const matchingEntry =
-      scopedCandidates.find((entry) => getReasoningEffort(entry) === input.reasoningEffort) ??
-      candidates.find((entry) => getReasoningEffort(entry) === input.reasoningEffort);
-
-    if (!matchingEntry) {
-      throw new Error(
-        `No ${input.reasoningEffort} reasoning tier found for model ${targetHandle}.`,
-      );
-    }
-
-    const payload: UpdateModelPayload = { model_id: matchingEntry.id };
-    if (explicitHandle !== undefined) {
-      payload.model_handle = explicitHandle;
-    }
-    return payload;
+    return resolveUpdateModelPayloadFromCatalog(input, catalog, this._model, this._modelSettings);
   }
 
   protected async applyPostInitializeOptions(): Promise<void> {

@@ -116,6 +116,8 @@ export type {
   MessageContentItem,
   SendMessage,
   SendOptions,
+  JsonSchemaOutputFormat,
+  OutputFormat,
   // List messages API
   ListMessagesOptions,
   ListMessagesResult,

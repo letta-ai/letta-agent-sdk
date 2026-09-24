@@ -13,7 +13,6 @@ describe("createAgentBody", () => {
     expect(body).toMatchObject({
       agent_type: LETTA_CODE_AGENT_TYPE,
       model: "openai/gpt-5.2",
-      system: buildSystemPrompt("default", "memfs"),
       tags: ["origin:letta-code", "git-memory-enabled"],
       initial_message_sequence: [],
       parallel_tool_calls: true,
@@ -24,7 +23,11 @@ describe("createAgentBody", () => {
     });
     expect(body).not.toHaveProperty("name");
     expect(body).not.toHaveProperty("description");
-    expect(body).not.toHaveProperty("memory_blocks");
+    // 0.33.x seeds the root index and refers to core memory files in the prompt.
+    expect(body.memory_blocks).toEqual([
+      { label: "MEMORY", value: "# Memory\n", description: "Root memory index." },
+    ]);
+    expect(body.system).toContain("core memory files");
   });
 
   test("uses caller memory as the complete identity without a personality preset", async () => {
@@ -41,7 +44,10 @@ describe("createAgentBody", () => {
 
     expect(body.name).toBe("Ezra");
     expect(body.description).toBe("Letta documentation assistant.");
-    expect(body.memory_blocks).toEqual(memory);
+    expect(body.memory_blocks).toEqual([
+      { label: "MEMORY", value: "# Memory\n", description: "Root memory index." },
+      ...memory,
+    ]);
   });
 
   test("applies a personality only when explicitly requested", async () => {
