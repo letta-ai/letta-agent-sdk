@@ -2528,6 +2528,7 @@ describe("CloudEnvironmentSession", () => {
       headers: {
         authorization: "Bearer sk-test",
         "content-type": "application/json",
+        "x-letta-source": "letta-agent-sdk",
       },
       body: {
         model: "anthropic/claude-sonnet-4",
@@ -2562,6 +2563,23 @@ describe("CloudEnvironmentSession", () => {
     );
   });
 
+  test("allows caller headers to override the Cloud source header case-insensitively", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      headers: { "x-letta-source": "custom-source" },
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+    });
+
+    await expect(client.createAgent()).resolves.toBe("agent-created");
+    expect(requests[0]?.headers["x-letta-source"]).toBe("custom-source");
+    expect(requests[0]?.body).toMatchObject({ system: null });
+  });
+
   test("uses the Letta Code default model for Cloud createAgent", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
@@ -2574,7 +2592,8 @@ describe("CloudEnvironmentSession", () => {
     });
 
     await expect(client.createAgent()).resolves.toBe("agent-created");
-    expect(requests[0]?.body).toMatchObject({ model: "letta/auto" });
+    expect(requests[0]?.body).toMatchObject({ model: "letta/auto", system: null });
+    expect(requests[0]?.headers["x-letta-source"]).toBe("letta-agent-sdk");
 
     await expect(client.createAgent({
       model: "   ",

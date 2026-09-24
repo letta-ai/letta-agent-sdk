@@ -40,7 +40,12 @@ export function createCloudClient(
   return new Letta({
     apiKey: getCloudApiKey(options) ?? null,
     baseURL: normalizeCloudApiBaseUrl(options.apiBaseUrl),
-    defaultHeaders: options.headers,
+    defaultHeaders: {
+      ...(!Object.keys(options.headers ?? {}).some(
+        (name) => name.toLowerCase() === "x-letta-source",
+      ) ? { "X-Letta-Source": "letta-agent-sdk" } : {}),
+      ...options.headers,
+    },
     fetch: options.fetch,
   });
 }

@@ -48,10 +48,13 @@ function assertCreateAgentOptionsSupported(options: CreateAgentOptions): void {
   }
 }
 
-/** Translate SDK convenience options into the canonical Letta Code request. */
+/** Translate SDK convenience options into the canonical Letta Code request.
+ * Cloud delegates omitted prompts to the server; app-server keeps the Letta Code default.
+ */
 export async function createAgentBody(
   options: CreateAgentOptions,
   resolvedSkills?: AgentSkill[],
+  { defaultSystemToNull = false }: { defaultSystemToNull?: boolean } = {},
 ): Promise<CreateAgentRequest> {
   assertCreateAgentOptionsSupported(options);
 
@@ -77,7 +80,7 @@ export async function createAgentBody(
     );
   }
 
-  let system: string | undefined;
+  let system: string | null | undefined = defaultSystemToNull ? null : undefined;
   if (options.systemPrompt !== undefined) {
     if (
       typeof options.systemPrompt !== "string" ||
