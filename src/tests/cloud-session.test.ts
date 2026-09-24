@@ -7,6 +7,10 @@ import {
 } from "../index.js";
 import type { SessionDeviceStatus } from "../index.js";
 import { asAdvanced } from "./advanced-session.js";
+import {
+  EXPECTED_BLOCKS_SYSTEM_PROMPT,
+  EXPECTED_MEMFS_SYSTEM_PROMPT,
+} from "./default-system-prompt.fixture.js";
 
 type Listener = (event: unknown) => void;
 type FetchInput = Parameters<typeof fetch>[0];
@@ -2576,12 +2580,12 @@ describe("CloudEnvironmentSession", () => {
     await expect(client.createAgent()).resolves.toBe("agent-created");
     expect(requests[0]?.body).toMatchObject({
       model: "letta/auto",
-      system: "You are a stateful Letta agent. Your memory persists across conversations and is included below. Use it, and keep it current: when you learn something durable (preferences, corrections, decisions, facts about the user or their work), save it with the memory tool. Do not save what can be recovered from past conversations. If you edit files in $MEMORY_DIR directly, commit and push the changes.",
+      system: EXPECTED_MEMFS_SYSTEM_PROMPT,
     });
 
     await expect(client.createAgent({ memfs: false })).resolves.toBe("agent-created");
     expect(requests[1]?.body).toMatchObject({
-      system: "You are a stateful Letta agent. Your memory blocks persist across conversations and are included below. Use them, and keep them current: when you learn something durable (preferences, corrections, decisions, facts about the user or their work), update the relevant block with the memory tool. Do not save what can be recovered from past conversations.",
+      system: EXPECTED_BLOCKS_SYSTEM_PROMPT,
     });
 
     await expect(client.createAgent({ systemPrompt: "" })).resolves.toBe("agent-created");

@@ -4,6 +4,10 @@ import {
   LETTA_CODE_AGENT_TYPE,
 } from "@letta-ai/letta-code/agent-presets";
 import { createAgentBody } from "../agent-creation.js";
+import {
+  EXPECTED_BLOCKS_SYSTEM_PROMPT,
+  EXPECTED_MEMFS_SYSTEM_PROMPT,
+} from "./default-system-prompt.fixture.js";
 
 describe("createAgentBody", () => {
   test("builds a generic harness agent when personality is omitted", async () => {
@@ -12,7 +16,7 @@ describe("createAgentBody", () => {
     expect(body).toMatchObject({
       agent_type: LETTA_CODE_AGENT_TYPE,
       model: "openai/gpt-5.2",
-      system: "You are a stateful Letta agent. Your memory persists across conversations and is included below. Use it, and keep it current: when you learn something durable (preferences, corrections, decisions, facts about the user or their work), save it with the memory tool. Do not save what can be recovered from past conversations. If you edit files in $MEMORY_DIR directly, commit and push the changes.",
+      system: EXPECTED_MEMFS_SYSTEM_PROMPT,
       tags: ["origin:letta-code", "git-memory-enabled"],
       initial_message_sequence: [],
       parallel_tool_calls: true,
@@ -52,7 +56,7 @@ describe("createAgentBody", () => {
       await buildCreateAgentRequest({
         personalityId: "memo",
         model: "openai/gpt-5.2",
-        system: "You are a stateful Letta agent. Your memory persists across conversations and is included below. Use it, and keep it current: when you learn something durable (preferences, corrections, decisions, facts about the user or their work), save it with the memory tool. Do not save what can be recovered from past conversations. If you edit files in $MEMORY_DIR directly, commit and push the changes.",
+        system: EXPECTED_MEMFS_SYSTEM_PROMPT,
       }),
     );
   });
@@ -79,7 +83,7 @@ describe("createAgentBody", () => {
 
   test("keeps MemFS mode and exact base tools in the canonical request", async () => {
     const body = await createAgentBody({ memfs: false, baseTools: [] });
-    expect(body.system).toBe("You are a stateful Letta agent. Your memory blocks persist across conversations and are included below. Use them, and keep them current: when you learn something durable (preferences, corrections, decisions, facts about the user or their work), update the relevant block with the memory tool. Do not save what can be recovered from past conversations.");
+    expect(body.system).toBe(EXPECTED_BLOCKS_SYSTEM_PROMPT);
     expect(body.tags).toEqual(["origin:letta-code"]);
     expect(body.tools).toEqual([]);
     expect(body.include_base_tools).toBe(false);
