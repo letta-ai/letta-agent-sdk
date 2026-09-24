@@ -46,6 +46,10 @@ function validateOutputFormat(outputFormat: CreateSessionOptions["outputFormat"]
       "Invalid outputFormat. Expected { type: 'json_schema', schema: <JSON Schema object> }.",
     );
   }
+  if (outputFormat.maxRetries !== undefined &&
+    (!Number.isInteger(outputFormat.maxRetries) || outputFormat.maxRetries < 0 || outputFormat.maxRetries > 5)) {
+    throw new Error("Invalid outputFormat.maxRetries. Expected an integer from 0 to 5.");
+  }
 }
 
 const VALID_REASONING_EFFORTS = [

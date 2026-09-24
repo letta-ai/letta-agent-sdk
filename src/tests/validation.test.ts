@@ -30,6 +30,11 @@ describe("validation", () => {
         outputFormat: { type: "json_schema", schema: null },
       } as never),
     ).toThrow("Invalid outputFormat");
+    for (const maxRetries of [-1, 6, NaN, 0.5]) {
+      expect(() => validateCreateSessionOptions({
+        outputFormat: { type: "json_schema", schema: { type: "object" }, maxRetries },
+      })).toThrow("outputFormat.maxRetries");
+    }
   });
 
   test("validates keyed MCP server configurations", () => {
