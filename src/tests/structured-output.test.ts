@@ -119,6 +119,37 @@ test("validates the final assistant response after a tool continuation", async (
   });
 });
 
+test("late interrupted-run status cannot finish the next session turn", async () => {
+  const runtime = { agent_id: "agent-1", conversation_id: "conv-1" };
+  const coordinator = new RemoteTurnCoordinator({ label: "test", onDeviceStatus() {} });
+  coordinator.trackSentTurn(runtime);
+  coordinator.handleProtocolMessage({ type: "stream_delta", runtime, delta: {
+    id: "first", message_type: "assistant_message", content: "first", run_id: "run-1",
+  } }, runtime);
+  coordinator.handleProtocolMessage({ type: "turn_finished", runtime,
+    run_id: "run-1", stop_reason: "interrupted" }, runtime);
+  let first;
+  while (first?.type !== "result") first = await coordinator.nextMessage();
+
+  coordinator.trackSentTurn(runtime);
+  coordinator.handleProtocolMessage({ type: "stream_delta", runtime, delta: {
+    id: "late", message_type: "status", message: "Interrupted", run_id: "run-1",
+  } }, runtime);
+  coordinator.handleProtocolMessage({ type: "stream_delta", runtime, delta: {
+    id: "new-user", message_type: "user_message", content: "second prompt",
+  } }, runtime);
+  coordinator.handleProtocolMessage({ type: "update_loop_status", runtime,
+    status: "WAITING_ON_INPUT", active_run_ids: [] }, runtime);
+  coordinator.handleProtocolMessage({ type: "stream_delta", runtime, delta: {
+    id: "second", message_type: "assistant_message", content: "second", run_id: "run-2",
+  } }, runtime);
+  coordinator.handleProtocolMessage({ type: "turn_finished", runtime,
+    run_id: "run-2", stop_reason: "end_turn" }, runtime);
+  let second;
+  while (second?.type !== "result") second = await coordinator.nextMessage();
+  expect(second).toMatchObject({ success: true, result: "second", runIds: ["run-2"] });
+});
+
 test("portable tool reports validation errors to the model and accepts a retry", async () => {
   const results: unknown[] = [];
   const tool = createStructuredOutputTool(outputFormat, (result) => results.push(result));

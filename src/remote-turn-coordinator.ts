@@ -162,6 +162,10 @@ export class RemoteTurnCoordinator {
     }
 
     const deferredDelta = streamDeltaRecord(message);
+    // An interrupted run may emit a final lifecycle/status delta after its
+    // result. Never attribute that old evidence to the next sent turn.
+    const deltaRunId = deferredDelta ? streamDeltaRunId(deferredDelta) : undefined;
+    if (deltaRunId && this.settledRunIds.has(deltaRunId)) return;
     const deferredMessageType = deferredDelta
       ? streamDeltaMessageType(deferredDelta)
       : undefined;
@@ -220,9 +224,20 @@ export class RemoteTurnCoordinator {
       messageType === "usage_statistics" || messageType === "stop_reason"
         ? this.activeTurn
         : this.activateNextTurnFromProtocol();
-    if (active) {
+    const runId = streamDeltaRunId(delta);
+    const isTurnEvidence =
+      messageType === "assistant_message" ||
+      messageType === "reasoning_message" ||
+      messageType === "tool_call_message" ||
+      messageType === "approval_request_message" ||
+      messageType === "tool_return_message" ||
+      messageType === "error_message" ||
+      messageType === "loop_error" ||
+      (runId !== undefined && (messageType === "usage_statistics" || messageType === "stop_reason"));
+    // Persisted user-message echoes and lifecycle status are not evidence that
+    // the new model run started. In particular they may arrive after an abort.
+    if (active && isTurnEvidence) {
       active.observedTurnEvidence = true;
-      const runId = streamDeltaRunId(delta);
       if (runId) active.runIds.add(runId);
     }
 
