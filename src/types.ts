@@ -113,6 +113,8 @@ export type SendMessage = string | MessageContentItem[];
 export interface JsonSchemaOutputFormat {
   type: "json_schema";
   schema: Record<string, unknown>;
+  /** Corrective follow-up turns after an invalid or missing result (default 2). */
+  maxRetries?: number;
 }
 
 export type OutputFormat = JsonSchemaOutputFormat;

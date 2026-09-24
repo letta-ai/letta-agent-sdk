@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
 import {
   AppServerRuntimeController,
-  assertStructuredOutputsSupported,
 } from "../app-server-session.js";
 import { RemoteTurnCoordinator } from "../remote-turn-coordinator.js";
-import { parseStructuredOutput } from "../structured-output.js";
+import { createStructuredOutputTool, parseStructuredOutput } from "../structured-output.js";
+import { streamStructuredTurns, resolveStructuredMode } from "../structured-output-session.js";
+import type { SDKMessage } from "../types.js";
 
 const outputFormat = {
   type: "json_schema" as const,
@@ -118,15 +119,84 @@ test("validates the final assistant response after a tool continuation", async (
   });
 });
 
-test("rejects harnesses that do not advertise structured outputs", async () => {
-  const client = {
-    async info() {
-      return { capabilities: { structured_outputs: false } };
-    },
-  };
-  await expect(
-    assertStructuredOutputsSupported(client as never, { outputFormat }),
-  ).rejects.toThrow("does not support outputFormat");
+test("portable tool reports validation errors to the model and accepts a retry", async () => {
+  const results: unknown[] = [];
+  const tool = createStructuredOutputTool(outputFormat, (result) => results.push(result));
+  const bad = await tool.execute("call-1", { bugs: [] });
+  expect(bad.isError).toBe(true);
+  expect(bad.content[0]?.text).toContain("answer");
+  const good = await tool.execute("call-2", { answer: "ok" });
+  expect(good.isError).toBeUndefined();
+  expect(results).toMatchObject([{ success: false }, { success: true, value: { answer: "ok" } }]);
+});
+
+test("catalog capability selects native only for explicitly supported resolved model", async () => {
+  const controller = { listModels: async () => ({ entries: [
+    { id: "luna", handle: "openai/luna", supportsStructuredOutputs: true },
+    { id: "sonnet", handle: "anthropic/sonnet", supportsStructuredOutputs: false },
+  ] }) };
+  expect(await resolveStructuredMode(controller as never, "openai/luna")).toBe("native");
+  expect(await resolveStructuredMode(controller as never, "anthropic/sonnet")).toBe("portable");
+  expect(await resolveStructuredMode(controller as never, "unknown")).toBe("portable");
+});
+
+test("a valid portable tool return ends the turn with the validated value", async () => {
+  const messages: SDKMessage[] = [
+    { type: "tool_result", toolCallId: "call-2", content: "accepted", isError: false, uuid: "tool-2" },
+    { type: "result", success: false, errorCode: "interrupted", durationMs: 1,
+      conversationId: "conv-1" },
+  ];
+  let aborted = 0;
+  const emitted = [];
+  for await (const message of streamStructuredTurns({
+    nextMessage: async () => messages.shift() ?? null,
+    send: async () => {}, abort: async () => { aborted++; },
+    format: outputFormat, mode: () => "portable",
+    accepted: () => ({ valid: true, value: { answer: "ok" }, detail: "", toolCallId: "call-2" }),
+  })) emitted.push(message);
+  expect(aborted).toBe(1);
+  expect(emitted.at(-1)).toMatchObject({ success: true, structuredOutput: { answer: "ok" } });
+});
+
+test("missing portable calls get two corrective turns then a detailed failure", async () => {
+  const sent: string[] = [];
+  const messages: SDKMessage[] = Array.from({ length: 3 }, () => ({
+    type: "result", success: true, durationMs: 1, conversationId: "conv-1",
+  }));
+  const stream = streamStructuredTurns({
+    nextMessage: async () => messages.shift() ?? null,
+    send: async (text) => { sent.push(String(text)); },
+    abort: async () => {},
+    format: outputFormat,
+    mode: () => "portable",
+    accepted: () => ({ valid: false, value: undefined, detail: "StructuredOutput was not called." }),
+  });
+  const emitted = [];
+  for await (const message of stream) emitted.push(message);
+  expect(sent).toHaveLength(2);
+  expect(sent[0]).toContain("Call StructuredOutput");
+  expect(emitted.at(-1)).toMatchObject({ success: false, errorCode: "structured_output_error",
+    errorDetail: expect.stringContaining("not called") });
+});
+
+test("native parse failure is corrected in the same conversation", async () => {
+  const sent: string[] = [];
+  const messages: SDKMessage[] = [
+    { type: "result", success: false, errorCode: "structured_output_error",
+      errorDetail: "not valid JSON", durationMs: 1, conversationId: "conv-1" },
+    { type: "result", success: true, structuredOutput: { answer: "yes" },
+      durationMs: 1, conversationId: "conv-1" },
+  ];
+  const emitted = [];
+  for await (const message of streamStructuredTurns({
+    nextMessage: async () => messages.shift() ?? null,
+    send: async (text) => { sent.push(String(text)); },
+    abort: async () => {}, format: outputFormat, mode: () => "native",
+    accepted: () => ({ valid: false, value: undefined, detail: "" }),
+  })) emitted.push(message);
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toContain("not valid JSON");
+  expect(emitted.at(-1)).toMatchObject({ success: true, structuredOutput: { answer: "yes" } });
 });
 
 test("translates outputFormat to the app-server response_format wire contract", () => {

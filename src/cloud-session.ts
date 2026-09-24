@@ -14,7 +14,6 @@ import {
 import {
   AppServerRuntimeController,
   agentToolNames,
-  assertStructuredOutputsSupported,
   createExternalToolCallHandler,
   externalToolGroups,
   registerAppServerControlRequestHandler,
@@ -453,7 +452,6 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     const options = this.currentOptions();
 
     try {
-      await assertStructuredOutputsSupported(client, options);
       const response = await this.startCloudRuntime(client, runtime);
       if (!response.success || !response.runtime) {
         throw new Error(response.error ?? "Failed to start Cloud status runtime");
