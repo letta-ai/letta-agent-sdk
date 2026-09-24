@@ -863,8 +863,9 @@ export interface CreateAgentOptions {
   embedding?: string;
 
   /**
-   * System prompt configuration. When omitted, Cloud uses the server's default
-   * prompt, and local/remote App Servers receive the Letta Code default prompt.
+   * System prompt configuration. When omitted, Cloud sends null with the Agent
+   * SDK source header so the server can select its SDK default prompt;
+   * local/remote App Servers receive the Letta Code default prompt.
    * - string: Use as the complete system prompt
    * - SystemPromptPreset: Use a preset
    * - { type: 'preset', preset, append? }: Use a preset with optional appended text
