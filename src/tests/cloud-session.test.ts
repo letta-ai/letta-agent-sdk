@@ -2528,7 +2528,6 @@ describe("CloudEnvironmentSession", () => {
       headers: {
         authorization: "Bearer sk-test",
         "content-type": "application/json",
-        "x-letta-source": "letta-agent-sdk",
       },
       body: {
         model: "anthropic/claude-sonnet-4",
@@ -2563,24 +2562,7 @@ describe("CloudEnvironmentSession", () => {
     );
   });
 
-  test("allows caller headers to override the Cloud source header case-insensitively", async () => {
-    resetFakeCloud();
-    const requests: RecordedRequest[] = [];
-    const client = new LettaAgentClient({
-      backend: "cloud",
-      apiBaseUrl: "https://api.test",
-      apiKey: "sk-test",
-      headers: { "x-letta-source": "custom-source" },
-      fetch: createCloudFetchMock(requests),
-      WebSocket: FakeCloudSocket,
-    });
-
-    await expect(client.createAgent()).resolves.toBe("agent-created");
-    expect(requests[0]?.headers["x-letta-source"]).toBe("custom-source");
-    expect(requests[0]?.body).toMatchObject({ system: null });
-  });
-
-  test("uses the Letta Code default model for Cloud createAgent", async () => {
+  test("sends the SDK prompt and default model for Cloud createAgent", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
     const client = new LettaAgentClient({
@@ -2592,14 +2574,24 @@ describe("CloudEnvironmentSession", () => {
     });
 
     await expect(client.createAgent()).resolves.toBe("agent-created");
-    expect(requests[0]?.body).toMatchObject({ model: "letta/auto", system: null });
-    expect(requests[0]?.headers["x-letta-source"]).toBe("letta-agent-sdk");
+    expect(requests[0]?.body).toMatchObject({
+      model: "letta/auto",
+      system: "You are a stateful Letta agent. Your memory persists across conversations and is included below. Use it, and keep it current: when you learn something durable (preferences, corrections, decisions, facts about the user or their work), save it with the memory tool. Do not save what can be recovered from past conversations. If you edit files in $MEMORY_DIR directly, commit and push the changes.",
+    });
+
+    await expect(client.createAgent({ memfs: false })).resolves.toBe("agent-created");
+    expect(requests[1]?.body).toMatchObject({
+      system: "You are a stateful Letta agent. Your memory blocks persist across conversations and are included below. Use them, and keep them current: when you learn something durable (preferences, corrections, decisions, facts about the user or their work), update the relevant block with the memory tool. Do not save what can be recovered from past conversations.",
+    });
+
+    await expect(client.createAgent({ systemPrompt: "" })).resolves.toBe("agent-created");
+    expect(requests[2]?.body).toMatchObject({ system: "" });
 
     await expect(client.createAgent({
       model: "   ",
     })).rejects.toThrow('Unknown model:');
 
-    expect(requests).toHaveLength(1);
+    expect(requests).toHaveLength(3);
   });
 
   test("responds to Remote Client approval requests through canUseTool", async () => {

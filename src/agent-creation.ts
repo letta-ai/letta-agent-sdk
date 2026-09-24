@@ -4,6 +4,10 @@ import {
   type CreateAgentRequest,
 } from "@letta-ai/letta-code/agent-presets";
 import {
+  DEFAULT_BLOCKS_SYSTEM_PROMPT,
+  DEFAULT_MEMFS_SYSTEM_PROMPT,
+} from "./default-system-prompt.js";
+import {
   resolveSkillItems,
   skillsHaveSupportFiles,
   type AgentSkill,
@@ -48,13 +52,10 @@ function assertCreateAgentOptionsSupported(options: CreateAgentOptions): void {
   }
 }
 
-/** Translate SDK convenience options into the canonical Letta Code request.
- * Cloud delegates omitted prompts to the server; app-server keeps the Letta Code default.
- */
+/** Translate SDK convenience options into the canonical Letta Code request. */
 export async function createAgentBody(
   options: CreateAgentOptions,
   resolvedSkills?: AgentSkill[],
-  { defaultSystemToNull = false }: { defaultSystemToNull?: boolean } = {},
 ): Promise<CreateAgentRequest> {
   assertCreateAgentOptionsSupported(options);
 
@@ -80,7 +81,9 @@ export async function createAgentBody(
     );
   }
 
-  let system: string | null | undefined = defaultSystemToNull ? null : undefined;
+  let system = options.memfs === false
+    ? DEFAULT_BLOCKS_SYSTEM_PROMPT
+    : DEFAULT_MEMFS_SYSTEM_PROMPT;
   if (options.systemPrompt !== undefined) {
     if (
       typeof options.systemPrompt !== "string" ||

@@ -326,7 +326,7 @@ export async function createCloudAgent(
         "package root; the portable client seeds SKILL.md-only skills.",
     );
   }
-  const body = await createAgentBody(agentOptions, skills, { defaultSystemToNull: true });
+  const body = await createAgentBody(agentOptions, skills);
   const agent = await client.agents.create(body as AgentCreateParams);
   if (typeof agent.id !== "string" || agent.id.length === 0) {
     throw new Error("Cloud create agent response did not include an agent id.");

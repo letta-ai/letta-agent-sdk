@@ -1825,9 +1825,46 @@ describe("LettaAgentClient", () => {
       create_agent?: { body?: Record<string, unknown> };
     };
     expect(command.create_agent?.body).toMatchObject({
+      system: "You are a stateful Letta agent. Your memory persists across conversations and is included below. Use it, and keep it current: when you learn something durable (preferences, corrections, decisions, facts about the user or their work), save it with the memory tool. Do not save what can be recovered from past conversations. If you edit files in $MEMORY_DIR directly, commit and push the changes.",
       tools: ["web_search", "fetch_webpage"],
       include_base_tools: false,
       include_base_tool_rules: false,
+    });
+  });
+
+  test("forwards an explicit empty system prompt to the app-server", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    await client.createAgent({ systemPrompt: "" });
+
+    expect(fakeControlSocket().sent[0]).toMatchObject({
+      type: "runtime_start",
+      create_agent: { body: { system: "" } },
+    });
+  });
+
+  test("sends the memory-block prompt to the app-server without MemFS", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    await client.createAgent({ memfs: false });
+
+    expect(fakeControlSocket().sent[0]).toMatchObject({
+      type: "runtime_start",
+      create_agent: {
+        body: {
+          system: "You are a stateful Letta agent. Your memory blocks persist across conversations and are included below. Use them, and keep them current: when you learn something durable (preferences, corrections, decisions, facts about the user or their work), update the relevant block with the memory tool. Do not save what can be recovered from past conversations.",
+        },
+      },
     });
   });
 
