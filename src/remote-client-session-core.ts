@@ -28,10 +28,10 @@ import type {
 import { RemoteTurnCoordinator } from "./remote-turn-coordinator.js";
 import { resolveUpdateModelPayloadFromCatalog } from "./model-update-resolution.js";
 import {
+  appendStructuredOutputInstruction,
   registerStructuredOutputTool,
   resolveStructuredMode,
   streamStructuredTurns,
-  STRUCTURED_OUTPUT_PROMPT,
 } from "./structured-output-session.js";
 
 export {
@@ -115,7 +115,8 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       label: config.label,
       requestTimeoutMs: config.requestTimeoutMs,
       autoHandlesToolApprovals:
-        mode.kind === "session" && typeof mode.options.canUseTool === "function",
+        sessionOutputFormat(mode) !== undefined ||
+        (mode.kind === "session" && typeof mode.options.canUseTool === "function"),
       onDeviceStatus: (status) => this.emitDeviceStatus(status),
     });
   }
@@ -270,8 +271,9 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     const turn = this.turns.trackSentTurn(runtime, options?.otid, this.structuredMode === "native" ? format : undefined);
     try {
       controller.sendTurnMessage(runtime,
-        this.structuredMode === "portable" && typeof message === "string"
-          ? `${message}\n\n${STRUCTURED_OUTPUT_PROMPT}` : message,
+        this.structuredMode === "portable"
+          ? appendStructuredOutputInstruction(message)
+          : message,
         turnSendOptions(turn));
     } catch (error) {
       this.turns.removeTrackedTurn(turn);

@@ -6,6 +6,12 @@ import { createStructuredOutputTool, type StructuredOutputParseResult } from "./
 export const STRUCTURED_OUTPUT_TOOL = "StructuredOutput";
 export const STRUCTURED_OUTPUT_PROMPT = "Return the final result by calling StructuredOutput exactly once with the requested fields. Do not write the result as prose.";
 
+export function appendStructuredOutputInstruction(message: SendMessage): SendMessage {
+  return typeof message === "string"
+    ? `${message}\n\n${STRUCTURED_OUTPUT_PROMPT}`
+    : [...message, { type: "text", text: STRUCTURED_OUTPUT_PROMPT }];
+}
+
 export function registerStructuredOutputTool(
   mode: RuntimeSessionMode,
   onResult: (result: StructuredOutputParseResult, toolCallId: string) => void,

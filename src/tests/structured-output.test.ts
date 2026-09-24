@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
 import {
   AppServerRuntimeController,
+  resolveAppServerToolApproval,
 } from "../app-server-session.js";
 import { RemoteTurnCoordinator } from "../remote-turn-coordinator.js";
 import { createStructuredOutputTool, parseStructuredOutput } from "../structured-output.js";
-import { streamStructuredTurns, resolveStructuredMode, registerStructuredOutputTool } from "../structured-output-session.js";
+import { appendStructuredOutputInstruction, streamStructuredTurns, resolveStructuredMode, registerStructuredOutputTool, STRUCTURED_OUTPUT_PROMPT } from "../structured-output-session.js";
 import type { SDKMessage } from "../types.js";
 
 const outputFormat = {
@@ -148,6 +149,61 @@ test("late interrupted-run status cannot finish the next session turn", async ()
   let second;
   while (second?.type !== "result") second = await coordinator.nextMessage();
   expect(second).toMatchObject({ success: true, result: "second", runIds: ["run-2"] });
+});
+
+test("portable instruction is appended to text and multimodal inputs without mutation", () => {
+  expect(appendStructuredOutputInstruction("hello")).toBe(`hello\n\n${STRUCTURED_OUTPUT_PROMPT}`);
+  const parts = [{ type: "text" as const, text: "describe" }, {
+    type: "image" as const, source: { type: "base64" as const,
+      media_type: "image/png" as const, data: "AA==" },
+  }];
+  expect(appendStructuredOutputInstruction(parts)).toEqual([
+    ...parts, { type: "text", text: STRUCTURED_OUTPUT_PROMPT },
+  ]);
+  expect(parts).toHaveLength(2);
+});
+
+test("default permission automatically approves only the reserved schema tool", async () => {
+  const options = { outputFormat };
+  expect(await resolveAppServerToolApproval(options, "StructuredOutput", { city: "SF" }))
+    .toMatchObject({ behavior: "allow", updatedInput: null });
+  expect(await resolveAppServerToolApproval(options, "Bash", { command: "pwd" }))
+    .toMatchObject({ behavior: "deny" });
+  let callbackCalled = false;
+  const denied = { ...options, canUseTool: () => {
+    callbackCalled = true;
+    return { behavior: "deny" as const, message: "Denied" };
+  } };
+  expect(await resolveAppServerToolApproval(denied, "StructuredOutput", {}))
+    .toMatchObject({ behavior: "allow" });
+  expect(callbackCalled).toBe(false);
+  expect(await resolveAppServerToolApproval({}, "StructuredOutput", {}))
+    .toMatchObject({ behavior: "deny" });
+});
+
+test("auto-handled approval stop waits for the structured tool continuation", async () => {
+  const runtime = { agent_id: null, conversation_id: "conv-1" };
+  const coordinator = new RemoteTurnCoordinator({
+    label: "test", autoHandlesToolApprovals: true, onDeviceStatus() {},
+  });
+  coordinator.trackSentTurn(runtime);
+  coordinator.handleProtocolMessage({ type: "stream_delta", runtime, delta: {
+    message_type: "approval_request_message", id: "call-1", run_id: "run-1",
+    tool_calls: [{ tool_call_id: "call-1", name: "StructuredOutput", arguments: '{"answer":"ok"}' }],
+  } }, runtime);
+  coordinator.handleProtocolMessage({ type: "turn_finished", runtime,
+    run_id: "run-1", stop_reason: "requires_approval" }, runtime);
+  coordinator.handleProtocolMessage({ type: "update_loop_status", runtime,
+    loop_status: { status: "WAITING_ON_APPROVAL", active_run_ids: ["run-1"] } }, runtime);
+  coordinator.handleProtocolMessage({ type: "stream_delta", runtime, delta: {
+    message_type: "tool_return_message", id: "return-1", run_id: "run-1",
+    tool_call_id: "call-1", tool_return: "accepted", status: "success",
+  } }, runtime);
+  coordinator.handleProtocolMessage({ type: "turn_finished", runtime,
+    run_id: "run-1", stop_reason: "end_turn" }, runtime);
+  let result;
+  while (result?.type !== "result") result = await coordinator.nextMessage();
+  expect(result).toMatchObject({ success: true, runIds: ["run-1"] });
 });
 
 test("portable tool reports validation errors to the model and accepts a retry", async () => {

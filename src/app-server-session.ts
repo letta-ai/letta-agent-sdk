@@ -13,6 +13,7 @@ import type {
 } from "@letta-ai/letta-code/app-server-protocol";
 import { createAgentBody } from "./agent-creation.js";
 import { normalizeAppServerModels } from "./app-server-models.js";
+import { STRUCTURED_OUTPUT_TOOL } from "./structured-output-session.js";
 import {
   buildCanUseToolContext,
   isHeadlessAutoAllowTool,
@@ -153,6 +154,12 @@ export async function resolveAppServerToolApproval(
   toolInput: Record<string, unknown>,
   context?: CanUseToolContext,
 ): Promise<CanUseToolResponse> {
+  // This SDK-owned result sink is side-effect-free and reserved when a schema is
+  // active. It must not depend on permission mode or a caller approval callback.
+  if ("outputFormat" in options && options.outputFormat !== undefined &&
+    toolName === STRUCTURED_OUTPUT_TOOL) {
+    return { behavior: "allow", updatedInput: null, updatedPermissions: [] };
+  }
   const hasCallback = typeof options.canUseTool === "function";
   const toolNeedsRuntimeUserInput = requiresRuntimeUserInput(toolName);
 
