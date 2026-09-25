@@ -109,14 +109,14 @@ function createCloudFetchMock(
       return Promise.resolve(jsonResponse({ id: "conv-1", agent_id: "agent-from-conv" }));
     }
 
-    const agentSandboxMatch = /^\/v1\/agents\/([^/]+)\/sandboxes$/.exec(parsed.pathname);
+    const agentSandboxMatch = /^\/v1\/agents\/([^/]+)\/sandboxes(\/linux-vm)?$/.exec(parsed.pathname);
     if (agentSandboxMatch && method === "POST") {
       const agentId = decodeURIComponent(agentSandboxMatch[1]!);
       sandboxCreates += 1;
-      const body = bodyOf(init) as { conversationId?: string } | undefined;
       const sandboxId = sandboxCreates === 1
         ? `sandbox-${agentId}`
         : `sandbox-${agentId}-r${sandboxCreates}`;
+      const body = bodyOf(init) as { conversationId?: string } | undefined;
       const conversationEcho =
         body?.conversationId && !options.legacySandboxServer
           ? {
@@ -904,12 +904,14 @@ describe("CloudEnvironmentSession", () => {
 
       expect(requests).toContainEqual(expect.objectContaining({
         method: "POST",
-        url: "https://api.test/v1/agents/agent-1/sandboxes",
+        url: "https://api.test/v1/agents/agent-1/sandboxes/linux-vm",
         body: {},
       }));
+      // Linux VM sandboxes refresh by id: the agent-scoped refresh route
+      // only looks up legacy container rows server-side.
       expect(requests).toContainEqual(expect.objectContaining({
         method: "POST",
-        url: "https://api.test/v1/agents/agent-1/sandboxes/refresh",
+        url: "https://api.test/v1/sandboxes/sandbox-agent-1/refresh",
         body: { ttlMinutes: 2 },
       }));
       expect(requests).toContainEqual(expect.objectContaining({
@@ -923,7 +925,7 @@ describe("CloudEnvironmentSession", () => {
       const result = await asAdvanced(session).sendAndWaitForResult("hello");
       expect(result).toMatchObject({ success: true, result: "hello from cloud" });
       expect(requests.filter((request) =>
-        new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes/refresh"
+        new URL(request.url).pathname === "/v1/sandboxes/sandbox-agent-1/refresh"
       )).toHaveLength(2);
     } finally {
       session.close();
@@ -933,9 +935,55 @@ describe("CloudEnvironmentSession", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
+    // No third refresh: by-id terminate needs no "latest active" ownership
+    // probe, unlike the legacy agent-scoped DELETE.
     expect(requests.filter((request) =>
-      new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes/refresh"
-    )).toHaveLength(3);
+      new URL(request.url).pathname === "/v1/sandboxes/sandbox-agent-1/refresh"
+    )).toHaveLength(2);
+    expect(requests).toContainEqual(expect.objectContaining({
+      method: "POST",
+      url: "https://api.test/v1/sandboxes/sandbox-agent-1/terminate",
+    }));
+  });
+
+  test("keeps the legacy container lifecycle when sandboxClass is container", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      sandbox: { sandboxClass: "container", ttlMinutes: 2, terminateOnClose: true },
+    });
+
+    const session = client.resumeSession("agent-1");
+    try {
+      await asAdvanced(session).initialize();
+
+      expect(requests).toContainEqual(expect.objectContaining({
+        method: "POST",
+        url: "https://api.test/v1/agents/agent-1/sandboxes",
+        body: {},
+      }));
+      expect(requests).toContainEqual(expect.objectContaining({
+        method: "POST",
+        url: "https://api.test/v1/agents/agent-1/sandboxes/refresh",
+        body: { ttlMinutes: 2 },
+      }));
+      expect(requests.some((request) =>
+        new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes/linux-vm"
+      )).toBe(false);
+    } finally {
+      session.close();
+    }
+
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
     expect(requests).toContainEqual(expect.objectContaining({
       method: "DELETE",
       url: "https://api.test/v1/agents/agent-1/sandboxes",
@@ -990,7 +1038,7 @@ describe("CloudEnvironmentSession", () => {
 
       expect(requests).toContainEqual(expect.objectContaining({
         method: "POST",
-        url: "https://api.test/v1/agents/agent-from-conv/sandboxes",
+        url: "https://api.test/v1/agents/agent-from-conv/sandboxes/linux-vm",
         body: { conversationId: "conv-1" },
       }));
       // Refreshes go by sandbox id — never the agent-scoped "latest active"
@@ -1058,7 +1106,7 @@ describe("CloudEnvironmentSession", () => {
         requests.findIndex((request) =>
           request.method === "POST" &&
           new URL(request.url).pathname ===
-            "/v1/agents/agent-from-conv/sandboxes"
+            "/v1/agents/agent-from-conv/sandboxes/linux-vm"
         ),
       );
 
@@ -1118,7 +1166,7 @@ describe("CloudEnvironmentSession", () => {
 
       expect(requests).toContainEqual(expect.objectContaining({
         method: "POST",
-        url: "https://api.test/v1/agents/agent-from-conv/sandboxes",
+        url: "https://api.test/v1/agents/agent-from-conv/sandboxes/linux-vm",
         body: {
           conversationId: "conv-1",
           githubRepositories: [
@@ -1146,6 +1194,9 @@ describe("CloudEnvironmentSession", () => {
       fetch: createCloudFetchMock(requests, undefined, { legacySandboxServer: true }),
       WebSocket: FakeCloudSocket,
       requestTimeoutMs: 1_000,
+      // The agent-scoped lifecycle endpoints only exist for legacy container
+      // sandboxes server-side; linux-vm sandboxes always use by-id routes.
+      sandbox: { sandboxClass: "container" },
     });
 
     const session = client.resumeSession("conv-1");
@@ -1235,7 +1286,7 @@ describe("CloudEnvironmentSession", () => {
 
       const creates = requests.filter((request) =>
         request.method === "POST" &&
-          new URL(request.url).pathname === "/v1/agents/agent-from-conv/sandboxes"
+          new URL(request.url).pathname === "/v1/agents/agent-from-conv/sandboxes/linux-vm"
       );
       expect(creates).toHaveLength(1);
     } finally {
@@ -1830,7 +1881,7 @@ describe("CloudEnvironmentSession", () => {
       expect(
         requests.filter((request) =>
           request.method === "POST" &&
-          new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes"
+          new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes/linux-vm"
         ),
       ).toHaveLength(1);
     } finally {
@@ -1873,7 +1924,7 @@ describe("CloudEnvironmentSession", () => {
       expect(
         requests.filter((request) =>
           request.method === "POST" &&
-          new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes"
+          new URL(request.url).pathname === "/v1/agents/agent-1/sandboxes/linux-vm"
         ),
       ).toHaveLength(1);
       expect(warningSpy).toHaveBeenCalledTimes(1);
@@ -2817,6 +2868,15 @@ describe("CloudEnvironmentSession", () => {
       WebSocket: FakeCloudSocket,
       sandbox: { ttlMinutes: 61 },
     })).toThrow("Invalid sandbox.ttlMinutes");
+
+    expect(() => new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock([]),
+      WebSocket: FakeCloudSocket,
+      sandbox: { sandboxClass: "docker" as "container" },
+    })).toThrow("Invalid sandbox.sandboxClass");
 
     expect(() => new LettaAgentClient({
       backend: "cloud",

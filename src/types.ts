@@ -21,6 +21,7 @@ import type { ComputerSelector } from "./computers.js";
 export type { CreateBlock } from "@letta-ai/letta-client/resources/blocks/blocks";
 export type {
   GitHubRepositoryRef,
+  LettaCodeCloudSandboxClass,
   LettaCodeCloudSandboxOptions,
 } from "./cloud-sandbox.js";
 
