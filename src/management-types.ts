@@ -63,6 +63,7 @@ export interface ListConversationsOptions {
   limit?: Present<ConversationListParams["limit"]>;
   order?: Present<ConversationListParams["order"]>;
   orderBy?: "createdAt" | "lastRunCompletion" | "lastMessageAt";
+  /** Filter by archive state. Use `"archived"` to find conversations to restore. */
   archiveStatus?: Present<ConversationListParams["archive_status"]>;
   summarySearch?: Present<ConversationListParams["summary_search"]>;
 }
@@ -83,6 +84,7 @@ export interface UpdateConversationOptions {
   model?: ConversationUpdateParams["model"];
   modelSettings?: ConversationUpdateParams["model_settings"];
   contextWindowLimit?: ConversationUpdateParams["context_window_limit"];
+  /** Set to `false` to restore an archived conversation. */
   archived?: ConversationUpdateParams["archived"];
 }
 
@@ -204,11 +206,13 @@ export interface ModelsClient {
 }
 
 export interface ConversationsClient {
+  /** List conversations, including archived ones when selected by `archiveStatus`. */
   list(
     options?: ListConversationsOptions,
   ): Promise<LettaConversation[]>;
   retrieve(conversationId: string): Promise<LettaConversation>;
   create(options: CreateConversationOptions): Promise<LettaConversation>;
+  /** Update conversation metadata or restore it with `{ archived: false }`. */
   update(
     conversationId: string,
     options: UpdateConversationOptions,
