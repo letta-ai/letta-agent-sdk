@@ -5,6 +5,10 @@ import * as sdk from "../index.js";
 import { LettaAgentClient } from "../index.js";
 import type { SessionDeviceStatus } from "../index.js";
 import { asAdvanced } from "./advanced-session.js";
+import {
+  EXPECTED_BLOCKS_SYSTEM_PROMPT,
+  EXPECTED_MEMFS_SYSTEM_PROMPT,
+} from "./default-system-prompt.fixture.js";
 
 type Listener = (event: unknown) => void;
 type FetchInput = Parameters<typeof fetch>[0];
@@ -1825,9 +1829,46 @@ describe("LettaAgentClient", () => {
       create_agent?: { body?: Record<string, unknown> };
     };
     expect(command.create_agent?.body).toMatchObject({
+      system: EXPECTED_MEMFS_SYSTEM_PROMPT,
       tools: ["web_search", "fetch_webpage"],
       include_base_tools: false,
       include_base_tool_rules: false,
+    });
+  });
+
+  test("forwards an explicit empty system prompt to the app-server", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    await client.createAgent({ systemPrompt: "" });
+
+    expect(fakeControlSocket().sent[0]).toMatchObject({
+      type: "runtime_start",
+      create_agent: { body: { system: "" } },
+    });
+  });
+
+  test("sends the memory-block prompt to the app-server without MemFS", async () => {
+    FakeAppServerSocket.instances = [];
+    const client = new LettaAgentClient({
+      backend: "remote",
+      url: "ws://127.0.0.1:4500/ws",
+      WebSocket: FakeAppServerSocket,
+    });
+
+    await client.createAgent({ memfs: false });
+
+    expect(fakeControlSocket().sent[0]).toMatchObject({
+      type: "runtime_start",
+      create_agent: {
+        body: {
+          system: EXPECTED_BLOCKS_SYSTEM_PROMPT,
+        },
+      },
     });
   });
 

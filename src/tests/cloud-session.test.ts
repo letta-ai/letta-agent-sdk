@@ -7,6 +7,10 @@ import {
 } from "../index.js";
 import type { SessionDeviceStatus } from "../index.js";
 import { asAdvanced } from "./advanced-session.js";
+import {
+  EXPECTED_BLOCKS_SYSTEM_PROMPT,
+  EXPECTED_MEMFS_SYSTEM_PROMPT,
+} from "./default-system-prompt.fixture.js";
 
 type Listener = (event: unknown) => void;
 type FetchInput = Parameters<typeof fetch>[0];
@@ -2562,7 +2566,7 @@ describe("CloudEnvironmentSession", () => {
     );
   });
 
-  test("uses the Letta Code default model for Cloud createAgent", async () => {
+  test("sends the SDK prompt and default model for Cloud createAgent", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
     const client = new LettaAgentClient({
@@ -2574,13 +2578,24 @@ describe("CloudEnvironmentSession", () => {
     });
 
     await expect(client.createAgent()).resolves.toBe("agent-created");
-    expect(requests[0]?.body).toMatchObject({ model: "letta/auto" });
+    expect(requests[0]?.body).toMatchObject({
+      model: "letta/auto",
+      system: EXPECTED_MEMFS_SYSTEM_PROMPT,
+    });
+
+    await expect(client.createAgent({ memfs: false })).resolves.toBe("agent-created");
+    expect(requests[1]?.body).toMatchObject({
+      system: EXPECTED_BLOCKS_SYSTEM_PROMPT,
+    });
+
+    await expect(client.createAgent({ systemPrompt: "" })).resolves.toBe("agent-created");
+    expect(requests[2]?.body).toMatchObject({ system: "" });
 
     await expect(client.createAgent({
       model: "   ",
     })).rejects.toThrow('Unknown model:');
 
-    expect(requests).toHaveLength(1);
+    expect(requests).toHaveLength(3);
   });
 
   test("responds to Remote Client approval requests through canUseTool", async () => {
