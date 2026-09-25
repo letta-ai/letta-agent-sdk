@@ -27,7 +27,10 @@ describe("createAgentBody", () => {
     });
     expect(body).not.toHaveProperty("name");
     expect(body).not.toHaveProperty("description");
-    expect(body).not.toHaveProperty("memory_blocks");
+    // 0.33.x seeds the root memory index even when the SDK supplies `system`.
+    expect(body.memory_blocks).toEqual([
+      { label: "MEMORY", value: "# Memory\n", description: "Root memory index." },
+    ]);
   });
 
   test("uses caller memory as the complete identity without a personality preset", async () => {
@@ -44,7 +47,10 @@ describe("createAgentBody", () => {
 
     expect(body.name).toBe("Ezra");
     expect(body.description).toBe("Letta documentation assistant.");
-    expect(body.memory_blocks).toEqual(memory);
+    expect(body.memory_blocks).toEqual([
+      { label: "MEMORY", value: "# Memory\n", description: "Root memory index." },
+      ...memory,
+    ]);
   });
 
   test("applies a personality only when explicitly requested", async () => {

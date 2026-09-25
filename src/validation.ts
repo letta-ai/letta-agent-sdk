@@ -32,6 +32,26 @@ const VALID_TOOLSET_BASES = [
   "none",
 ] as const;
 
+function validateOutputFormat(outputFormat: CreateSessionOptions["outputFormat"]): void {
+  if (outputFormat === undefined) return;
+  if (
+    !outputFormat ||
+    typeof outputFormat !== "object" ||
+    outputFormat.type !== "json_schema" ||
+    !outputFormat.schema ||
+    typeof outputFormat.schema !== "object" ||
+    Array.isArray(outputFormat.schema)
+  ) {
+    throw new Error(
+      "Invalid outputFormat. Expected { type: 'json_schema', schema: <JSON Schema object> }.",
+    );
+  }
+  if (outputFormat.maxRetries !== undefined &&
+    (!Number.isInteger(outputFormat.maxRetries) || outputFormat.maxRetries < 0 || outputFormat.maxRetries > 5)) {
+    throw new Error("Invalid outputFormat.maxRetries. Expected an integer from 0 to 5.");
+  }
+}
+
 const VALID_REASONING_EFFORTS = [
   "none",
   "minimal",
@@ -244,6 +264,7 @@ export function validateCreateSessionOptions(options: CreateSessionOptions): voi
   validateMcpServers(options.mcpServers);
   validateReasoningEffort(options.reasoningEffort);
   validateDreamingOptions(options.dreaming);
+  validateOutputFormat(options.outputFormat);
   validateRemovedSessionOptions(options);
 }
 

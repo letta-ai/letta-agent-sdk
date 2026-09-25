@@ -10,6 +10,7 @@ import type {
   RecoverPendingApprovalsResult,
   ReasoningEffort,
   SDKErrorCode,
+  OutputFormat,
   SDKQueueItem,
   SendMessage,
   SessionDeviceStatus,
@@ -72,6 +73,7 @@ export type RuntimeSendTurnOptions = {
   clientMessageId: string;
   /** Caller-supplied OTID for the user message, when one was provided. */
   otid?: string;
+  outputFormat?: OutputFormat;
 };
 
 export type RuntimeRequestOptions = {
@@ -147,9 +149,12 @@ export type TurnTracker = {
   clientMessageId: string;
   /** Caller-supplied OTID for this turn's user message, when one was provided. */
   otid?: string;
+  outputFormat?: OutputFormat;
   queuedAt: number;
   startedAt: number;
   assistantText: string;
+  finalAssistantText: string;
+  finalAssistantMessageKey: string | null;
   runIds: Set<string>;
   observedTurnEvidence: boolean;
   observedRequiresApprovalStop: boolean;
@@ -183,6 +188,7 @@ const KNOWN_SDK_ERROR_CODES = new Set<SDKErrorCode>([
   "max_steps",
   "interrupted",
   "stream_closed",
+  "structured_output_error",
 ]);
 
 type LegacyPermissionMode = "default" | "bypassPermissions" | "fullAccess";
@@ -734,5 +740,14 @@ export function turnSendOptions(turn: TurnTracker): RuntimeSendTurnOptions {
   return {
     clientMessageId: turn.clientMessageId,
     ...(turn.otid !== undefined ? { otid: turn.otid } : {}),
+    ...(turn.outputFormat !== undefined
+      ? { outputFormat: turn.outputFormat }
+      : {}),
   };
+}
+
+export function sessionOutputFormat(
+  mode: RuntimeSessionMode,
+): OutputFormat | undefined {
+  return "outputFormat" in mode.options ? mode.options.outputFormat : undefined;
 }

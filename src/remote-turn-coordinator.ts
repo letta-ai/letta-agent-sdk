@@ -2,6 +2,7 @@ import type {
   SDKErrorCode,
   SDKLoopStatusMessage,
   SDKMessage,
+  OutputFormat,
   SDKQueueUpdateMessage,
   SDKResultMessage,
   SDKStreamEventPayload,
@@ -34,6 +35,7 @@ import {
   type RuntimeTurnResult,
   type TurnTracker,
 } from "./remote-session-protocol.js";
+import { parseStructuredOutput } from "./structured-output.js";
 
 type RemoteTurnCoordinatorConfig = {
   label: string;
@@ -88,17 +90,24 @@ export class RemoteTurnCoordinator {
    * `clientMessageId` so queue updates carry the same correlation id the
    * persisted message will; otherwise the SDK mints one.
    */
-  trackSentTurn(runtime: RuntimeScope, callerOtid?: string): TurnTracker {
+  trackSentTurn(
+    runtime: RuntimeScope,
+    callerOtid?: string,
+    outputFormat?: OutputFormat,
+  ): TurnTracker {
     const otid = normalizeCallerOtid(callerOtid);
     const turn: TurnTracker = {
       id: ++this.nextTurnId,
       runtime,
       ...(otid !== undefined ? { otid } : {}),
+      ...(outputFormat !== undefined ? { outputFormat } : {}),
       clientMessageId:
         otid ?? `sdk-message-${Date.now()}-${++this.clientMessageCounter}`,
       queuedAt: Date.now(),
       startedAt: 0,
       assistantText: "",
+      finalAssistantText: "",
+      finalAssistantMessageKey: null,
       runIds: new Set<string>(),
       observedTurnEvidence: false,
       observedRequiresApprovalStop: false,
@@ -153,6 +162,10 @@ export class RemoteTurnCoordinator {
     }
 
     const deferredDelta = streamDeltaRecord(message);
+    // An interrupted run may emit a final lifecycle/status delta after its
+    // result. Never attribute that old evidence to the next sent turn.
+    const deltaRunId = deferredDelta ? streamDeltaRunId(deferredDelta) : undefined;
+    if (deltaRunId && this.settledRunIds.has(deltaRunId)) return;
     const deferredMessageType = deferredDelta
       ? streamDeltaMessageType(deferredDelta)
       : undefined;
@@ -211,9 +224,20 @@ export class RemoteTurnCoordinator {
       messageType === "usage_statistics" || messageType === "stop_reason"
         ? this.activeTurn
         : this.activateNextTurnFromProtocol();
-    if (active) {
+    const runId = streamDeltaRunId(delta);
+    const isTurnEvidence =
+      messageType === "assistant_message" ||
+      messageType === "reasoning_message" ||
+      messageType === "tool_call_message" ||
+      messageType === "approval_request_message" ||
+      messageType === "tool_return_message" ||
+      messageType === "error_message" ||
+      messageType === "loop_error" ||
+      (runId !== undefined && (messageType === "usage_statistics" || messageType === "stop_reason"));
+    // Persisted user-message echoes and lifecycle status are not evidence that
+    // the new model run started. In particular they may arrive after an abort.
+    if (active && isTurnEvidence) {
       active.observedTurnEvidence = true;
-      const runId = streamDeltaRunId(delta);
       if (runId) active.runIds.add(runId);
     }
 
@@ -509,6 +533,12 @@ export class RemoteTurnCoordinator {
     (active.pendingTerminalTimeout as { unref?: () => void }).unref?.();
   }
 
+  private clearFinalAssistantForToolActivity(): void {
+    if (!this.activeTurn) return;
+    this.activeTurn.finalAssistantText = "";
+    this.activeTurn.finalAssistantMessageKey = null;
+  }
+
   private transformStreamDelta(
     delta: Record<string, unknown>,
   ): SDKMessage | null {
@@ -525,7 +555,23 @@ export class RemoteTurnCoordinator {
     if (messageType === "assistant_message") {
       const content = extractTextFromContent(delta.content);
       if (!content) return null;
-      if (this.activeTurn) this.activeTurn.assistantText += content;
+      if (this.activeTurn) {
+        this.activeTurn.assistantText += content;
+        const messageKey =
+          typeof delta.id === "string"
+            ? `id:${delta.id}`
+            : typeof otid === "string"
+              ? `otid:${otid}`
+              : null;
+        if (
+          messageKey !== null &&
+          this.activeTurn.finalAssistantMessageKey !== messageKey
+        ) {
+          this.activeTurn.finalAssistantMessageKey = messageKey;
+          this.activeTurn.finalAssistantText = "";
+        }
+        this.activeTurn.finalAssistantText += content;
+      }
       return {
         type: "assistant",
         content,
@@ -556,6 +602,7 @@ export class RemoteTurnCoordinator {
       messageType === "tool_call_message" ||
       messageType === "approval_request_message"
     ) {
+      this.clearFinalAssistantForToolActivity();
       const toolCall = firstToolCall(delta);
       if (!toolCall) return null;
       const fn =
@@ -598,6 +645,7 @@ export class RemoteTurnCoordinator {
     }
 
     if (messageType === "tool_return_message") {
+      this.clearFinalAssistantForToolActivity();
       const toolReturn = firstToolReturn(delta) ?? delta;
       const toolCallId =
         (typeof delta.tool_call_id === "string"
@@ -703,10 +751,35 @@ export class RemoteTurnCoordinator {
         ? errorCode
         : (turn.detail ?? stopReason ?? "error");
 
+    let structuredOutput: unknown;
+    if (success && tracker?.outputFormat !== undefined) {
+      const parsed = parseStructuredOutput(
+        tracker.finalAssistantText,
+        tracker.outputFormat,
+      );
+      if (!parsed.success) {
+        return {
+          type: "result",
+          success: false,
+          error: "structured_output_error",
+          errorCode: "structured_output_error",
+          recoverable: false,
+          errorDetail: parsed.detail,
+          stopReason,
+          durationMs:
+            Date.now() - (tracker.startedAt || this._activeTurnStartedAt),
+          conversationId: turn.runtime.conversation_id,
+          runIds: turn.runIds.length > 0 ? turn.runIds : undefined,
+        };
+      }
+      structuredOutput = parsed.value;
+    }
+
     return {
       type: "result",
       success,
       result: success ? tracker?.assistantText || undefined : undefined,
+      ...(tracker?.outputFormat !== undefined ? { structuredOutput } : {}),
       error: success ? undefined : publicError,
       errorCode: success ? undefined : (errorCode ?? "error"),
       approvalConflict: approvalConflict || undefined,
