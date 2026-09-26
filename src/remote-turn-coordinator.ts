@@ -45,12 +45,6 @@ type RemoteTurnCoordinatorConfig = {
 };
 
 const MAX_RECENTLY_SETTLED_RUN_IDS = 256;
-
-function messageRuntime(message: ProtocolMessage): RuntimeScope | undefined {
-  const runtime = message.runtime;
-  if (!runtime || typeof runtime.conversation_id !== "string") return undefined;
-  return runtime;
-}
 const TRAILING_USAGE_GRACE_MS = 100;
 
 /**
@@ -70,6 +64,10 @@ export class RemoteTurnCoordinator {
   private activeTurn: TurnTracker | null = null;
   private pendingTurns: TurnTracker[] = [];
   private settledRunIds = new Set<string>();
+  // Listeners before letta-code 0.30.3 never send turn_finished, so their idle
+  // loop status is the only terminal signal. Once this session sees one, idle
+  // no longer ends a turn whose run the server still reports as active.
+  private serverReportsTurnFinished = false;
   private nextTurnId = 0;
   private messageCounter = 0;
   private clientMessageCounter = 0;
@@ -217,7 +215,8 @@ export class RemoteTurnCoordinator {
 
     const finished = turnFinishedRecord(message);
     if (finished) {
-      this.handleTurnFinished(finished, messageRuntime(message));
+      this.serverReportsTurnFinished = true;
+      this.handleTurnFinished(finished);
       return;
     }
 
@@ -431,6 +430,11 @@ export class RemoteTurnCoordinator {
     }
     if (status === "WAITING_ON_INPUT" && active.observedTurnEvidence) {
       if (active.pendingTerminal) return;
+      // An idle status that still lists a run is not the end of the turn: the
+      // listener reports WAITING_ON_INPUT for an active turn in some approval
+      // and interrupt states. Its turn_finished, or a later idle status with
+      // no runs, closes the turn with the real stop reason.
+      if (this.serverReportsTurnFinished && activeRunIds.length > 0) return;
       this.completeActiveTurn({
         runtime: active.runtime,
         stopReason: null,
@@ -439,25 +443,15 @@ export class RemoteTurnCoordinator {
     }
   }
 
-  private handleTurnFinished(
-    finished: {
-      runId?: string;
-      stopReason: string;
-      error?: string;
-    },
-    messageRuntime?: RuntimeScope,
-  ): void {
+  private handleTurnFinished(finished: {
+    runId?: string;
+    stopReason: string;
+    error?: string;
+  }): void {
     if (!finished.runId) return;
     if (this.settledRunIds.has(finished.runId)) return;
     const active = this.activeTurn ?? this.activateNextTurnFromProtocol();
-    if (!active) {
-      // The turn was already closed, but the server kept a run going and is
-      // now reporting that it finished. Dropping this loses the only signal a
-      // client has that the continued run ended, so surface it as a result.
-      this.rememberSettledRunIds([finished.runId]);
-      this.enqueueOrphanedTurnResult(finished, messageRuntime);
-      return;
-    }
+    if (!active) return;
     if (
       active.runIds.size > 0 &&
       !active.runIds.has(finished.runId)
@@ -741,29 +735,6 @@ export class RemoteTurnCoordinator {
       event: delta as SDKStreamEventPayload,
       uuid,
     };
-  }
-
-  /**
-   * A turn_finished for a run whose turn the SDK already closed. The client
-   * still needs to learn the run ended, so emit a result carrying the stop
-   * reason and the run id.
-   */
-  private enqueueOrphanedTurnResult(
-    finished: { runId?: string; stopReason: string; error?: string },
-    runtime: RuntimeScope | undefined,
-  ): void {
-    const errorCode = toSdkErrorCode(finished.stopReason);
-    const success = !isFailureStopReason(finished.stopReason);
-    this.enqueue({
-      type: "result",
-      success,
-      error: success ? undefined : (finished.error ?? errorCode ?? "error"),
-      errorCode: success ? undefined : (errorCode ?? "error"),
-      stopReason: finished.stopReason,
-      durationMs: 0,
-      conversationId: runtime?.conversation_id ?? null,
-      runIds: finished.runId ? [finished.runId] : undefined,
-    });
   }
 
   private resultFromTurn(
