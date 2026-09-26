@@ -45,6 +45,12 @@ type RemoteTurnCoordinatorConfig = {
 };
 
 const MAX_RECENTLY_SETTLED_RUN_IDS = 256;
+
+function messageRuntime(message: ProtocolMessage): RuntimeScope | undefined {
+  const runtime = message.runtime;
+  if (!runtime || typeof runtime.conversation_id !== "string") return undefined;
+  return runtime;
+}
 const TRAILING_USAGE_GRACE_MS = 100;
 
 /**
@@ -211,7 +217,7 @@ export class RemoteTurnCoordinator {
 
     const finished = turnFinishedRecord(message);
     if (finished) {
-      this.handleTurnFinished(finished);
+      this.handleTurnFinished(finished, messageRuntime(message));
       return;
     }
 
@@ -433,15 +439,25 @@ export class RemoteTurnCoordinator {
     }
   }
 
-  private handleTurnFinished(finished: {
-    runId?: string;
-    stopReason: string;
-    error?: string;
-  }): void {
+  private handleTurnFinished(
+    finished: {
+      runId?: string;
+      stopReason: string;
+      error?: string;
+    },
+    messageRuntime?: RuntimeScope,
+  ): void {
     if (!finished.runId) return;
     if (this.settledRunIds.has(finished.runId)) return;
     const active = this.activeTurn ?? this.activateNextTurnFromProtocol();
-    if (!active) return;
+    if (!active) {
+      // The turn was already closed, but the server kept a run going and is
+      // now reporting that it finished. Dropping this loses the only signal a
+      // client has that the continued run ended, so surface it as a result.
+      this.rememberSettledRunIds([finished.runId]);
+      this.enqueueOrphanedTurnResult(finished, messageRuntime);
+      return;
+    }
     if (
       active.runIds.size > 0 &&
       !active.runIds.has(finished.runId)
@@ -725,6 +741,29 @@ export class RemoteTurnCoordinator {
       event: delta as SDKStreamEventPayload,
       uuid,
     };
+  }
+
+  /**
+   * A turn_finished for a run whose turn the SDK already closed. The client
+   * still needs to learn the run ended, so emit a result carrying the stop
+   * reason and the run id.
+   */
+  private enqueueOrphanedTurnResult(
+    finished: { runId?: string; stopReason: string; error?: string },
+    runtime: RuntimeScope | undefined,
+  ): void {
+    const errorCode = toSdkErrorCode(finished.stopReason);
+    const success = !isFailureStopReason(finished.stopReason);
+    this.enqueue({
+      type: "result",
+      success,
+      error: success ? undefined : (finished.error ?? errorCode ?? "error"),
+      errorCode: success ? undefined : (errorCode ?? "error"),
+      stopReason: finished.stopReason,
+      durationMs: 0,
+      conversationId: runtime?.conversation_id ?? null,
+      runIds: finished.runId ? [finished.runId] : undefined,
+    });
   }
 
   private resultFromTurn(
