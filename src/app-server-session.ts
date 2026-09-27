@@ -754,6 +754,16 @@ export class AppServerSession extends RemoteClientSessionCore {
 
     const mode = mapPermissionMode(options.permissionMode);
     if (mode) command.mode = mode;
+    if (
+      this.mode.kind === "agent-free" &&
+      this.mode.disableMemoryGuard === true
+    ) {
+      command.execution_settings = {
+        allowed_tools: [],
+        disallowed_tools: [],
+        disable_memory_guard: true,
+      };
+    }
     if (options.cwd !== undefined) command.cwd = options.cwd;
     if (
       this.mode.kind === "session" &&

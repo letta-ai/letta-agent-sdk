@@ -48,6 +48,7 @@ export type RuntimeSessionMode =
         isSubagent?: boolean;
         contextWindowLimit?: number | null;
       };
+      disableMemoryGuard?: boolean;
       options: LettaCodeClientSessionOptions;
     }
   | {

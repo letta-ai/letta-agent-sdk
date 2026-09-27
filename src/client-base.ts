@@ -111,6 +111,7 @@ function agentFreeSessionOptions(
     modelSettings: _modelSettings,
     contextWindowLimit: _contextWindowLimit,
     conversationId: _conversationId,
+    disableMemoryGuard: _disableMemoryGuard,
     ...sessionOptions
   } = options;
   return sessionOptions;
@@ -434,6 +435,11 @@ export class LettaAgentClientBase implements AsyncDisposable {
     validateAgentFreeQueryOptions(options);
     const sessionOptions = agentFreeSessionOptions(options);
     this.assertSessionBackend("query", sessionOptions);
+    if (options.disableMemoryGuard === true && this.backend === "cloud") {
+      throw new Error(
+        'query() disableMemoryGuard is only supported with backend: "local" or "remote".',
+      );
+    }
 
     if (this.backend === "remote") {
       return new AppServerSession(this.appServerSessionOptions(), {
@@ -460,6 +466,9 @@ export class LettaAgentClientBase implements AsyncDisposable {
               },
             }),
         options: sessionOptions,
+        ...(options.disableMemoryGuard === true
+          ? { disableMemoryGuard: true }
+          : {}),
       });
     }
     if (this.backend === "cloud") {

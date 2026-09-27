@@ -1712,6 +1712,7 @@ describe("LettaAgentClient", () => {
       options: {
         model: "openai/gpt-5.6-luna",
         system: "Answer with one number.",
+        disableMemoryGuard: true,
         ...lineage,
         modelSettings: { parallel_tool_calls: false },
         contextWindowLimit: 64_000,
@@ -1741,6 +1742,11 @@ describe("LettaAgentClient", () => {
           model_settings: { parallel_tool_calls: false },
           context_window_limit: 64_000,
         },
+      },
+      execution_settings: {
+        allowed_tools: [],
+        disallowed_tools: [],
+        disable_memory_guard: true,
       },
     });
     expect(runtimeStart).not.toHaveProperty("agent_id");
@@ -1786,6 +1792,7 @@ describe("LettaAgentClient", () => {
         (sent) => (sent as { type?: string }).type === "runtime_start",
       );
       expect(runtimeStart).toMatchObject({ conversation_id: "conv-previous" });
+      expect(runtimeStart).not.toHaveProperty("execution_settings");
       expect(runtimeStart).not.toHaveProperty("agent_id");
       expect(runtimeStart).not.toHaveProperty("create_conversation");
     },
@@ -1803,6 +1810,27 @@ describe("LettaAgentClient", () => {
         },
       }),
     ).toThrow("conversationId must be a non-empty string");
+  });
+
+  test("query rejects memory guard bypass on Cloud before creating a worker", async () => {
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      computer: "test-computer",
+    });
+    const query = client.query({
+      prompt: "Hello",
+      options: {
+        model: "openai/gpt-5.6-luna",
+        system: "Be concise.",
+        disableMemoryGuard: true,
+      },
+    });
+    await expect((async () => {
+      for await (const _message of query) {
+        // Initialization must fail before there is a worker response.
+      }
+    })()).rejects.toThrow('only supported with backend: "local" or "remote"');
+    query.close();
   });
 
   test("creates remote app-server agents with an explicit pinning preference", async () => {
