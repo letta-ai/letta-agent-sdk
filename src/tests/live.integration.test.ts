@@ -342,6 +342,92 @@ describeLive("live integration: letta-agent-sdk", () => {
     TEST_TIMEOUT_MS,
   );
 
+  test(
+    "query resumes an agent-free conversation with persisted history",
+    async () => {
+      const client = new LettaAgentClient({
+        backend: "local",
+        appServer: {
+          harnessBackend: "api",
+          requestTimeoutMs: TEST_TIMEOUT_MS,
+        },
+      });
+      const management = new LettaAgentClient({
+        backend: "cloud",
+        apiKey: API_KEY!,
+        apiBaseUrl: BASE_URL,
+      });
+      const marker = `QUERY_RESUME_${crypto.randomUUID().replaceAll("-", "")}`;
+      const firstPrompt = `Remember this exact marker for my next message: ${marker}`;
+      const secondPrompt = "What exact marker did my prior message ask you to remember? Reply with the marker.";
+      const options = {
+        model: "openai/gpt-5.6-luna",
+        system: "Answer the user's questions accurately and briefly.",
+        permissionMode: "unrestricted" as const,
+        allowedTools: [],
+      };
+      let conversationId: string | null = null;
+      let first: ReturnType<typeof client.query> | null = null;
+      let second: ReturnType<typeof client.query> | null = null;
+
+      try {
+        first = client.query({ prompt: firstPrompt, options });
+        const firstMessages: SDKMessage[] = [];
+        for await (const message of first) firstMessages.push(message);
+        conversationId = first.conversationId;
+        expect(conversationId?.startsWith("conv-")).toBe(true);
+        expect(first.agentId).toBeNull();
+        expect(expectTerminalResult(firstMessages).success).toBe(true);
+
+        second = client.query({
+          prompt: secondPrompt,
+          options: { ...options, conversationId: conversationId! },
+        });
+        const secondMessages: SDKMessage[] = [];
+        for await (const message of second) secondMessages.push(message);
+        const result = expectTerminalResult(secondMessages);
+        expect(result.success).toBe(true);
+        expect(result.result).toContain(marker);
+        expect(result.conversationId).toBe(conversationId);
+        expect(second.conversationId).toBe(conversationId);
+        expect(second.agentId).toBeNull();
+
+        const conversation = await management.conversations.retrieve(conversationId!);
+        expect(conversation.agent_id).toBeNull();
+        const history = await management.conversations.listMessages(conversationId!, {
+          order: "asc",
+          limit: 100,
+        });
+        const firstUserIndex = history.messages.findIndex(
+          (message) => message.message_type === "user_message" && JSON.stringify(message).includes(firstPrompt),
+        );
+        const secondUserIndex = history.messages.findIndex(
+          (message, index) => index > firstUserIndex && message.message_type === "user_message" && JSON.stringify(message).includes(secondPrompt),
+        );
+        const assistantIndex = history.messages.findIndex(
+          (message, index) => index > secondUserIndex && message.message_type === "assistant_message" && JSON.stringify(message).includes(marker),
+        );
+        expect(firstUserIndex).toBeGreaterThanOrEqual(0);
+        expect(secondUserIndex).toBeGreaterThan(firstUserIndex);
+        expect(assistantIndex).toBeGreaterThan(secondUserIndex);
+      } finally {
+        const ownedConversationId = conversationId ?? first?.conversationId;
+        if (ownedConversationId) {
+          try {
+            await management.conversations.update(ownedConversationId, { archived: true });
+          } catch (error) {
+            log(`Could not archive query conversation ${ownedConversationId}: ${String(error)}`);
+          }
+        }
+        first?.close();
+        second?.close();
+        await client[Symbol.asyncDispose]?.();
+        await management[Symbol.asyncDispose]?.();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
   afterAll(() => {
     for (const session of openedSessions) {
       session.close();
