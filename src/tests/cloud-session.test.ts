@@ -110,8 +110,9 @@ function createCloudFetchMock(
     }
 
     const agentSandboxMatch = /^\/v1\/agents\/([^/]+)\/sandboxes$/.exec(parsed.pathname);
-    if (agentSandboxMatch && method === "POST") {
-      const agentId = decodeURIComponent(agentSandboxMatch[1]!);
+    const sandboxCreateMatch = /^\/v1\/agents\/([^/]+)\/sandboxes(?:\/linux-vm)?$/.exec(parsed.pathname);
+    if (sandboxCreateMatch && method === "POST") {
+      const agentId = decodeURIComponent(sandboxCreateMatch[1]!);
       sandboxCreates += 1;
       const body = bodyOf(init) as { conversationId?: string } | undefined;
       const sandboxId = sandboxCreates === 1
@@ -1000,7 +1001,7 @@ describe("CloudEnvironmentSession", () => {
     )).toBe(false);
   });
 
-  test("scopes the managed sandbox to the conversation when the server supports it", async () => {
+  test.each(["create", "resume"] as const)("requests a Linux VM for a named conversation (%s)", async (mode) => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
     const client = new LettaAgentClient({
@@ -1012,19 +1013,27 @@ describe("CloudEnvironmentSession", () => {
       requestTimeoutMs: 1_000,
     });
 
-    const session = client.resumeSession("conv-1");
+    const session = mode === "create"
+      ? client.createSession("agent-from-conv")
+      : client.resumeSession("conv-1");
+    const conversationId = mode === "create" ? "conv-created" : "conv-1";
     try {
       const init = await session.ready();
       expect(init).toMatchObject({
         agentId: "agent-from-conv",
-        conversationId: "conv-1",
+        conversationId,
       });
 
       expect(requests).toContainEqual(expect.objectContaining({
         method: "POST",
-        url: "https://api.test/v1/agents/agent-from-conv/sandboxes",
-        body: { conversationId: "conv-1" },
+        url: "https://api.test/v1/agents/agent-from-conv/sandboxes/linux-vm",
+        body: { conversationId },
       }));
+      expect(requests.some((request) =>
+        new URL(request.url).pathname === "/v1/agents/agent-from-conv/sandboxes"
+      )).toBe(false);
+      const result = await asAdvanced(session).sendAndWaitForResult("hello");
+      expect(result).toMatchObject({ success: true, result: "hello from cloud" });
       // Refreshes go by sandbox id — never the agent-scoped "latest active"
       // route, whose target another conversation's create could displace.
       expect(requests.some((request) =>
@@ -1090,7 +1099,7 @@ describe("CloudEnvironmentSession", () => {
         requests.findIndex((request) =>
           request.method === "POST" &&
           new URL(request.url).pathname ===
-            "/v1/agents/agent-from-conv/sandboxes"
+            "/v1/agents/agent-from-conv/sandboxes/linux-vm"
         ),
       );
 
@@ -1150,7 +1159,7 @@ describe("CloudEnvironmentSession", () => {
 
       expect(requests).toContainEqual(expect.objectContaining({
         method: "POST",
-        url: "https://api.test/v1/agents/agent-from-conv/sandboxes",
+        url: "https://api.test/v1/agents/agent-from-conv/sandboxes/linux-vm",
         body: {
           conversationId: "conv-1",
           githubRepositories: [
@@ -1189,7 +1198,7 @@ describe("CloudEnvironmentSession", () => {
       // on the agent-scoped lifecycle.
       expect(requests).toContainEqual(expect.objectContaining({
         method: "POST",
-        url: "https://api.test/v1/agents/agent-from-conv/sandboxes",
+        url: "https://api.test/v1/agents/agent-from-conv/sandboxes/linux-vm",
         body: { conversationId: "conv-1" },
       }));
       expect(requests.some((request) =>
@@ -1267,7 +1276,7 @@ describe("CloudEnvironmentSession", () => {
 
       const creates = requests.filter((request) =>
         request.method === "POST" &&
-          new URL(request.url).pathname === "/v1/agents/agent-from-conv/sandboxes"
+          new URL(request.url).pathname === "/v1/agents/agent-from-conv/sandboxes/linux-vm"
       );
       expect(creates).toHaveLength(1);
     } finally {

@@ -995,7 +995,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     const sandboxOptions = this.resolvedSandboxOptions();
     const githubRepositories = sandboxOptions.githubRepositories;
     const body = await this.apiClient.post<unknown>(
-      `/v1/agents/${encodeURIComponent(agentId)}/sandboxes`,
+      `/v1/agents/${encodeURIComponent(agentId)}/sandboxes${conversationId ? "/linux-vm" : ""}`,
       {
         body: {
           ...(conversationId ? { conversationId } : {}),
