@@ -375,7 +375,9 @@ function fakeAppServerHandle(
     const createConversation = command.create_conversation as
       | { body?: Record<string, unknown> }
       | undefined;
-    const agentFree = createConversation?.body?.system !== undefined;
+    const agentFree =
+      createConversation?.body?.system !== undefined ||
+      (command.conversation_id !== undefined && command.agent_id === undefined);
     const agentId = agentFree
       ? null
       : ((command.agent_id as string | undefined) ?? "agent-created");
@@ -1753,6 +1755,54 @@ describe("LettaAgentClient", () => {
     expect(messages).toContainEqual(
       expect.objectContaining({ type: "result", success: true }),
     );
+  });
+
+  test.each(["remote", "local"] as const)(
+    "query resumes an agent-free conversation without creating another (%s)",
+    async (backend) => {
+      FakeAppServerSocket.instances = [];
+      const connection = {
+        url: "ws://127.0.0.1:4500/ws",
+        WebSocket: FakeAppServerSocket,
+      };
+      const client = new LettaAgentClient(
+        backend === "remote"
+          ? { backend, ...connection }
+          : { backend, appServer: { ...connection, harnessBackend: "api" } },
+      );
+      const query = client.query({
+        prompt: "Continue the previous conversation",
+        options: {
+          conversationId: "conv-previous",
+          model: "openai/gpt-5.6-luna",
+          system: "Used only for new conversations.",
+        },
+      });
+      for await (const _message of query) {
+        expect(query.conversationId).toBe("conv-previous");
+        expect(query.agentId).toBeNull();
+      }
+      const runtimeStart = fakeControlSocket().sent.find(
+        (sent) => (sent as { type?: string }).type === "runtime_start",
+      );
+      expect(runtimeStart).toMatchObject({ conversation_id: "conv-previous" });
+      expect(runtimeStart).not.toHaveProperty("agent_id");
+      expect(runtimeStart).not.toHaveProperty("create_conversation");
+    },
+  );
+
+  test("query rejects an empty resume id before opening a session", () => {
+    const client = new LettaAgentClient({ backend: "local" });
+    expect(() =>
+      client.query({
+        prompt: "Continue",
+        options: {
+          conversationId: "",
+          model: "openai/gpt-5.6-luna",
+          system: "New conversation system prompt",
+        },
+      }),
+    ).toThrow("conversationId must be a non-empty string");
   });
 
   test("creates remote app-server agents with an explicit pinning preference", async () => {

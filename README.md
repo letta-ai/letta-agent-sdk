@@ -70,6 +70,11 @@ for await (const message of client.query({
 `appServer.harnessBackend: "api"`; the default local harness backend does not
 store agent-free conversations.
 
+Pass the returned `query.conversationId` as `options.conversationId` on a later
+`query()` to continue that conversation with its history. On resume, `model`,
+`system`, and other creation settings are ignored; the conversation keeps its
+stored configuration.
+
 Cloud queries require an explicit connected computer. Local and remote clients
 run the ephemeral conversation through their App Server.
 

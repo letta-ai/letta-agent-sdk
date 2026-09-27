@@ -92,23 +92,27 @@ export class LettaAgentClient extends LettaAgentClientBase {
     }
     return createLocalAppServerSession(localOptions.appServer, {
       kind: "agent-free",
-      createConversation: {
-        model: queryOptions.model,
-        system: queryOptions.system,
-        ...(queryOptions.parentAgentId !== undefined
-          ? { parentAgentId: queryOptions.parentAgentId }
-          : {}),
-        ...(queryOptions.name !== undefined ? { name: queryOptions.name } : {}),
-        ...(queryOptions.isSubagent !== undefined
-          ? { isSubagent: queryOptions.isSubagent }
-          : {}),
-        ...(queryOptions.modelSettings !== undefined
-          ? { modelSettings: queryOptions.modelSettings }
-          : {}),
-        ...(queryOptions.contextWindowLimit !== undefined
-          ? { contextWindowLimit: queryOptions.contextWindowLimit }
-          : {}),
-      },
+      ...(queryOptions.conversationId
+        ? { conversationId: queryOptions.conversationId }
+        : {
+            createConversation: {
+              model: queryOptions.model,
+              system: queryOptions.system,
+              ...(queryOptions.parentAgentId !== undefined
+                ? { parentAgentId: queryOptions.parentAgentId }
+                : {}),
+              ...(queryOptions.name !== undefined ? { name: queryOptions.name } : {}),
+              ...(queryOptions.isSubagent !== undefined
+                ? { isSubagent: queryOptions.isSubagent }
+                : {}),
+              ...(queryOptions.modelSettings !== undefined
+                ? { modelSettings: queryOptions.modelSettings }
+                : {}),
+              ...(queryOptions.contextWindowLimit !== undefined
+                ? { contextWindowLimit: queryOptions.contextWindowLimit }
+                : {}),
+            },
+          }),
       options: sessionOptions,
     });
   }

@@ -110,12 +110,19 @@ function agentFreeSessionOptions(
     isSubagent: _isSubagent,
     modelSettings: _modelSettings,
     contextWindowLimit: _contextWindowLimit,
+    conversationId: _conversationId,
     ...sessionOptions
   } = options;
   return sessionOptions;
 }
 
 function validateAgentFreeQueryOptions(options: AgentFreeQueryOptions): void {
+  if (
+    options.conversationId !== undefined &&
+    (typeof options.conversationId !== "string" || !options.conversationId.trim())
+  ) {
+    throw new Error("query() conversationId must be a non-empty string.");
+  }
   if (typeof options.model !== "string" || options.model.length === 0) {
     throw new Error("query() requires a non-empty model.");
   }
@@ -413,7 +420,7 @@ export class LettaAgentClientBase implements AsyncDisposable {
     }
   }
 
-  /** Run one prompt in a new agent-free ephemeral conversation. */
+  /** Run one prompt in a new or resumed agent-free ephemeral conversation. */
   query(params: QueryParams): Query {
     this.assertOpen();
     validateAgentFreeQueryOptions(params.options);
@@ -431,23 +438,27 @@ export class LettaAgentClientBase implements AsyncDisposable {
     if (this.backend === "remote") {
       return new AppServerSession(this.appServerSessionOptions(), {
         kind: "agent-free",
-        createConversation: {
-          model: options.model,
-          system: options.system,
-          ...(options.parentAgentId !== undefined
-            ? { parentAgentId: options.parentAgentId }
-            : {}),
-          ...(options.name !== undefined ? { name: options.name } : {}),
-          ...(options.isSubagent !== undefined
-            ? { isSubagent: options.isSubagent }
-            : {}),
-          ...(options.modelSettings !== undefined
-            ? { modelSettings: options.modelSettings }
-            : {}),
-          ...(options.contextWindowLimit !== undefined
-            ? { contextWindowLimit: options.contextWindowLimit }
-            : {}),
-        },
+        ...(options.conversationId
+          ? { conversationId: options.conversationId }
+          : {
+              createConversation: {
+                model: options.model,
+                system: options.system,
+                ...(options.parentAgentId !== undefined
+                  ? { parentAgentId: options.parentAgentId }
+                  : {}),
+                ...(options.name !== undefined ? { name: options.name } : {}),
+                ...(options.isSubagent !== undefined
+                  ? { isSubagent: options.isSubagent }
+                  : {}),
+                ...(options.modelSettings !== undefined
+                  ? { modelSettings: options.modelSettings }
+                  : {}),
+                ...(options.contextWindowLimit !== undefined
+                  ? { contextWindowLimit: options.contextWindowLimit }
+                  : {}),
+              },
+            }),
         options: sessionOptions,
       });
     }
@@ -458,28 +469,30 @@ export class LettaAgentClientBase implements AsyncDisposable {
           "Cloud query() requires an explicit computer; managed sandboxes are agent-scoped.",
         );
       }
-      const conversation = await this.getCloudClient().post<unknown>(
-        "/v1/conversations/ephemeral",
-        {
-          body: {
-            model: options.model,
-            system: options.system,
-            ...(options.parentAgentId !== undefined
-              ? { parent_agent_id: options.parentAgentId }
-              : {}),
-            ...(options.name !== undefined ? { name: options.name } : {}),
-            ...(options.isSubagent !== undefined
-              ? { is_subagent: options.isSubagent }
-              : {}),
-            ...(options.modelSettings !== undefined
-              ? { model_settings: options.modelSettings }
-              : {}),
-            ...(options.contextWindowLimit !== undefined
-              ? { context_window_limit: options.contextWindowLimit }
-              : {}),
-          },
-        },
-      );
+      const conversation = options.conversationId
+        ? { id: options.conversationId }
+        : await this.getCloudClient().post<unknown>(
+            "/v1/conversations/ephemeral",
+            {
+              body: {
+                model: options.model,
+                system: options.system,
+                ...(options.parentAgentId !== undefined
+                  ? { parent_agent_id: options.parentAgentId }
+                  : {}),
+                ...(options.name !== undefined ? { name: options.name } : {}),
+                ...(options.isSubagent !== undefined
+                  ? { is_subagent: options.isSubagent }
+                  : {}),
+                ...(options.modelSettings !== undefined
+                  ? { model_settings: options.modelSettings }
+                  : {}),
+                ...(options.contextWindowLimit !== undefined
+                  ? { context_window_limit: options.contextWindowLimit }
+                  : {}),
+              },
+            },
+          );
       if (
         !conversation ||
         typeof conversation !== "object" ||
