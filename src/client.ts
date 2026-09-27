@@ -114,6 +114,9 @@ export class LettaAgentClient extends LettaAgentClientBase {
             },
           }),
       options: sessionOptions,
+      ...(queryOptions.disableMemoryGuard === true
+        ? { disableMemoryGuard: true }
+        : {}),
     });
   }
 

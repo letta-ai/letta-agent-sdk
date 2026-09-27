@@ -29,6 +29,8 @@ export interface AgentFreeQueryOptions
   name?: string;
   /** Whether the ephemeral conversation represents a subagent. */
   isSubagent?: boolean;
+  /** Disable the runtime's memory guard for this query (app-server backends only). */
+  disableMemoryGuard?: boolean;
   /** Optional context-window limit persisted on the ephemeral conversation. */
   contextWindowLimit?: number | null;
 }
