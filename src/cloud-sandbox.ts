@@ -1,3 +1,6 @@
+/** Sandbox class of an SDK-managed Cloud sandbox. */
+export type LettaCodeCloudSandboxClass = "linux-vm" | "container";
+
 /** A GitHub repository cloned into an SDK-managed Cloud sandbox. */
 export interface GitHubRepositoryRef {
   owner: string;
@@ -7,6 +10,12 @@ export interface GitHubRepositoryRef {
 }
 
 export interface LettaCodeCloudSandboxOptions {
+  /**
+   * Class of the SDK-managed sandbox. Defaults to "linux-vm", matching the
+   * Cloud default for new conversations. Pass "container" for the legacy
+   * container sandbox behavior.
+   */
+  sandboxClass?: LettaCodeCloudSandboxClass;
   /**
    * TTL to request when refreshing an SDK-managed sandbox. Defaults to 5
    * minutes, matching the Cloud API default. Valid range: 1-60.
@@ -53,6 +62,15 @@ export function validateCloudSandboxOptions(
   if (options === undefined) return;
   if (options === null || typeof options !== "object" || Array.isArray(options)) {
     throw new Error(`Invalid ${name}. Expected an object.`);
+  }
+  if (
+    options.sandboxClass !== undefined &&
+    options.sandboxClass !== "linux-vm" &&
+    options.sandboxClass !== "container"
+  ) {
+    throw new Error(
+      `Invalid ${name}.sandboxClass. Expected "linux-vm" or "container".`,
+    );
   }
   if (
     options.ttlMinutes !== undefined &&
