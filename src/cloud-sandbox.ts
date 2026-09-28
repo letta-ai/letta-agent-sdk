@@ -33,6 +33,44 @@ export interface LettaCodeCloudSandboxOptions {
   terminateOnClose?: boolean;
 }
 
+export const IMPLICIT_SANDBOX_DEPRECATION_CODE =
+  "LETTA_AGENT_SDK_IMPLICIT_SANDBOX";
+
+const IMPLICIT_SANDBOX_DEPRECATION_MESSAGE =
+  `[${IMPLICIT_SANDBOX_DEPRECATION_CODE}] This Cloud session is implicitly ` +
+  "creating a managed sandbox. Implicit sandbox creation is deprecated and " +
+  "will become an error in the next major release.\n\n" +
+  "Pass `sandbox: {}` to explicitly use a managed sandbox, pass `computer` " +
+  'to use a registered computer, or use `backend: "local"` for on-device ' +
+  "execution.";
+
+/**
+ * Warn that a Cloud session is about to implicitly create a managed sandbox.
+ * Emits once per affected session initialization — never deduplicated, so a
+ * fan-out of implicit sessions produces one warning each. Explicit `computer`
+ * or `sandbox` configuration suppresses the warning at the call site.
+ */
+export function warnImplicitManagedSandbox(): void {
+  const nodeProcess = (
+    globalThis as {
+      process?: {
+        emitWarning?: (
+          warning: string,
+          options: { type: string; code: string },
+        ) => void;
+      };
+    }
+  ).process;
+  if (typeof nodeProcess?.emitWarning === "function") {
+    nodeProcess.emitWarning(IMPLICIT_SANDBOX_DEPRECATION_MESSAGE, {
+      type: "DeprecationWarning",
+      code: IMPLICIT_SANDBOX_DEPRECATION_CODE,
+    });
+    return;
+  }
+  console.warn(IMPLICIT_SANDBOX_DEPRECATION_MESSAGE);
+}
+
 const MIN_TTL_MINUTES = 1;
 const MAX_TTL_MINUTES = 60;
 const MAX_GITHUB_REPOSITORIES = 10;
