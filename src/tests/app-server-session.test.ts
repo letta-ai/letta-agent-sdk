@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildCreateAgentRequest,
-  buildSystemPrompt,
   LETTA_CODE_AGENT_TYPE,
 } from "@letta-ai/letta-code/agent-presets";
 import { createAgentBody } from "../agent-creation.js";
+import {
+  EXPECTED_BLOCKS_SYSTEM_PROMPT,
+  EXPECTED_MEMFS_SYSTEM_PROMPT,
+} from "./default-system-prompt.fixture.js";
 
 describe("createAgentBody", () => {
   test("builds a generic harness agent when personality is omitted", async () => {
@@ -13,6 +16,7 @@ describe("createAgentBody", () => {
     expect(body).toMatchObject({
       agent_type: LETTA_CODE_AGENT_TYPE,
       model: "openai/gpt-5.2",
+      system: EXPECTED_MEMFS_SYSTEM_PROMPT,
       tags: ["origin:letta-code", "git-memory-enabled"],
       initial_message_sequence: [],
       parallel_tool_calls: true,
@@ -23,11 +27,10 @@ describe("createAgentBody", () => {
     });
     expect(body).not.toHaveProperty("name");
     expect(body).not.toHaveProperty("description");
-    // 0.33.x seeds the root index and refers to core memory files in the prompt.
+    // 0.33.x seeds the root memory index even when the SDK supplies `system`.
     expect(body.memory_blocks).toEqual([
       { label: "MEMORY", value: "# Memory\n", description: "Root memory index." },
     ]);
-    expect(body.system).toContain("core memory files");
   });
 
   test("uses caller memory as the complete identity without a personality preset", async () => {
@@ -59,6 +62,7 @@ describe("createAgentBody", () => {
       await buildCreateAgentRequest({
         personalityId: "memo",
         model: "openai/gpt-5.2",
+        system: EXPECTED_MEMFS_SYSTEM_PROMPT,
       }),
     );
   });
@@ -85,7 +89,7 @@ describe("createAgentBody", () => {
 
   test("keeps MemFS mode and exact base tools in the canonical request", async () => {
     const body = await createAgentBody({ memfs: false, baseTools: [] });
-    expect(body.system).toBe(buildSystemPrompt("default", "standard"));
+    expect(body.system).toBe(EXPECTED_BLOCKS_SYSTEM_PROMPT);
     expect(body.tags).toEqual(["origin:letta-code"]);
     expect(body.tools).toEqual([]);
     expect(body.include_base_tools).toBe(false);
@@ -99,5 +103,6 @@ describe("createAgentBody", () => {
         systemPrompt: "You are a focused research assistant.",
       })).system,
     ).toBe("You are a focused research assistant.");
+    expect((await createAgentBody({ systemPrompt: "" })).system).toBe("");
   });
 });
