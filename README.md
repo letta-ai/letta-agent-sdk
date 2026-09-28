@@ -66,9 +66,8 @@ for await (const message of client.query({
 }
 ```
 
-`query()` requires an API-backed App Server. For `backend: "local"`, set
-`appServer.harnessBackend: "api"`; the default local harness backend does not
-store agent-free conversations.
+`query()` supports API-backed App Servers and local App Servers that advertise
+local conversation support. Older local App Servers return an upgrade error.
 
 Pass the returned `query.conversationId` as `options.conversationId` on a later
 `query()` to continue that conversation with its history. On resume, `model`,
