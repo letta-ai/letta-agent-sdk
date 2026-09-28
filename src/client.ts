@@ -82,14 +82,6 @@ export class LettaAgentClient extends LettaAgentClientBase {
     sessionOptions: LettaCodeClientSessionOptions,
   ): LettaCodeSession {
     const localOptions = this.options as LettaCodeLocalClientOptions;
-    if (
-      localOptions.appServer?.url === undefined &&
-      (localOptions.appServer?.harnessBackend ?? "local") === "local"
-    ) {
-      throw new Error(
-        'query() requires the API-backed App Server. Set appServer.harnessBackend to "api" or connect to an API-backed remote App Server.',
-      );
-    }
     return createLocalAppServerSession(localOptions.appServer, {
       kind: "agent-free",
       ...(queryOptions.conversationId

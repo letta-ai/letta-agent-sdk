@@ -15,6 +15,10 @@ export function createLocalAppServerSession(
 ): AppServerSession {
   const appServer = options ?? {};
   const sessionOptions: AppServerSessionOptions = {
+    ...(mode.kind === "agent-free" &&
+    (appServer.harnessBackend ?? "local") === "local"
+      ? { requireLocalAgentFreeCapability: true }
+      : {}),
     ...(appServer.url !== undefined
       ? { url: appServer.url }
       : {

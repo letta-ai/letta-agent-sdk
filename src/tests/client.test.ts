@@ -42,6 +42,7 @@ class FakeAppServerSocket {
     | "terminalWithoutUsage"
     | "hang" = "normal";
   static failNextRuntimeStart = false;
+  static supportsAgentFreeConversations = true;
   static deferReflectionSettingsResponse = false;
   static failNextReflectionSettings = false;
   static pendingReflectionSettingsResponse: (() => void) | null = null;
@@ -173,6 +174,28 @@ function fakeAppServerHandle(
   // client's own pair so tests can run several client instances at once.
   const control = sender;
   const stream = fakeStreamPairOf(sender);
+
+  if (command.type === "app_server_info") {
+    control.serverMessage({
+      type: "app_server_info_response",
+      request_id: command.request_id,
+      success: true,
+      backend: "local",
+      letta_code_version: "test",
+      protocol_version: 1,
+      capabilities: {
+        agent_management: true,
+        conversation_management: true,
+        memory_management: true,
+        runtime_start: true,
+        ...(FakeAppServerSocket.supportsAgentFreeConversations
+          ? { agent_free_conversations: true }
+          : {}),
+        split_channels: false,
+      },
+    });
+    return;
+  }
 
   if (command.type === "conversation_retrieve") {
     const conversationId = command.conversation_id as string;
@@ -754,22 +777,74 @@ describe("LettaAgentClient", () => {
     );
   });
 
-  test("rejects agent-free queries on the SDK-owned local harness backend", async () => {
+  test("runs agent-free queries against a local-backend app-server", async () => {
     FakeAppServerSocket.instances = [];
-    const client = new LettaAgentClient({ backend: "local" });
-
-    await expect(async () => {
-      for await (const _message of client.query({
-        prompt: "hello",
-        options: {
-          model: "openai/gpt-5.6-luna",
-          system: "Answer directly.",
+    const client = new LettaAgentClient({
+      backend: "local",
+      appServer: {
+        url: "ws://127.0.0.1:4500/ws",
+        WebSocket: FakeAppServerSocket,
+      },
+    });
+    const messages = [];
+    for await (const message of client.query({
+      prompt: "hello",
+      options: {
+        model: "openai/gpt-5.6-luna",
+        system: "Answer directly.",
+      },
+    })) {
+      messages.push(message);
+    }
+    expect(messages.at(-1)).toMatchObject({ type: "result", success: true });
+    const commands = FakeAppServerSocket.instances.flatMap((socket) => socket.sent);
+    expect(commands).toContainEqual(
+      expect.objectContaining({
+        type: "runtime_start",
+        create_conversation: {
+          body: expect.objectContaining({
+            model: "openai/gpt-5.6-luna",
+            system: "Answer directly.",
+          }),
         },
-      })) {
-        // The query must fail before starting an App Server.
-      }
-    }).toThrow('query() requires the API-backed App Server');
-    expect(FakeAppServerSocket.instances).toHaveLength(0);
+      }),
+    );
+  });
+
+  test("fails clearly against a local app-server without agent-free support", async () => {
+    FakeAppServerSocket.instances = [];
+    FakeAppServerSocket.supportsAgentFreeConversations = false;
+    try {
+      const client = new LettaAgentClient({
+        backend: "local",
+        appServer: {
+          url: "ws://127.0.0.1:4500/ws",
+          WebSocket: FakeAppServerSocket,
+        },
+      });
+      await expect(async () => {
+        for await (const _message of client.query({
+          prompt: "hello",
+          options: {
+            model: "openai/gpt-5.6-luna",
+            system: "Answer directly.",
+          },
+        })) {
+          // Initialization must fail before runtime_start.
+        }
+      }).toThrow("agent-free local conversation support");
+      const commands = FakeAppServerSocket.instances.flatMap(
+        (socket) => socket.sent,
+      );
+      expect(
+        commands.some(
+          (command) =>
+            (command as { type?: unknown }).type === "runtime_start",
+        ),
+      ).toBe(false);
+    } finally {
+      FakeAppServerSocket.supportsAgentFreeConversations = true;
+    }
   });
 
   test("restricts filesystem confinement to SDK-owned local app-server processes", () => {

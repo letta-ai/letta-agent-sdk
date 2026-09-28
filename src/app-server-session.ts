@@ -95,6 +95,8 @@ export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
   connect?: (
     sessionEnv?: Record<string, string>,
   ) => Promise<{ url: string; close(): void }>;
+  /** Require the app-server capability needed by local agent-free queries. */
+  requireLocalAgentFreeCapability?: boolean;
 };
 
 export type AppServerSessionMode = RuntimeSessionMode;
@@ -647,6 +649,21 @@ export class AppServerSession extends RemoteClientSessionCore {
 
     try {
       await client.connect();
+      if (
+        this.mode.kind === "agent-free" &&
+        this.remoteOptions.requireLocalAgentFreeCapability === true
+      ) {
+        const info = await client.info();
+        const capabilities = info.capabilities as Record<string, unknown>;
+        if (
+          info.backend === "local" &&
+          capabilities.agent_free_conversations !== true
+        ) {
+          throw new Error(
+            `Local query() requires a Letta Code app-server with agent-free local conversation support (connected version: ${info.letta_code_version}). Upgrade @letta-ai/letta-code.`,
+          );
+        }
+      }
       const response = await this.startRuntime(client);
       if (!response.success || !response.runtime) {
         throw new Error(response.error ?? "Failed to start app-server runtime");
