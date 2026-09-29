@@ -5,7 +5,7 @@
  * Claude Code dynamic-workflow contract (https://code.claude.com/docs/en/workflows):
  *
  * - agent(task, opts)          spawn one worker agent, resolve to its result
- * - reason(task, opts)         run one tool-less stage as an agent-free query
+ * - reason(task, opts)         run one tool-less stage as an ordinary query conversation
  * - parallel(thunks)           run tasks concurrently, barrier until all settle
  * - pipeline(items, ...stages) run each item through stages independently
  * - phase(title) / log(msg)    progress narration
@@ -87,15 +87,16 @@ export function setWorkflowClient(client: LettaAgentClient): void {
   workflowClient = client;
 }
 
-// Agent-free queries run over the Letta API through a local app-server, so
+// Query conversations run over the Letta API through a local app-server, so
 // they need LETTA_API_KEY regardless of where the tool-using workers run.
-// The letta-code local backend has no ephemeral-conversation support.
+// Keep reasoning stages on this API-backed client so provider credentials and
+// conversation state follow the same path in local and cloud workflows.
 let queryClient: LettaAgentClient | null = null;
 
 function getQueryClient(): LettaAgentClient {
   if (!process.env.LETTA_API_KEY) {
     throw new Error(
-      'reason() runs agent-free queries against the Letta API; set LETTA_API_KEY.',
+      'reason() runs ordinary query conversations against the Letta API; set LETTA_API_KEY.',
     );
   }
   queryClient ??= new LettaAgentClient({
@@ -251,12 +252,12 @@ export interface ReasonOptions {
   /** JSON schema for structured output; reason() returns the parsed value. */
   schema?: object;
   model?: string;
-  /** System prompt for the ephemeral conversation. */
+  /** System prompt for the query conversation. */
   system?: string;
 }
 
 /**
- * Run one tool-less stage as an agent-free query.
+ * Run one tool-less stage as an ordinary query conversation.
  *
  * Each call creates a stateless conversation (agent_id: null) via
  * client.query(), streams it to completion, and resolves to the final text

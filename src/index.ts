@@ -160,6 +160,7 @@ export type {
 export type {
   AgentFreeQueryOptions,
   Query,
+  QueryOptions,
   QueryParams,
 } from "./query-types.js";
 export type * from "./sandbox-files.js";
@@ -335,7 +336,7 @@ export async function prompt(
   }
 }
 
-/** Run an agent-free query in a new ephemeral conversation. */
+/** Run a query in a new ordinary conversation. */
 export function query(params: QueryParams): Query {
   return new LettaAgentClient({
     backend: "local",

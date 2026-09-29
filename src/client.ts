@@ -3,7 +3,7 @@ import { AppServerManagementTransport } from "./app-server-management.js";
 import type { ManagementTransport } from "./management.js";
 import { createLocalAppServerSession } from "./local-app-server-session.js";
 import { startLocalAppServer } from "./local-app-server.js";
-import type { AgentFreeQueryOptions } from "./query-types.js";
+import type { QueryOptions } from "./query-types.js";
 import type { SkillNodeSupport } from "./skill-loading.js";
 import { loadSkillDirectory, pushSkillSupportFiles } from "./skill-node.js";
 import type {
@@ -77,13 +77,13 @@ export class LettaAgentClient extends LettaAgentClientBase {
     );
   }
 
-  protected override createLocalAgentFreeSession(
-    queryOptions: AgentFreeQueryOptions,
+  protected override createLocalQuerySession(
+    queryOptions: QueryOptions,
     sessionOptions: LettaCodeClientSessionOptions,
   ): LettaCodeSession {
     const localOptions = this.options as LettaCodeLocalClientOptions;
     return createLocalAppServerSession(localOptions.appServer, {
-      kind: "agent-free",
+      kind: "conversation",
       ...(queryOptions.conversationId
         ? { conversationId: queryOptions.conversationId }
         : {

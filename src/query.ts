@@ -1,13 +1,11 @@
-import type { AgentFreeQueryOptions, Query, QueryParams } from "./query-types.js";
+import type { Query, QueryOptions, QueryParams } from "./query-types.js";
 import type { LettaCodeSession, SDKMessage } from "./types.js";
 
-type CreateAgentFreeSession = (
-  options: AgentFreeQueryOptions,
-) => Promise<LettaCodeSession>;
+type CreateQuerySession = (options: QueryOptions) => Promise<LettaCodeSession>;
 
-/** Create one agent-free ephemeral conversation and stream its query result. */
+/** Create one ordinary conversation and stream its query result. */
 export function createQuery(
-  createSession: CreateAgentFreeSession,
+  createSession: CreateQuerySession,
   params: QueryParams,
 ): Query {
   let session: LettaCodeSession | null = null;

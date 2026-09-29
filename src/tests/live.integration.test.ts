@@ -312,7 +312,7 @@ function assertRawMessageShape(page: ListMessagesResult): void {
 
 describeLive("live integration: letta-agent-sdk", () => {
   test(
-    "query runs through an agent-free ephemeral conversation",
+    "query runs through an ordinary conversation",
     async () => {
       const client = new LettaAgentClient({
         backend: "local",
@@ -343,7 +343,7 @@ describeLive("live integration: letta-agent-sdk", () => {
   );
 
   test(
-    "query resumes an agent-free conversation with persisted history",
+    "query resumes an ordinary conversation with persisted history",
     async () => {
       const client = new LettaAgentClient({
         backend: "local",

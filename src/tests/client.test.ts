@@ -42,7 +42,7 @@ class FakeAppServerSocket {
     | "terminalWithoutUsage"
     | "hang" = "normal";
   static failNextRuntimeStart = false;
-  static supportsAgentFreeConversations = true;
+  static supportsLocalConversations = true;
   static deferReflectionSettingsResponse = false;
   static failNextReflectionSettings = false;
   static pendingReflectionSettingsResponse: (() => void) | null = null;
@@ -188,7 +188,7 @@ function fakeAppServerHandle(
         conversation_management: true,
         memory_management: true,
         runtime_start: true,
-        ...(FakeAppServerSocket.supportsAgentFreeConversations
+        ...(FakeAppServerSocket.supportsLocalConversations
           ? { agent_free_conversations: true }
           : {}),
         split_channels: false,
@@ -398,10 +398,10 @@ function fakeAppServerHandle(
     const createConversation = command.create_conversation as
       | { body?: Record<string, unknown> }
       | undefined;
-    const agentFree =
+    const queryConversation =
       createConversation?.body?.system !== undefined ||
       (command.conversation_id !== undefined && command.agent_id === undefined);
-    const agentId = agentFree
+    const agentId = queryConversation
       ? null
       : ((command.agent_id as string | undefined) ?? "agent-created");
     const conversationId =
@@ -413,7 +413,7 @@ function fakeAppServerHandle(
       request_id: command.request_id,
       success: true,
       runtime: { agent_id: agentId, conversation_id: conversationId },
-      agent: agentFree
+      agent: queryConversation
         ? null
         : {
             id: agentId,
@@ -425,7 +425,7 @@ function fakeAppServerHandle(
       conversation: {
         id: conversationId,
         agent_id: agentId,
-        ...(agentFree ? { model: createConversation?.body?.model } : {}),
+        ...(queryConversation ? { model: createConversation?.body?.model } : {}),
       },
       created: {
         agent: createdAgent !== undefined,
@@ -777,7 +777,7 @@ describe("LettaAgentClient", () => {
     );
   });
 
-  test("runs agent-free queries against a local-backend app-server", async () => {
+  test("runs queries as ordinary conversations against a local-backend app-server", async () => {
     FakeAppServerSocket.instances = [];
     const client = new LettaAgentClient({
       backend: "local",
@@ -811,9 +811,9 @@ describe("LettaAgentClient", () => {
     );
   });
 
-  test("fails clearly against a local app-server without agent-free support", async () => {
+  test("fails clearly against a local app-server without conversation support", async () => {
     FakeAppServerSocket.instances = [];
-    FakeAppServerSocket.supportsAgentFreeConversations = false;
+    FakeAppServerSocket.supportsLocalConversations = false;
     try {
       const client = new LettaAgentClient({
         backend: "local",
@@ -832,7 +832,7 @@ describe("LettaAgentClient", () => {
         })) {
           // Initialization must fail before runtime_start.
         }
-      }).toThrow("agent-free local conversation support");
+      }).toThrow("local conversation support");
       const commands = FakeAppServerSocket.instances.flatMap(
         (socket) => socket.sent,
       );
@@ -843,7 +843,7 @@ describe("LettaAgentClient", () => {
         ),
       ).toBe(false);
     } finally {
-      FakeAppServerSocket.supportsAgentFreeConversations = true;
+      FakeAppServerSocket.supportsLocalConversations = true;
     }
   });
 
@@ -1763,7 +1763,7 @@ describe("LettaAgentClient", () => {
     ["local", undefined],
     ["local", true],
     ["local", false],
-  ] as const)("query creates an agent-free conversation (%s, subagent=%s)", async (backend, isSubagent) => {
+  ] as const)("query creates an ordinary conversation (%s, subagent=%s)", async (backend, isSubagent) => {
     FakeAppServerSocket.instances = [];
     const connection = {
       url: "ws://127.0.0.1:4500/ws",
@@ -1839,7 +1839,7 @@ describe("LettaAgentClient", () => {
   });
 
   test.each(["remote", "local"] as const)(
-    "query resumes an agent-free conversation without creating another (%s)",
+    "query resumes an ordinary conversation without creating another (%s)",
     async (backend) => {
       FakeAppServerSocket.instances = [];
       const connection = {

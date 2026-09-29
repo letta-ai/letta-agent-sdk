@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { LettaAgentClient } from "../client.js";
+import type { AgentFreeQueryOptions, QueryOptions } from "../index.js";
 import type { LettaCodeSession } from "../types.js";
 
 type AssertTrue<T extends true> = T;
@@ -30,6 +31,12 @@ type HasClientKey<K extends PropertyKey> =
   K extends keyof LettaAgentClient ? true : false;
 type _ClientHasClose = AssertTrue<HasClientKey<"close">>;
 type _ClientHasAsyncDispose = AssertTrue<HasClientKey<typeof Symbol.asyncDispose>>;
+type _LegacyQueryOptionsAreCompatible = AssertTrue<
+  AgentFreeQueryOptions extends QueryOptions ? true : false
+>;
+type _QueryOptionsSupportLegacyCallers = AssertTrue<
+  QueryOptions extends AgentFreeQueryOptions ? true : false
+>;
 
 describe("public LettaCodeSession type", () => {
   test("keeps the canonical public session surface", () => {

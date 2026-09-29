@@ -133,7 +133,7 @@ if (drafts.length < ANGLES.length) {
 
 phase('Judge');
 // The judge only reasons over the drafts it is given — no tools, no
-// repository access — so it runs as an agent-free query, not a worker agent.
+// repository access — so it runs as an ordinary query conversation, not a worker agent.
 const verdict = await reason<{
   scores: Array<{ angle: string; score: number; strengths: string; weaknesses: string }>;
   winner: string;
