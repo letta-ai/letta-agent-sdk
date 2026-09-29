@@ -51,7 +51,7 @@ measures the tracked turn and excludes session initialization; measure `ready()`
 separately when startup latency matters.
 
 For a simple question that should not create or use an agent, call `query()`.
-It creates an agent-free ephemeral conversation from the supplied model and
+It creates an ordinary conversation from the supplied model and
 system prompt, streams the turn, and closes the runtime when iteration ends:
 
 ```typescript
@@ -66,9 +66,8 @@ for await (const message of client.query({
 }
 ```
 
-`query()` requires an API-backed App Server. For `backend: "local"`, set
-`appServer.harnessBackend: "api"`; the default local harness backend does not
-store agent-free conversations.
+`query()` supports API-backed App Servers and local App Servers that advertise
+local conversation support. Older local App Servers return an upgrade error.
 
 Pass the returned `query.conversationId` as `options.conversationId` on a later
 `query()` to continue that conversation with its history. On resume, `model`,
@@ -76,7 +75,7 @@ Pass the returned `query.conversationId` as `options.conversationId` on a later
 stored configuration.
 
 Cloud queries require an explicit connected computer. Local and remote clients
-run the ephemeral conversation through their App Server.
+run the conversation through their App Server.
 
 Set `LETTA_API_KEY` for the cloud backend. See the [quickstart](https://docs.letta.com/agent-sdk/quickstart) for the local and self-hosted paths.
 

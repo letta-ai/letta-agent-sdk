@@ -155,7 +155,7 @@ export class CloudManagedSandboxExpiredError extends Error {
 
 type CloudSessionMode = Extract<
   RuntimeSessionMode,
-  { kind: "session" } | { kind: "agent-free" }
+  { kind: "session" } | { kind: "conversation" }
 >;
 
 function getWebSocketConstructor(
@@ -727,9 +727,9 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   private async resolveRuntime(): Promise<{ runtime: RuntimeScope }> {
-    if (this.cloudMode.kind === "agent-free") {
+    if (this.cloudMode.kind === "conversation") {
       if (!this.cloudMode.conversationId) {
-        throw new Error("Cloud agent-free sessions require a conversation id.");
+        throw new Error("Cloud query sessions require a conversation id.");
       }
       return {
         runtime: {
@@ -955,7 +955,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   ): Promise<ResolvedCloudConnection> {
     if (!runtime.agent_id) {
       throw new Error(
-        "Agent-free queries require an explicit Cloud computer; managed sandboxes are agent-scoped.",
+        "Queries without an agent require an explicit Cloud computer; managed sandboxes are agent-scoped.",
       );
     }
     // Scope the managed sandbox to the conversation when one exists: the

@@ -223,7 +223,7 @@ test("StructuredOutput coexists with caller tools and an explicit allowlist", ()
     parameters: { type: "object" },
     execute: async () => ({ content: [{ type: "text" as const, text: "found" }] }),
   };
-  const mode = { kind: "agent-free" as const,
+  const mode = { kind: "conversation" as const,
     options: { outputFormat, tools: [callerTool], allowedTools: ["Lookup"] } };
   registerStructuredOutputTool(mode, () => {});
   expect(mode.options.tools.map((tool) => tool.name)).toEqual(["Lookup", "StructuredOutput"]);
@@ -308,12 +308,12 @@ test("translates outputFormat to the app-server response_format wire contract", 
   };
   const controller = new AppServerRuntimeController(client as never, {}, undefined, undefined);
   controller.sendTurnMessage(
-    { agent_id: null, conversation_id: "conv-agent-free" },
+    { agent_id: null, conversation_id: "conv-query" },
     "hello",
     { clientMessageId: "cm-1", outputFormat },
   );
   expect(sent[0]).toMatchObject({
-    runtime: { agent_id: null, conversation_id: "conv-agent-free" },
+    runtime: { agent_id: null, conversation_id: "conv-query" },
     payload: {
       response_format: {
         type: "json_schema",

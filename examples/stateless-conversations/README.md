@@ -1,7 +1,7 @@
 # Stateless conversations
 
 Use `query()` when you need one model turn but do not need an agent or memory.
-Each call creates an ephemeral conversation, streams its messages, and closes
+Each call creates an ordinary conversation, streams its messages, and closes
 the runtime when iteration ends.
 
 This example includes three patterns:

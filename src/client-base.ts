@@ -34,8 +34,8 @@ import type {
 } from "./management-types.js";
 import { createQuery } from "./query.js";
 import type {
-  AgentFreeQueryOptions,
   Query,
+  QueryOptions,
   QueryParams,
 } from "./query-types.js";
 import type {
@@ -100,8 +100,8 @@ function looksLikeConversationId(id: string): boolean {
   return id.startsWith("conv-") || id.startsWith("local-conv-");
 }
 
-function agentFreeSessionOptions(
-  options: AgentFreeQueryOptions,
+function querySessionOptions(
+  options: QueryOptions,
 ): LettaCodeClientSessionOptions {
   const {
     system: _system,
@@ -117,7 +117,7 @@ function agentFreeSessionOptions(
   return sessionOptions;
 }
 
-function validateAgentFreeQueryOptions(options: AgentFreeQueryOptions): void {
+function validateQueryOptions(options: QueryOptions): void {
   if (
     options.conversationId !== undefined &&
     (typeof options.conversationId !== "string" || !options.conversationId.trim())
@@ -130,7 +130,7 @@ function validateAgentFreeQueryOptions(options: AgentFreeQueryOptions): void {
   if (typeof options.system !== "string") {
     throw new Error("query() requires a system prompt.");
   }
-  validateCreateSessionOptions(agentFreeSessionOptions(options));
+  validateCreateSessionOptions(querySessionOptions(options));
 }
 
 type OneShotSession = LettaCodeSession & {
@@ -421,19 +421,19 @@ export class LettaAgentClientBase implements AsyncDisposable {
     }
   }
 
-  /** Run one prompt in a new or resumed agent-free ephemeral conversation. */
+  /** Run one prompt in a new or resumed ordinary conversation. */
   query(params: QueryParams): Query {
     this.assertOpen();
-    validateAgentFreeQueryOptions(params.options);
-    return createQuery((options) => this.createAgentFreeSession(options), params);
+    validateQueryOptions(params.options);
+    return createQuery((options) => this.createQuerySession(options), params);
   }
 
-  private async createAgentFreeSession(
-    options: AgentFreeQueryOptions,
+  private async createQuerySession(
+    options: QueryOptions,
   ): Promise<LettaCodeSession> {
     this.assertOpen();
-    validateAgentFreeQueryOptions(options);
-    const sessionOptions = agentFreeSessionOptions(options);
+    validateQueryOptions(options);
+    const sessionOptions = querySessionOptions(options);
     this.assertSessionBackend("query", sessionOptions);
     if (options.disableMemoryGuard === true && this.backend === "cloud") {
       throw new Error(
@@ -443,7 +443,7 @@ export class LettaAgentClientBase implements AsyncDisposable {
 
     if (this.backend === "remote") {
       return new AppServerSession(this.appServerSessionOptions(), {
-        kind: "agent-free",
+        kind: "conversation",
         ...(options.conversationId
           ? { conversationId: options.conversationId }
           : {
@@ -508,20 +508,20 @@ export class LettaAgentClientBase implements AsyncDisposable {
         typeof (conversation as { id?: unknown }).id !== "string"
       ) {
         throw new Error(
-          "Cloud ephemeral conversation response did not include a conversation id.",
+          "Cloud query conversation response did not include a conversation id.",
         );
       }
       return new CloudEnvironmentSession(
         this.cloudOptions(),
         {
-          kind: "agent-free",
+          kind: "conversation",
           conversationId: (conversation as { id: string }).id,
           options: sessionOptions,
         },
         this.getCloudClient(),
       );
     }
-    return this.createLocalAgentFreeSession(options, sessionOptions);
+    return this.createLocalQuerySession(options, sessionOptions);
   }
 
   private assertSessionBackend(
@@ -637,8 +637,8 @@ export class LettaAgentClientBase implements AsyncDisposable {
     throw this.localBackendUnavailableError();
   }
 
-  protected createLocalAgentFreeSession(
-    _queryOptions: AgentFreeQueryOptions,
+  protected createLocalQuerySession(
+    _queryOptions: QueryOptions,
     _sessionOptions: LettaCodeClientSessionOptions,
   ): LettaCodeSession {
     throw this.localBackendUnavailableError();

@@ -71,6 +71,9 @@ type UpdateModelPayload = {
 };
 
 type RuntimeStartCommand = Parameters<AppServerClient["runtimeStart"]>[0];
+// Letta Code 0.33.6 publishes this wire key. Keep the compatibility spelling
+// at the protocol boundary while the SDK uses ordinary conversation naming.
+const LOCAL_CONVERSATION_CAPABILITY = "agent_free_conversations";
 
 export function agentToolNames(
   agent: object | null | undefined,
@@ -95,6 +98,8 @@ export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
   connect?: (
     sessionEnv?: Record<string, string>,
   ) => Promise<{ url: string; close(): void }>;
+  /** Require the app-server capability needed by local query conversations. */
+  requireLocalConversationCapability?: boolean;
 };
 
 export type AppServerSessionMode = RuntimeSessionMode;
@@ -647,6 +652,21 @@ export class AppServerSession extends RemoteClientSessionCore {
 
     try {
       await client.connect();
+      if (
+        this.mode.kind === "conversation" &&
+        this.remoteOptions.requireLocalConversationCapability === true
+      ) {
+        const info = await client.info();
+        const capabilities = info.capabilities as Record<string, unknown>;
+        if (
+          info.backend === "local" &&
+          capabilities[LOCAL_CONVERSATION_CAPABILITY] !== true
+        ) {
+          throw new Error(
+            `Local query() requires a Letta Code app-server with local conversation support (connected version: ${info.letta_code_version}). Upgrade @letta-ai/letta-code.`,
+          );
+        }
+      }
       const response = await this.startRuntime(client);
       if (!response.success || !response.runtime) {
         throw new Error(response.error ?? "Failed to start app-server runtime");
@@ -755,7 +775,7 @@ export class AppServerSession extends RemoteClientSessionCore {
     const mode = mapPermissionMode(options.permissionMode);
     if (mode) command.mode = mode;
     if (
-      this.mode.kind === "agent-free" &&
+      this.mode.kind === "conversation" &&
       this.mode.disableMemoryGuard === true
     ) {
       command.execution_settings = {
@@ -798,7 +818,7 @@ export class AppServerSession extends RemoteClientSessionCore {
       return command as RuntimeStartCommand;
     }
 
-    if (this.mode.kind === "agent-free") {
+    if (this.mode.kind === "conversation") {
       if (this.mode.createConversation) {
         const create = this.mode.createConversation;
         command.create_conversation = {
@@ -824,7 +844,7 @@ export class AppServerSession extends RemoteClientSessionCore {
         command.conversation_id = this.mode.conversationId;
       } else {
         throw new Error(
-          "Agent-free sessions require a conversation to create or resume.",
+          "Query sessions require a conversation to create or resume.",
         );
       }
       return command as RuntimeStartCommand;

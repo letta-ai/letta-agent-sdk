@@ -772,7 +772,7 @@ describe("CloudEnvironmentSession", () => {
     expect(requests).toHaveLength(0);
   });
 
-  test.each([undefined, true, false])("query creates an ephemeral conversation without an agent (subagent=%s)", async (isSubagent) => {
+  test.each([undefined, true, false])("query creates an ordinary conversation without an agent (subagent=%s)", async (isSubagent) => {
     const lineage = isSubagent === undefined
       ? {}
       : { parentAgentId: "agent-parent", name: "worker", isSubagent };
@@ -838,7 +838,7 @@ describe("CloudEnvironmentSession", () => {
     );
   });
 
-  test("query resumes an agent-free Cloud conversation without creating another", async () => {
+  test("query resumes an ordinary Cloud conversation without creating another", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
     const client = new LettaAgentClient({

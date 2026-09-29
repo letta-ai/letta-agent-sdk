@@ -15,6 +15,10 @@ export function createLocalAppServerSession(
 ): AppServerSession {
   const appServer = options ?? {};
   const sessionOptions: AppServerSessionOptions = {
+    ...(mode.kind === "conversation" &&
+    (appServer.harnessBackend ?? "local") === "local"
+      ? { requireLocalConversationCapability: true }
+      : {}),
     ...(appServer.url !== undefined
       ? { url: appServer.url }
       : {

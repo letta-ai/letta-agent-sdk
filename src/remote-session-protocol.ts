@@ -37,7 +37,7 @@ export type ProtocolMessage = Record<string, unknown> & {
 export type RuntimeSessionMode =
   | { kind: "create-agent"; options: CreateAgentOptions }
   | {
-      kind: "agent-free";
+      kind: "conversation";
       conversationId?: string;
       createConversation?: {
         model: string;
