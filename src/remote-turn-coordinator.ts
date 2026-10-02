@@ -211,7 +211,7 @@ export class RemoteTurnCoordinator {
 
     const finished = turnFinishedRecord(message);
     if (finished) {
-      this.handleTurnFinished(finished);
+      this.handleTurnFinished(finished, message.runtime);
       return;
     }
 
@@ -437,8 +437,27 @@ export class RemoteTurnCoordinator {
     runId?: string;
     stopReason: string;
     error?: string;
-  }): void {
-    if (!finished.runId) return;
+  }, runtime?: RuntimeScope): void {
+    if (!finished.runId) {
+      const active = this.activeTurn;
+      // Early cancellation can precede run allocation. Never activate a queued
+      // turn or infer cancellation from an unscoped receipt.
+      if (
+        !active?.abortRequested || active.runIds.size > 0 ||
+        finished.stopReason !== "cancelled" ||
+        runtime?.agent_id !== active.runtime.agent_id ||
+        runtime?.conversation_id !== active.runtime.conversation_id
+      ) return;
+      this.completeActiveTurn({
+        runtime: active.runtime,
+        stopReason: finished.stopReason,
+        runIds: [],
+        success: false,
+        errorCode: "interrupted",
+        ...(finished.error ? { detail: finished.error } : {}),
+      });
+      return;
+    }
     if (this.settledRunIds.has(finished.runId)) return;
     const active = this.activeTurn ?? this.activateNextTurnFromProtocol();
     if (!active) return;
