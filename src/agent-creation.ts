@@ -4,6 +4,10 @@ import {
   type CreateAgentRequest,
 } from "@letta-ai/letta-code/agent-presets";
 import {
+  DEFAULT_BLOCKS_SYSTEM_PROMPT,
+  DEFAULT_MEMFS_SYSTEM_PROMPT,
+} from "./default-system-prompt.js";
+import {
   resolveSkillItems,
   skillsHaveSupportFiles,
   type AgentSkill,
@@ -77,7 +81,9 @@ export async function createAgentBody(
     );
   }
 
-  let system: string | undefined;
+  let system = options.memfs === false
+    ? DEFAULT_BLOCKS_SYSTEM_PROMPT
+    : DEFAULT_MEMFS_SYSTEM_PROMPT;
   if (options.systemPrompt !== undefined) {
     if (
       typeof options.systemPrompt !== "string" ||
