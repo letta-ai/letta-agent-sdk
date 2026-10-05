@@ -1,5 +1,6 @@
 import type Letta from "@letta-ai/letta-client";
 import { RepositoriesClient } from "./repositories.js";
+import { AlphaClient } from "./alpha/index.js";
 import { resolveSkillItems, type SkillNodeSupport } from "./skill-loading.js";
 import { createAgentRepositoriesClient } from "./agent-repositories.js";
 import { AppServerManagementTransport } from "./app-server-management.js";
@@ -157,6 +158,7 @@ export class LettaAgentClientBase implements AsyncDisposable {
   readonly models: ModelsClient;
   protected readonly options: LettaCodeClientOptions;
   private repositoriesClient: RepositoriesClient | null = null;
+  private alphaClient: AlphaClient | null = null;
   private computersClient: ComputersClientImpl | null = null;
   private agentRepositoriesClient: AgentRepositoriesClient | null = null;
   private cloudClient: Letta | null = null;
@@ -260,6 +262,19 @@ export class LettaAgentClientBase implements AsyncDisposable {
   get computers(): ComputersClient {
     this.assertOpen();
     return this.getComputersClient();
+  }
+
+  /** Experimental Cloud APIs, without a stability guarantee. */
+  get alpha(): AlphaClient {
+    this.assertOpen();
+    if (this.backend !== "cloud") {
+      throw new Error('client.alpha is only available with backend: "cloud".');
+    }
+    this.alphaClient ??= new AlphaClient(
+      this.getCloudClient(),
+      () => this.assertOpen(),
+    );
+    return this.alphaClient;
   }
 
   async createAgent(options: CreateAgentOptions = {}): Promise<string> {

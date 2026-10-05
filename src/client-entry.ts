@@ -26,6 +26,9 @@ export class LettaAgentClient extends LettaAgentClientBase {
 export { CloudManagedSandboxExpiredError } from "./cloud-session.js";
 export { ConversationForkHydrationError } from "./management-errors.js";
 export { RepositoriesClient } from "./repositories.js";
+export { AlphaClient } from "./alpha/index.js";
+export { DecisionsClient } from "./alpha/decisions.js";
+export type * from "./alpha/decision-types.js";
 export type * from "./sandbox-files.js";
 export type {
   Computer,
