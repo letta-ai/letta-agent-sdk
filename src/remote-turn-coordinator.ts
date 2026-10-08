@@ -64,6 +64,10 @@ export class RemoteTurnCoordinator {
   private activeTurn: TurnTracker | null = null;
   private pendingTurns: TurnTracker[] = [];
   private settledRunIds = new Set<string>();
+  // Listeners before letta-code 0.30.3 never send turn_finished, so their idle
+  // loop status is the only terminal signal. Once this session sees one, idle
+  // no longer ends a turn whose run the server still reports as active.
+  private serverReportsTurnFinished = false;
   private nextTurnId = 0;
   private messageCounter = 0;
   private clientMessageCounter = 0;
@@ -211,6 +215,7 @@ export class RemoteTurnCoordinator {
 
     const finished = turnFinishedRecord(message);
     if (finished) {
+      this.serverReportsTurnFinished = true;
       this.handleTurnFinished(finished);
       return;
     }
@@ -425,6 +430,11 @@ export class RemoteTurnCoordinator {
     }
     if (status === "WAITING_ON_INPUT" && active.observedTurnEvidence) {
       if (active.pendingTerminal) return;
+      // An idle status that still lists a run is not the end of the turn: the
+      // listener reports WAITING_ON_INPUT for an active turn in some approval
+      // and interrupt states. Its turn_finished, or a later idle status with
+      // no runs, closes the turn with the real stop reason.
+      if (this.serverReportsTurnFinished && activeRunIds.length > 0) return;
       this.completeActiveTurn({
         runtime: active.runtime,
         stopReason: null,
