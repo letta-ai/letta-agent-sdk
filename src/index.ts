@@ -190,6 +190,9 @@ export type {
 } from "./management-types.js";
 
 export { RepositoriesClient } from "./repositories.js";
+export { AlphaClient } from "./alpha/index.js";
+export { DecisionsClient } from "./alpha/decisions.js";
+export type * from "./alpha/decision-types.js";
 export { ConversationForkHydrationError } from "./management-errors.js";
 export type {
   Computer,

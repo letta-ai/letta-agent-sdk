@@ -1,13 +1,12 @@
 # Examples
 
-These examples show one path from a local agent to persistent and multi-agent applications. Start with the SDK tour, then choose an application that matches the concept you need.
-
-Run `bun install` from the repository root before you start. The examples import `../src/index.js` so that they run against this checkout. In your application, import from `@letta-ai/letta-agent-sdk`.
+Run `bun install` at the repository root. Examples import this checkout's source; applications import `@letta-ai/letta-agent-sdk`.
 
 ## Learning path
 
 | Example | What it teaches | Backend | Side effects |
 | --- | --- | --- | --- |
+| [`decisions.ts`](./decisions.ts) | Experimental `client.alpha.decisions` classification | Cloud | Sends synthetic state; no agent, conversation, or sandbox |
 | [`stateless-conversations/`](./stateless-conversations) | Streaming, structured results, and independent one-turn questions without an agent | Local App Server + API backend | Creates ordinary conversations; does not create agents |
 | [`sdk-tour.ts`](./sdk-tour.ts) | Agent creation, streaming, conversations, tools, permissions, and MemFS | Local | Creates local agents and can run tools |
 | [`custom-tools/`](./custom-tools) | Tools that execute in your SDK process for a Cloud agent | Cloud | Creates a Cloud agent and runs local functions |
@@ -16,7 +15,7 @@ Run `bun install` from the repository root before you start. The examples import
 | [`focus-group/`](./focus-group) | Several persistent agents coordinated by TypeScript | Local | Creates agents and writes `state.json` |
 | [`research-team/`](./research-team) | File handoffs, user feedback, and reuse of the same agents in another script | Local | Creates agents and writes reports under `output/` |
 
-The other application demos apply the same session pattern to bug fixing, file organization, release notes, and an economics seminar. Read them after the SDK tour if that use case is useful to you.
+Start with the SDK tour for agent applications. The remaining demos apply its session pattern to other use cases.
 
 ## Choose a backend
 

@@ -51,6 +51,12 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Alpha Decisions demo
+        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
+        env:
+          LETTA_API_KEY: ${{ secrets.LETTA_API_KEY }}
+        run: bun examples/decisions.ts
+
       - name: SDK smoke test
         # Only run with API key on push or same-repo PRs
         if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
