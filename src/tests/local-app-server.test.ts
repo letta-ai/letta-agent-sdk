@@ -33,7 +33,7 @@ describe("buildLocalAppServerArgs", () => {
 describe("buildLocalAppServerProcess", () => {
   test("keeps the normal app-server launcher unwrapped", () => {
     const processSpec = buildLocalAppServerProcess("/path/to/letta.js", {
-      env: { SDK_TEST_VALUE: "present" },
+      env: { SDK_TEST_VALUE: "present", LETTA_WORKLOAD_SYSTEMD_SLICE: undefined },
     });
 
     expect(processSpec.command).toBe(process.execPath);
@@ -46,13 +46,60 @@ describe("buildLocalAppServerProcess", () => {
     expect(processSpec.env.SDK_TEST_VALUE).toBe("present");
   });
 
+  test.if(process.platform === "linux")("scopes an unconfined worker", () => {
+    const processSpec = buildLocalAppServerProcess("/path with spaces/letta.js", {
+      backend: "api",
+      env: { LETTA_WORKLOAD_SYSTEMD_SLICE: " test-workers.slice " },
+    });
+
+    expect(processSpec.command).toBe("systemd-run");
+    expect(processSpec.args).toEqual([
+      "--scope", "--quiet", "--collect", "--property=TimeoutStopSec=5s",
+      "--slice=test-workers.slice", "--", process.execPath,
+      ...buildLocalAppServerArgs("/path with spaces/letta.js", { backend: "api" }),
+    ]);
+  });
+
+  test("ignores an empty workload slice", () => {
+    const processSpec = buildLocalAppServerProcess("/path/to/letta.js", {
+      env: { LETTA_WORKLOAD_SYSTEMD_SLICE: "  " },
+    });
+    expect(processSpec.command).toBe(process.execPath);
+  });
+
+  test.if(process.platform === "linux")("scopes memory-confined workers", () => {
+    const processSpec = buildLocalAppServerProcess(
+      "/path/to/letta.js",
+      {
+        filesystemConfinement: "memory",
+        env: { LETTA_WORKLOAD_SYSTEMD_SLICE: "test-workers.slice" },
+      },
+      (input) => ({
+        launcher: ["bwrap", "--", ...input.launcher],
+        env: { ...input.env, LETTA_SANDBOX_ACTIVE: "bwrap" },
+        backend: "bwrap",
+      }),
+    );
+
+    expect(processSpec.command).toBe("systemd-run");
+    expect(processSpec.args).toContain("--slice=test-workers.slice");
+    expect(processSpec.args.slice(processSpec.args.indexOf("--") + 1)).toEqual([
+      "bwrap", "--", process.execPath,
+      ...buildLocalAppServerArgs("/path/to/letta.js"),
+    ]);
+    expect(processSpec.env.LETTA_SANDBOX_ACTIVE).toBe("bwrap");
+  });
+
   test("wraps memory-confined app-server processes", () => {
     let received: unknown;
     const processSpec = buildLocalAppServerProcess(
       "/path/to/letta.js",
       {
         filesystemConfinement: "memory",
-        env: { MEMORY_DIR: "/state/agent/memory" },
+        env: {
+          MEMORY_DIR: "/state/agent/memory",
+          LETTA_WORKLOAD_SYSTEMD_SLICE: undefined,
+        },
       },
       (input) => {
         received = input;
