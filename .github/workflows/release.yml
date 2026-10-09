@@ -115,6 +115,11 @@ jobs:
           OLD_VERSION=$(jq -r '.version' package.json)
           CURRENT_CODE_VERSION=$(jq -r '.devDependencies["@letta-ai/letta-code"]' package.json)
 
+          if [ -n "$LETTA_CODE_VERSION" ] && [[ ! "$LETTA_CODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::letta_code_version must be an exact stable semver version, got '$LETTA_CODE_VERSION'."
+            exit 1
+          fi
+
           if [ -n "$CASCADE_ID" ]; then
             if [ -z "$LETTA_CODE_VERSION" ]; then
               echo "::error::Cascade releases must include letta_code_version."
@@ -123,11 +128,6 @@ jobs:
 
             if [ "$VERSION_TYPE" != "patch" ] || [ -n "$PRERELEASE_TAG" ]; then
               echo "::error::Cascade releases must be stable patch releases."
-              exit 1
-            fi
-
-            if [[ ! "$LETTA_CODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "::error::Cascade letta_code_version must be a stable semver version, got '$LETTA_CODE_VERSION'."
               exit 1
             fi
           fi
