@@ -253,7 +253,33 @@ export {
  */
 export async function createAgent(options: CreateAgentOptions = {}): Promise<string> {
   validateCreateAgentOptions(options);
-  return new LettaAgentClient().createAgent(options);
+  const client = new LettaAgentClient();
+  try {
+    return await client.createAgent(options);
+  } finally {
+    await client.close();
+  }
+}
+
+/** Convenience sessions own their otherwise inaccessible client as well. */
+function ownSession(client: LettaAgentClient, session: LettaCodeSession): LettaCodeSession {
+  const close = session.close.bind(session);
+  const dispose = session[Symbol.asyncDispose].bind(session);
+  session.close = () => {
+    try {
+      close();
+    } finally {
+      void client.close();
+    }
+  };
+  session[Symbol.asyncDispose] = async () => {
+    try {
+      await dispose();
+    } finally {
+      await client.close();
+    }
+  };
+  return session;
 }
 
 /**
@@ -272,7 +298,8 @@ export function createSession(
   options: CreateSessionOptions = {},
 ): LettaCodeSession {
   validateCreateSessionOptions(options);
-  return new LettaAgentClient().createSession(agentId, options);
+  const client = new LettaAgentClient();
+  return ownSession(client, client.createSession(agentId, options));
 }
 
 /**
@@ -298,7 +325,8 @@ export function resumeSession(
   options: CreateSessionOptions = {},
 ): LettaCodeSession {
   validateCreateSessionOptions(options);
-  return new LettaAgentClient().resumeSession(id, options);
+  const client = new LettaAgentClient();
+  return ownSession(client, client.resumeSession(id, options));
 }
 
 /**
@@ -338,10 +366,29 @@ export async function prompt(
 
 /** Run a query in a new ordinary conversation. */
 export function query(params: QueryParams): Query {
-  return new LettaAgentClient({
+  const client = new LettaAgentClient({
     backend: "local",
     appServer: { harnessBackend: "api" },
-  }).query(params);
+  });
+  const inner = client.query(params);
+  const result = (async function* () {
+    try {
+      yield* inner;
+    } finally {
+      await client.close();
+    }
+  })();
+  return Object.defineProperties(Object.assign(result, {
+    interrupt: () => inner.interrupt(),
+    close() {
+      inner.close();
+      void client.close();
+      void result.return();
+    },
+  }), {
+    conversationId: { get: () => inner.conversationId, enumerable: true },
+    agentId: { get: () => inner.agentId, enumerable: true },
+  }) as Query;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -383,11 +430,11 @@ export async function listMessagesDirect(
 ): Promise<ListMessagesResult> {
   // resumeSession uses --default which maps to the agent's default conversation.
   // The session is transient: we only need it long enough to list messages.
-  const session = new LettaAgentClient().resumeSession(agentId, {
+  const session = resumeSession(agentId, {
     permissionMode: "unrestricted",
   });
-  await (session as InitializableSession).initialize();
   try {
+    await (session as InitializableSession).initialize();
     return await session.listMessages(options);
   } finally {
     session.close();

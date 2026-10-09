@@ -742,8 +742,8 @@ export class LettaAgentClientBase implements AsyncDisposable {
 
   /**
    * Release resources owned directly by this client, including its pooled
-   * management connection and any local App Server started for that pool.
-   * Sessions have independent lifecycles and must be closed separately.
+   * management connection. The Node client also stops its shared local App
+   * Server; dedicated and externally hosted sessions remain independently owned.
    */
   close(): Promise<void> {
     if (this.closePromise) return this.closePromise;

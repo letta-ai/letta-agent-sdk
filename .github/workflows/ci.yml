@@ -88,3 +88,10 @@ jobs:
           LETTA_API_KEY: ${{ secrets.LETTA_API_KEY }}
           LETTA_LIVE_INTEGRATION: "1"
         run: bun test src/tests/cloud-transport.live.integration.test.ts
+
+      - name: Shared local App Server integration test
+        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
+        env:
+          LETTA_API_KEY: ${{ secrets.LETTA_API_KEY }}
+          LETTA_LIVE_INTEGRATION: "1"
+        run: bun test src/tests/shared-local-app-server.live.test.ts
