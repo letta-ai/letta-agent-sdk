@@ -46,6 +46,12 @@ type RemoteTurnCoordinatorConfig = {
 
 const MAX_RECENTLY_SETTLED_RUN_IDS = 256;
 const TRAILING_USAGE_GRACE_MS = 100;
+/**
+ * Cloud sends turn_finished on the control socket and stream deltas on the
+ * stream socket, so the receipt can overtake the end of the reply. Wait this
+ * long for the stream's stop_reason before settling without it.
+ */
+const STREAM_TAIL_GRACE_MS = 1_000;
 
 /**
  * Owns the portable session's turn correlation and stream queue.
@@ -113,6 +119,7 @@ export class RemoteTurnCoordinator {
       observedRequiresApprovalStop: false,
       pendingTerminal: null,
       pendingTerminalTimeout: null,
+      awaitingStreamStop: false,
       deferredMessages: [],
       deferredTurnEvidence: false,
       abortRequested: false,
@@ -172,7 +179,15 @@ export class RemoteTurnCoordinator {
     const trailingUsageTurn = this.activeTurn?.pendingTerminalTimeout
       ? this.activeTurn
       : null;
-    if (trailingUsageTurn) {
+    // Output still streaming for a run whose receipt overtook it belongs to
+    // that turn, not to whatever is deferred until it settles.
+    const streamTailTurn =
+      trailingUsageTurn?.awaitingStreamStop &&
+      deltaRunId !== undefined &&
+      trailingUsageTurn.runIds.has(deltaRunId)
+        ? trailingUsageTurn
+        : null;
+    if (trailingUsageTurn && !streamTailTurn) {
       const statusRunIds = message.type === "update_loop_status"
         ? loopStatusRunIds(message)
         : [];
@@ -470,16 +485,21 @@ export class RemoteTurnCoordinator {
       ...(success ? {} : { errorCode: errorCode ?? "error" }),
       ...(finished.error ? { detail: finished.error } : {}),
     } satisfies RuntimeTurnResult;
-    if (active.pendingTerminal) {
-      active.pendingTerminal = terminal;
-      if (active.timeout) {
-        clearTimeout(active.timeout);
-        active.timeout = null;
-      }
-      this.schedulePendingTerminal(active);
-      return;
+    // Without the stream's stop_reason the end of the reply may still be in
+    // flight on the stream socket, so give it a bounded chance to arrive.
+    // A receipt with no streamed output has no reply tail to wait for.
+    if (!active.pendingTerminal && active.observedTurnEvidence) {
+      active.awaitingStreamStop = true;
     }
-    this.completeActiveTurn(terminal);
+    active.pendingTerminal = terminal;
+    if (active.timeout) {
+      clearTimeout(active.timeout);
+      active.timeout = null;
+    }
+    this.schedulePendingTerminal(
+      active,
+      active.awaitingStreamStop ? STREAM_TAIL_GRACE_MS : TRAILING_USAGE_GRACE_MS,
+    );
   }
 
   private handleTurnTerminalDelta(
@@ -495,6 +515,15 @@ export class RemoteTurnCoordinator {
         active.observedRequiresApprovalStop = true;
         return;
       }
+      if (active.awaitingStreamStop) {
+        // The stream caught up with turn_finished, whose terminal stays
+        // authoritative. Only trailing usage is left to wait for.
+        active.awaitingStreamStop = false;
+        if (active.pendingTerminalTimeout) clearTimeout(active.pendingTerminalTimeout);
+        active.pendingTerminalTimeout = null;
+        this.schedulePendingTerminal(active, TRAILING_USAGE_GRACE_MS);
+        return;
+      }
       // Hosted streams send final usage after stop_reason. Keep result last so
       // consumers that stop at result cannot miss the accounting event.
       active.pendingTerminal = {
@@ -506,7 +535,7 @@ export class RemoteTurnCoordinator {
     }
 
     if (messageType === "usage_statistics" && active.pendingTerminal) {
-      if (active.pendingTerminalTimeout) {
+      if (active.pendingTerminalTimeout && !active.awaitingStreamStop) {
         this.completeActiveTurn(active.pendingTerminal);
       }
       return;
@@ -524,12 +553,12 @@ export class RemoteTurnCoordinator {
     }
   }
 
-  private schedulePendingTerminal(active: TurnTracker): void {
+  private schedulePendingTerminal(active: TurnTracker, delayMs: number): void {
     if (active.pendingTerminalTimeout) return;
     active.pendingTerminalTimeout = setTimeout(() => {
       if (this.activeTurn !== active || !active.pendingTerminal) return;
       this.completeActiveTurn(active.pendingTerminal);
-    }, TRAILING_USAGE_GRACE_MS);
+    }, delayMs);
     (active.pendingTerminalTimeout as { unref?: () => void }).unref?.();
   }
 
