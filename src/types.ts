@@ -686,11 +686,11 @@ export interface LettaCodeClientSessionOptions extends CreateSessionOptions {
   /** Per-session SDK-managed sandbox options when no computer is selected. */
   sandbox?: LettaCodeCloudSandboxOptions;
   /**
-   * Extra environment variables for the session's harness process. Each
-   * SDK-owned local app-server session runs in its own process, so this
-   * scopes cleanly per session — e.g. MEMORY_DIR / LETTA_MEMORY_DIR to point
-   * the harness's memory scoping (and its guard) at a session-specific
-   * memory copy. Ignored on remote and cloud transports.
+   * Extra environment variables for the session's harness process. Nonempty
+   * overrides use a dedicated process rather than the client's shared server,
+   * so MEMORY_DIR / LETTA_MEMORY_DIR can select a session-specific memory copy.
+   * Close these independently owned sessions separately from the client.
+   * Ignored on remote and cloud transports.
    */
   env?: Record<string, string>;
   /**

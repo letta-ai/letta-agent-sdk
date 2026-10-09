@@ -10,6 +10,7 @@ import { findLettaCli } from "./cli-resolver.js";
 
 export interface LocalAppServerHandle {
   url: string;
+  isRunning(): boolean;
   close(): void;
 }
 
@@ -194,6 +195,7 @@ export function startLocalAppServer(
       cleanup();
       resolve({
         url,
+        isRunning: () => child.exitCode === null && child.signalCode === null,
         close: () => terminateProcess(child),
       });
     };

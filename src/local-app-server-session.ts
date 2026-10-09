@@ -4,6 +4,7 @@ import {
   type AppServerSessionOptions,
 } from "./app-server-session.js";
 import { startLocalAppServer } from "./local-app-server.js";
+import type { SharedLocalAppServer } from "./shared-local-app-server.js";
 import type {
   LettaCodeClientSessionOptions,
   LettaCodeLocalAppServerOptions,
@@ -12,8 +13,12 @@ import type {
 export function createLocalAppServerSession(
   options: LettaCodeLocalAppServerOptions | undefined,
   mode: AppServerSessionMode,
+  sharedServer?: SharedLocalAppServer,
 ): AppServerSession {
   const appServer = options ?? {};
+  const session = mode.options as LettaCodeClientSessionOptions;
+  const needsOwnProcess = session.filesystemConfinement === "memory" ||
+    Object.keys(session.env ?? {}).length > 0;
   const sessionOptions: AppServerSessionOptions = {
     ...(mode.kind === "conversation" &&
     (appServer.harnessBackend ?? "local") === "local"
@@ -23,7 +28,7 @@ export function createLocalAppServerSession(
       ? { url: appServer.url }
       : {
           connect: (sessionEnv?: Record<string, string>) =>
-            startLocalAppServer({
+            sharedServer && !needsOwnProcess ? sharedServer.connect() : startLocalAppServer({
               listen: appServer.listen,
               backend: appServer.harnessBackend ?? "local",
               startupTimeoutMs: appServer.startupTimeoutMs,

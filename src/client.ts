@@ -2,7 +2,7 @@ import { LettaAgentClientBase } from "./client-base.js";
 import { AppServerManagementTransport } from "./app-server-management.js";
 import type { ManagementTransport } from "./management.js";
 import { createLocalAppServerSession } from "./local-app-server-session.js";
-import { startLocalAppServer } from "./local-app-server.js";
+import { SharedLocalAppServer } from "./shared-local-app-server.js";
 import type { QueryOptions } from "./query-types.js";
 import type { SkillNodeSupport } from "./skill-loading.js";
 import { loadSkillDirectory, pushSkillSupportFiles } from "./skill-node.js";
@@ -14,6 +14,29 @@ import type {
 } from "./types.js";
 
 export class LettaAgentClient extends LettaAgentClientBase {
+  private localServer: SharedLocalAppServer | null = null;
+  private localClosePromise: Promise<void> | null = null;
+
+  private sharedLocalServer(): SharedLocalAppServer {
+    if (this.localClosePromise) throw new Error("LettaAgentClient is closed");
+    const options = (this.options as LettaCodeLocalClientOptions).appServer;
+    return this.localServer ??= new SharedLocalAppServer({
+      listen: options?.listen,
+      backend: options?.harnessBackend ?? "local",
+      startupTimeoutMs: options?.startupTimeoutMs,
+    });
+  }
+
+  override close(): Promise<void> {
+    if (!this.localClosePromise) {
+      this.localClosePromise = Promise.all([
+        super.close(),
+        this.localServer?.close(),
+      ]).then(() => {});
+    }
+    return this.localClosePromise;
+  }
+
   protected override skillNodeSupport(): SkillNodeSupport {
     return { loadSkillDirectory, pushSkillSupportFiles };
   }
@@ -22,16 +45,12 @@ export class LettaAgentClient extends LettaAgentClientBase {
     const localOptions = (
       this.options as LettaCodeLocalClientOptions
     ).appServer;
+    const sharedServer = this.sharedLocalServer();
     return new AppServerManagementTransport({
       ...(localOptions?.url !== undefined
         ? { url: localOptions.url }
         : {
-            connect: () =>
-              startLocalAppServer({
-                listen: localOptions?.listen,
-                backend: localOptions?.harnessBackend ?? "local",
-                startupTimeoutMs: localOptions?.startupTimeoutMs,
-              }),
+            connect: () => sharedServer.connect(),
           }),
       ...(localOptions?.WebSocket !== undefined
         ? { WebSocket: localOptions.WebSocket }
@@ -52,13 +71,17 @@ export class LettaAgentClient extends LettaAgentClientBase {
         kind: "create-agent",
         options,
       },
+      this.sharedLocalServer(),
     );
-    const initMsg = await session.initialize();
-    session.close();
-    if (!initMsg.agentId) {
-      throw new Error("Local App Server agent creation did not return an agent id.");
+    try {
+      const initMsg = await session.initialize();
+      if (!initMsg.agentId) {
+        throw new Error("Local App Server agent creation did not return an agent id.");
+      }
+      return initMsg.agentId;
+    } finally {
+      session.close();
     }
-    return initMsg.agentId;
   }
 
   protected override createLocalSession(
@@ -74,6 +97,7 @@ export class LettaAgentClient extends LettaAgentClientBase {
         newConversation: true,
         options,
       },
+      this.sharedLocalServer(),
     );
   }
 
@@ -109,7 +133,7 @@ export class LettaAgentClient extends LettaAgentClientBase {
       ...(queryOptions.disableMemoryGuard === true
         ? { disableMemoryGuard: true }
         : {}),
-    });
+    }, this.sharedLocalServer());
   }
 
   protected override resumeLocalSession(
@@ -125,6 +149,7 @@ export class LettaAgentClient extends LettaAgentClientBase {
           conversationId: id,
           options,
         },
+        this.sharedLocalServer(),
       );
     }
     return createLocalAppServerSession(
@@ -135,6 +160,7 @@ export class LettaAgentClient extends LettaAgentClientBase {
         defaultConversation: true,
         options,
       },
+      this.sharedLocalServer(),
     );
   }
 }
