@@ -115,21 +115,30 @@ export function buildLocalAppServerProcess(
     process.execPath,
     ...buildLocalAppServerArgs(cliPath, options),
   ];
-  if (options.filesystemConfinement !== "memory") {
-    return {
-      command: launcher[0] as string,
-      args: launcher.slice(1),
-      env,
-    };
-  }
-
-  const confined = confineMemory({
-    launcher,
-    env: withDefaultMemoryDirectory(env, options),
-  });
+  const confined =
+    options.filesystemConfinement === "memory"
+      ? confineMemory({ launcher, env: withDefaultMemoryDirectory(env, options) })
+      : { launcher, env };
+  // Managed Linux hosts reserve the listener's cgroup for control processes.
+  // Apply workload placement even when filesystem confinement is disabled,
+  // and outside that confinement so systemd remains accessible at launch.
+  const slice = env.LETTA_WORKLOAD_SYSTEMD_SLICE?.trim();
+  const managedLauncher =
+    process.platform === "linux" && slice
+      ? [
+          "systemd-run",
+          "--scope",
+          "--quiet",
+          "--collect",
+          "--property=TimeoutStopSec=5s",
+          `--slice=${slice}`,
+          "--",
+          ...confined.launcher,
+        ]
+      : confined.launcher;
   return {
-    command: confined.launcher[0] as string,
-    args: confined.launcher.slice(1),
+    command: managedLauncher[0] as string,
+    args: managedLauncher.slice(1),
     env: confined.env,
   };
 }
