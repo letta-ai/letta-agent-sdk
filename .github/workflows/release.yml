@@ -45,7 +45,7 @@ jobs:
           current_version="$(
             gh api "repos/${GITHUB_REPOSITORY}/contents/package.json?ref=main" --jq '.content' \
               | base64 -d \
-              | jq -r '.dependencies["@letta-ai/letta-code"]'
+              | jq -r '.devDependencies["@letta-ai/letta-code"]'
           )"
           latest_version="$(npm view @letta-ai/letta-code version)"
 
@@ -113,7 +113,12 @@ jobs:
           CASCADE_ID="${{ inputs.cascade_id }}"
           PACKAGE_NAME=$(jq -r '.name' package.json)
           OLD_VERSION=$(jq -r '.version' package.json)
-          CURRENT_CODE_VERSION=$(jq -r '.dependencies["@letta-ai/letta-code"]' package.json)
+          CURRENT_CODE_VERSION=$(jq -r '.devDependencies["@letta-ai/letta-code"]' package.json)
+
+          if [ -n "$LETTA_CODE_VERSION" ] && [[ ! "$LETTA_CODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::letta_code_version must be an exact stable semver version, got '$LETTA_CODE_VERSION'."
+            exit 1
+          fi
 
           if [ -n "$CASCADE_ID" ]; then
             if [ -z "$LETTA_CODE_VERSION" ]; then
@@ -123,11 +128,6 @@ jobs:
 
             if [ "$VERSION_TYPE" != "patch" ] || [ -n "$PRERELEASE_TAG" ]; then
               echo "::error::Cascade releases must be stable patch releases."
-              exit 1
-            fi
-
-            if [[ ! "$LETTA_CODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "::error::Cascade letta_code_version must be a stable semver version, got '$LETTA_CODE_VERSION'."
               exit 1
             fi
           fi
@@ -206,7 +206,16 @@ jobs:
 
           pkg.version = process.env.NEW_VERSION;
           if (process.env.LETTA_CODE_VERSION) {
-            pkg.dependencies["@letta-ai/letta-code"] = process.env.LETTA_CODE_VERSION;
+            const [major, minor] = process.env.LETTA_CODE_VERSION
+              .split(".")
+              .map(Number);
+            delete pkg.dependencies["@letta-ai/letta-code"];
+            pkg.peerDependencies ??= {};
+            pkg.devDependencies ??= {};
+            pkg.peerDependencies["@letta-ai/letta-code"] =
+              `>=${process.env.LETTA_CODE_VERSION} <${major}.${minor + 1}.0`;
+            pkg.devDependencies["@letta-ai/letta-code"] =
+              process.env.LETTA_CODE_VERSION;
           }
 
           fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);

@@ -51,6 +51,45 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Verify Letta Code peer install
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          package_json="$(npm pack --json)"
+          tarball="$(node -e 'const fs=require("fs"); const rows=JSON.parse(fs.readFileSync(0,"utf8")); process.stdout.write(rows[0].filename)' <<<"$package_json")"
+          tarball="$(realpath "$tarball")"
+          consumer="$(mktemp -d)"
+          trap 'rm -rf "$consumer" "$tarball"' EXIT
+
+          cat > "$consumer/package.json" <<JSON
+          {
+            "private": true,
+            "dependencies": {
+              "@letta-ai/letta-agent-sdk": "file:$tarball",
+              "@letta-ai/letta-code": "0.34.9"
+            }
+          }
+          JSON
+
+          npm install --prefix "$consumer" --ignore-scripts --no-audit --no-fund
+          CONSUMER="$consumer" node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const root = process.env.CONSUMER;
+          const cli = path.join(root, "node_modules/@letta-ai/letta-code/package.json");
+          const nested = path.join(
+            root,
+            "node_modules/@letta-ai/letta-agent-sdk/node_modules/@letta-ai/letta-code/package.json",
+          );
+          if (!fs.existsSync(cli)) {
+            throw new Error("Letta Code peer was not installed at the consumer root");
+          }
+          if (fs.existsSync(nested)) {
+            throw new Error("Agent SDK reintroduced a nested Letta Code dependency");
+          }
+          NODE
+
       - name: SDK smoke test
         # Only run with API key on push or same-repo PRs
         if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
