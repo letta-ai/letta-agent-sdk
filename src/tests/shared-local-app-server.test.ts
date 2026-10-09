@@ -94,7 +94,7 @@ describe("shared local App Server (real processes)", () => {
       const [out, err, code] = await Promise.all([
         new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
       ]);
-      expect({ code, err: code === 0 ? "" : err }).toEqual({ code: 0, err: "" });
+      expect({ code, output: code === 0 ? "" : out + err }).toEqual({ code: 0, output: "" });
       expect(out).toContain("SHARED_CLIENT_OK");
     } finally { clearTimeout(deadline); proc.kill(); rmSync(home, { recursive: true, force: true }); }
   }, 30_000);

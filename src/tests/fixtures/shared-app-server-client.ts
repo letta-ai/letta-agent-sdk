@@ -9,10 +9,12 @@ await new Promise<void>((resolve) => reservation.close(() => resolve()));
 const url = `ws://127.0.0.1:${port}`;
 await using client = new LettaAgentClient({ backend: "local", appServer: { listen: url } });
 const agentId = await client.createAgent({ memfs: false });
+console.log("agent created");
 // A fixed port makes accidental per-call process startup fail deterministically.
 const sessions = Array.from({ length: 16 }, () => client.createSession(agentId));
 try {
   const ready = await Promise.all(sessions.map((session) => session.ready()));
+  console.log("16 sessions ready");
   assert.equal(new Set(ready.map((r) => r.conversationId)).size, 16);
   await client.models.list(); // Management shares the same process too.
   sessions[0]!.close();
@@ -27,6 +29,7 @@ try {
     await assert.rejects(confined.ready());
   } finally { confined.close(); }
   await sessions[1]!.listMessages();
+  console.log("sibling and confinement checks complete");
 
   await using external = new LettaAgentClient({ backend: "local", appServer: { url } });
   await external.models.list();
@@ -36,6 +39,7 @@ try {
 
 await using next = client.createSession(agentId);
 await next.ready(); // Closing every prior session does not terminate the owner.
+console.log("replacement session ready");
 
 const isolatedOwner = new LettaAgentClient({ backend: "local" });
 const ordinary = isolatedOwner.createSession(agentId);
@@ -45,6 +49,7 @@ try {
   await isolatedOwner.close();
   await isolated.listMessages(); // Explicit env still owns an independent process.
   await next.listMessages(); // Another client has an independent server lifetime.
+  console.log("independent client checks complete");
 } finally {
   ordinary.close();
   isolated.close();
