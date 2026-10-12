@@ -111,6 +111,7 @@ export class RemoteTurnCoordinator {
       runIds: new Set<string>(),
       observedTurnEvidence: false,
       observedRequiresApprovalStop: false,
+      observedRunError: false,
       pendingTerminal: null,
       pendingTerminalTimeout: null,
       deferredMessages: [],
@@ -424,7 +425,7 @@ export class RemoteTurnCoordinator {
       return;
     }
     if (status === "WAITING_ON_INPUT" && active.observedTurnEvidence) {
-      if (active.pendingTerminal) return;
+      if (active.pendingTerminal || active.observedRunError) return;
       this.completeActiveTurn({
         runtime: active.runtime,
         stopReason: null,
@@ -679,6 +680,7 @@ export class RemoteTurnCoordinator {
         typeof delta.error_type === "string") ||
       (messageType === "loop_error" && delta.is_terminal === false)
     ) {
+      if (this.activeTurn) this.activeTurn.observedRunError = true;
       return { type: "stream_event", event: delta as SDKStreamEventPayload, uuid };
     }
     if (messageType === "error_message" || messageType === "loop_error") {

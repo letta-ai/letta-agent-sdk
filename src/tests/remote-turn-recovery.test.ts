@@ -104,6 +104,15 @@ describe("worker run recovery", () => {
       expect(coordinator.hasInFlightTurn()).toBe(true);
       coordinator.handleProtocolMessage(
         {
+          type: "update_loop_status",
+          runtime,
+          loop_status: { status: "WAITING_ON_INPUT", active_run_ids: [] },
+        },
+        runtime,
+      );
+      expect(coordinator.hasInFlightTurn()).toBe(true);
+      coordinator.handleProtocolMessage(
+        {
           type: "turn_finished",
           runtime,
           turn_id: "turn-1",
