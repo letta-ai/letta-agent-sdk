@@ -159,6 +159,8 @@ export type TurnTracker = {
   runIds: Set<string>;
   observedTurnEvidence: boolean;
   observedRequiresApprovalStop: boolean;
+  /** After a run error, idle alone cannot prove the enclosing turn succeeded. */
+  observedRunError: boolean;
   pendingTerminal: RuntimeTurnResult | null;
   pendingTerminalTimeout: ReturnType<typeof setTimeout> | null;
   deferredMessages: ProtocolMessage[];
