@@ -56,6 +56,11 @@ await session.send(message);
 measures the tracked turn and excludes session initialization; measure `ready()`
 separately when startup latency matters.
 
+Use the final `result.success` to determine whether a turn succeeded. A turn can
+recover from a failed API run: run-scoped errors and explicitly nonterminal
+error notices remain `stream_event` diagnostics while the harness continues.
+They do not close the session or produce a failed result on their own.
+
 For a simple question that should not create or use an agent, call `query()`.
 It creates an ordinary conversation from the supplied model and
 system prompt, streams the turn, and closes the runtime when iteration ends:

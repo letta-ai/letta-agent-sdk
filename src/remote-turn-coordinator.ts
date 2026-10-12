@@ -671,6 +671,16 @@ export class RemoteTurnCoordinator {
       };
     }
 
+    // API errors end runs, not necessarily the enclosing harness turn. Keep
+    // diagnostics observable without making consumers abandon active recovery.
+    // Unstructured legacy errors retain their existing terminal behavior.
+    if (
+      (messageType === "error_message" && runId !== undefined &&
+        typeof delta.error_type === "string") ||
+      (messageType === "loop_error" && delta.is_terminal === false)
+    ) {
+      return { type: "stream_event", event: delta as SDKStreamEventPayload, uuid };
+    }
     if (messageType === "error_message" || messageType === "loop_error") {
       const detail =
         (typeof delta.detail === "string" ? delta.detail : undefined) ??
