@@ -67,7 +67,7 @@ jobs:
             "private": true,
             "dependencies": {
               "@letta-ai/letta-agent-sdk": "file:$tarball",
-              "@letta-ai/letta-code": "0.34.9"
+              "@letta-ai/letta-code": "$(node -p 'require("./package.json").devDependencies["@letta-ai/letta-code"]')"
             }
           }
           JSON
