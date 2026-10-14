@@ -873,7 +873,9 @@ export interface CreateAgentOptions {
   embedding?: string;
 
   /**
-   * System prompt configuration.
+   * System prompt configuration. When omitted, both Cloud and local/remote
+   * App Servers receive the SDK's stateful-agent default prompt (a MemFS or
+   * memory-block variant, depending on `memfs`).
    * - string: Use as the complete system prompt
    * - SystemPromptPreset: Use a preset
    * - { type: 'preset', preset, append? }: Use a preset with optional appended text
