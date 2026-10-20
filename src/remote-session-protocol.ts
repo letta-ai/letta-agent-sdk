@@ -163,6 +163,8 @@ export type TurnTracker = {
   observedRunError: boolean;
   pendingTerminal: RuntimeTurnResult | null;
   pendingTerminalTimeout: ReturnType<typeof setTimeout> | null;
+  /** turn_finished arrived before the stream's stop_reason; the reply may still be streaming. */
+  awaitingStreamStop: boolean;
   deferredMessages: ProtocolMessage[];
   deferredTurnEvidence: boolean;
   abortRequested: boolean;
