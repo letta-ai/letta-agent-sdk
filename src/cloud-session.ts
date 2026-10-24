@@ -53,6 +53,7 @@ import type {
   RepositoryResource,
 } from "./types.js";
 import {
+  type LettaCodeCloudSandboxClass,
   type LettaCodeCloudSandboxOptions,
   validateCloudSandboxOptions,
 } from "./cloud-sandbox.js";
@@ -117,6 +118,7 @@ type ManagedCloudSandbox = {
    * conversationId (legacy servers strip unknown body keys and answer
    * without it, so the sandbox falls back to the agent-scoped lifecycle). */
   conversationId: string | null;
+  sandboxClass: LettaCodeCloudSandboxClass;
   sandboxId: string;
   deviceId: string;
   connectionName: string;
@@ -993,9 +995,16 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     conversationId?: string,
   ): Promise<ManagedCloudSandbox> {
     const sandboxOptions = this.resolvedSandboxOptions();
+    const sandboxClass = sandboxOptions.sandboxClass ?? "linux-vm";
     const githubRepositories = sandboxOptions.githubRepositories;
+    // The two creation routes are identical apart from the class the server
+    // provisions; /sandboxes is the legacy container-only endpoint.
+    const createPath =
+      sandboxClass === "linux-vm"
+        ? `/v1/agents/${encodeURIComponent(agentId)}/sandboxes/linux-vm`
+        : `/v1/agents/${encodeURIComponent(agentId)}/sandboxes`;
     const body = await this.apiClient.post<unknown>(
-      `/v1/agents/${encodeURIComponent(agentId)}/sandboxes`,
+      createPath,
       {
         body: {
           ...(conversationId ? { conversationId } : {}),
@@ -1033,6 +1042,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     return {
       agentId,
       conversationId: responseConversationId,
+      sandboxClass,
       sandboxId: body.sandboxId,
       deviceId: body.deviceId,
       connectionName: body.connectionName,
@@ -1062,9 +1072,11 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   private async refreshManagedSandboxOnce(sandbox: ManagedCloudSandbox): Promise<void> {
-    if (sandbox.conversationId) {
-      // Conversation-scoped sandboxes refresh by id — no "latest active"
-      // indirection, so ownership changes are structurally impossible.
+    // The agent-scoped refresh endpoint only looks up legacy container rows,
+    // so linux-vm sandboxes refresh by id even when agent-scoped.
+    // Conversation-scoped sandboxes refresh by id — no "latest active"
+    // indirection, so ownership changes are structurally impossible.
+    if (sandbox.conversationId || sandbox.sandboxClass === "linux-vm") {
       let body: unknown;
       try {
         body = await this.apiClient.post(
@@ -1080,7 +1092,8 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
         // a new SDK session.
         throw new CloudManagedSandboxExpiredError(
           sandbox.sandboxId,
-          sandbox.conversationId,
+          // Agent-scoped linux-vm sandboxes belong to the default conversation.
+          sandbox.conversationId ?? "default",
         );
       }
       if (!isCloudAgentSandboxRefresh(body) || !body.success) {
@@ -1106,9 +1119,11 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   }
 
   private async terminateManagedSandbox(sandbox: ManagedCloudSandbox): Promise<void> {
-    if (sandbox.conversationId) {
-      // Terminate exactly this sandbox — the agent-scoped DELETE targets the
-      // agent's "latest active" sandbox, which may not be ours.
+    // The agent-scoped DELETE targets the agent's "latest active" legacy
+    // container sandbox, so linux-vm sandboxes terminate by id even when
+    // agent-scoped. Terminate exactly this sandbox — the agent-scoped DELETE
+    // may not be ours.
+    if (sandbox.conversationId || sandbox.sandboxClass === "linux-vm") {
       try {
         await this.apiClient.post(
           `/v1/sandboxes/${encodeURIComponent(sandbox.sandboxId)}/terminate`,
