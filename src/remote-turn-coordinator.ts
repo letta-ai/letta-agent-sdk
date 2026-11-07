@@ -162,6 +162,10 @@ export class RemoteTurnCoordinator {
       return;
     }
 
+    // requestTimeoutMs bounds idle time, not turn length: turn traffic
+    // (stream deltas, loop status, turn_finished) restarts the timer.
+    if (this.activeTurn?.timeout) this.armTurnTimeout(this.activeTurn);
+
     const deferredDelta = streamDeltaRecord(message);
     // An interrupted run may emit a final lifecycle/status delta after its
     // result. Never attribute that old evidence to the next sent turn.
@@ -311,12 +315,16 @@ export class RemoteTurnCoordinator {
     this.activeTurn = turn;
     turn.startedAt = Date.now();
     this._activeTurnStartedAt = turn.startedAt;
-    if (this.requestTimeoutMs !== undefined) {
-      turn.timeout = setTimeout(() => {
-        this.failTurn(turn, `Timed out waiting for ${this.label} turn`);
-      }, this.requestTimeoutMs);
-      (turn.timeout as { unref?: () => void }).unref?.();
-    }
+    this.armTurnTimeout(turn);
+  }
+
+  private armTurnTimeout(turn: TurnTracker): void {
+    if (this.requestTimeoutMs === undefined) return;
+    if (turn.timeout) clearTimeout(turn.timeout);
+    turn.timeout = setTimeout(() => {
+      this.failTurn(turn, `Timed out waiting for ${this.label} turn`);
+    }, this.requestTimeoutMs);
+    (turn.timeout as { unref?: () => void }).unref?.();
   }
 
   private activateNextTurnFromProtocol(): TurnTracker | null {
