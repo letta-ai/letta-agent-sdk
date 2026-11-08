@@ -26,6 +26,12 @@ import {
 } from "./mcp-runtime.js";
 import { applyUniqueRequestIds } from "./request-ids.js";
 import {
+  clientToolsetPayload,
+  runtimeToolPolicy,
+  supportsRuntimeToolPolicy,
+  type RuntimeToolPolicy,
+} from "./runtime-tool-policy.js";
+import {
   RemoteClientSessionCore,
   ensureSuccess,
   isUnrestrictedPermissionMode,
@@ -395,6 +401,8 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
     private readonly options: AppServerSessionOptions,
     private readonly clientToolAllowlist?: readonly string[],
     private readonly clientToolset?: ClientToolsetConfig,
+    /** The listener applies runtime_start's tool_policy to every turn. */
+    private readonly toolPolicyApplied = false,
   ) {}
 
   onMessage(handler: (message: ProtocolMessage, channel?: string) => void): () => void {
@@ -425,18 +433,12 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
         },
       ],
     };
-    if (this.clientToolAllowlist !== undefined) {
+    // Older listeners only honour tool selection sent with each message.
+    if (!this.toolPolicyApplied && this.clientToolAllowlist !== undefined) {
       payload.client_tool_allowlist = [...new Set(this.clientToolAllowlist)];
     }
-    if (this.clientToolset !== undefined) {
-      payload.client_toolset = {
-        ...(this.clientToolset.base !== undefined
-          ? { base: this.clientToolset.base }
-          : {}),
-        ...(this.clientToolset.include !== undefined
-          ? { include: [...new Set(this.clientToolset.include)] }
-          : {}),
-      };
+    if (!this.toolPolicyApplied && this.clientToolset !== undefined) {
+      payload.client_toolset = clientToolsetPayload(this.clientToolset);
     }
     if (options.outputFormat !== undefined) {
       payload.response_format = {
@@ -451,7 +453,7 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
     // SDK sessions are headless: interactive user-input tools are always
     // excluded from the toolset (harnesses without support ignore the flag
     // and the SDK's runtime denial still applies).
-    payload.exclude_interactive_tools = true;
+    if (!this.toolPolicyApplied) payload.exclude_interactive_tools = true;
     this.client.input({
       runtime,
       payload,
@@ -667,21 +669,25 @@ export class AppServerSession extends RemoteClientSessionCore {
           );
         }
       }
-      const response = await this.startRuntime(client);
-      if (!response.success || !response.runtime) {
-        throw new Error(response.error ?? "Failed to start app-server runtime");
-      }
-
-      this.watchTransportDisconnect(client);
-
-      const tools = agentToolNames(response.agent);
-      const skillSources = options.skillSources;
       const clientToolset = "toolset" in options ? options.toolset : undefined;
       const mcpToolNames = this.mcpBridge?.tools.map((tool) => tool.name) ?? [];
       const allowedTools = expandMcpToolWildcards(
         options.allowedTools,
         mcpToolNames,
       );
+      const response = await this.startRuntime(
+        client,
+        runtimeToolPolicy(allowedTools, clientToolset),
+      );
+      if (!response.success || !response.runtime) {
+        throw new Error(response.error ?? "Failed to start app-server runtime");
+      }
+
+      this.watchTransportDisconnect(client);
+      const toolPolicyApplied = await supportsRuntimeToolPolicy(client);
+
+      const tools = agentToolNames(response.agent);
+      const skillSources = options.skillSources;
       const availableTools =
         tools === undefined && mcpToolNames.length === 0
           ? undefined
@@ -692,6 +698,7 @@ export class AppServerSession extends RemoteClientSessionCore {
           this.remoteOptions,
           allowedTools,
           clientToolset,
+          toolPolicyApplied,
         ),
         runtime: response.runtime,
         model:
@@ -756,12 +763,16 @@ export class AppServerSession extends RemoteClientSessionCore {
 
   private async startRuntime(
     client: AppServerClient,
+    toolPolicy: RuntimeToolPolicy,
   ): Promise<RuntimeStartResponseMessage> {
-    const command = await this.buildRuntimeStartCommand(client);
+    const command = await this.buildRuntimeStartCommand(client, toolPolicy);
     return client.runtimeStart(command);
   }
 
-  private async buildRuntimeStartCommand(client: AppServerClient): Promise<RuntimeStartCommand> {
+  private async buildRuntimeStartCommand(
+    client: AppServerClient,
+    toolPolicy: RuntimeToolPolicy,
+  ): Promise<RuntimeStartCommand> {
     const options = this.mode.options;
     const command: Record<string, unknown> = {
       client_info: {
@@ -799,6 +810,10 @@ export class AppServerSession extends RemoteClientSessionCore {
     }
     const groups = externalToolGroups([...this.externalTools.values()]);
     if (groups) command.external_tools = groups;
+    // Sent on create, resume and every reconnect: the listener keeps it only
+    // while this connection is open, and applies it to every turn, including
+    // task notifications and cron prompts the runtime starts itself.
+    command.tool_policy = toolPolicy;
 
     if (this.mode.kind === "create-agent") {
       command.create_agent = {

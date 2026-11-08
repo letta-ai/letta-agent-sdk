@@ -1087,7 +1087,27 @@ export interface SDKResultMessage {
   conversationId: string | null;
   /** Run IDs associated with this turn (if provided by the CLI). */
   runIds?: string[];
+  /**
+   * Set only on a turn this session did not send, such as a background task
+   * notification or a cron prompt. `stream()` yields these turns as they run
+   * and keeps going until the result of the session's own turn.
+   */
+  origin?: SDKTurnOrigin;
 }
+
+/**
+ * Who started a turn the session did not send: a queue source reported by
+ * the runtime, `"user"` for another client's message, or `"unknown"` when the
+ * runtime started the turn without reporting a source.
+ */
+export type SDKTurnOrigin =
+  | "task_notification"
+  | "cron"
+  | "subagent"
+  | "system"
+  | "channel"
+  | "user"
+  | "unknown";
 
 export interface SDKStreamEventDeltaPayload {
   type: string;

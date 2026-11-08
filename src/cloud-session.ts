@@ -24,6 +24,7 @@ import {
   expandMcpToolWildcards,
   type McpToolBridge,
 } from "./mcp-runtime.js";
+import { runtimeToolPolicy } from "./runtime-tool-policy.js";
 import { CloudManagementTransport } from "./cloud-management.js";
 import {
   createCloudClient,
@@ -656,6 +657,15 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     }
     const groups = externalToolGroups([...this.externalTools.values()]);
     if (groups) command.external_tools = groups;
+    // Re-sent on idle-transport recovery so a new connection restores it.
+    // Per-message fields are still sent: Cloud does not confirm the capability.
+    command.tool_policy = runtimeToolPolicy(
+      expandMcpToolWildcards(
+        options.allowedTools,
+        this.mcpBridge?.tools.map((tool) => tool.name) ?? [],
+      ),
+      "toolset" in options ? options.toolset : undefined,
+    );
 
     return (await client.runtimeStart(
       command as Parameters<AppServerClient["runtimeStart"]>[0],

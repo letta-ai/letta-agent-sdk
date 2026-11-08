@@ -289,9 +289,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
     }
     await this.send(message);
     for await (const msg of this.stream()) {
-      if (msg.type === "result") {
-        return msg;
-      }
+      if (msg.type === "result" && msg.origin === undefined) return msg;
     }
     return {
       type: "result",
@@ -323,7 +321,8 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
       const msg = await this.turns.nextMessage();
       if (!msg) break;
       yield msg;
-      if (msg.type === "result") break;
+      // Results of turns the runtime started are yielded; only ours end the pass.
+      if (msg.type === "result" && msg.origin === undefined) break;
     }
   }
 
@@ -717,6 +716,7 @@ export abstract class RemoteClientSessionCore implements LettaCodeSession {
         this.controller?.close();
         this.controller = null;
         const error = new Error(`${this.label} connection closed before send`);
+        this.turns.failServerTurn(error.message);
         for (const cancel of [...this.deviceStatusRefreshCancels]) cancel(error);
         this.deviceStatusRefreshCancels.clear();
         this.onIdleTransportDisconnect();

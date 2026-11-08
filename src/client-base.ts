@@ -33,6 +33,11 @@ import type {
   ModelsClient,
 } from "./management-types.js";
 import { createQuery } from "./query.js";
+import {
+  ToolRegistry,
+  type RegisterToolsOptions,
+  type ToolRegistration,
+} from "./tool-registration.js";
 import type {
   Query,
   QueryOptions,
@@ -161,6 +166,7 @@ export class LettaAgentClientBase implements AsyncDisposable {
   private agentRepositoriesClient: AgentRepositoriesClient | null = null;
   private cloudClient: Letta | null = null;
   private managementTransport: ManagementTransport | null = null;
+  private toolRegistry: ToolRegistry | null = null;
   private closed = false;
   private closePromise: Promise<void> | null = null;
 
@@ -741,6 +747,30 @@ export class LettaAgentClientBase implements AsyncDisposable {
   }
 
   /**
+   * Register client tools for many conversations over one long-lived
+   * connection. Every turn in those conversations can call them, including
+   * turns the runtime starts itself, such as task notifications and cron
+   * prompts, with or without an open session.
+   */
+  registerTools(options: RegisterToolsOptions): Promise<ToolRegistration> {
+    this.assertOpen();
+    if (this.backend === "cloud") {
+      return Promise.reject(new Error(
+        'registerTools() requires backend: "local" or "remote". Cloud sessions register tools through the tools session option.',
+      ));
+    }
+    this.toolRegistry ??= new ToolRegistry(
+      this.backend === "remote" ? this.remoteOptions() : this.localAppServerConnection(),
+    );
+    return this.toolRegistry.register(options);
+  }
+
+  /** How the local backend reaches its App Server; overridden by the Node client. */
+  protected localAppServerConnection(): AppServerSessionOptions {
+    throw this.localBackendUnavailableError();
+  }
+
+  /**
    * Release resources owned directly by this client, including its pooled
    * management connection. The Node client also stops its shared local App
    * Server; dedicated and externally hosted sessions remain independently owned.
@@ -748,6 +778,8 @@ export class LettaAgentClientBase implements AsyncDisposable {
   close(): Promise<void> {
     if (this.closePromise) return this.closePromise;
     this.closed = true;
+    this.toolRegistry?.close();
+    this.toolRegistry = null;
     const transport = this.managementTransport;
     this.managementTransport = null;
     const close = transport?.close() ?? Promise.resolve();
