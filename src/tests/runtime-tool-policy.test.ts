@@ -312,3 +312,112 @@ describe("client.registerTools", () => {
     await client.close();
   });
 });
+
+describe("sessions on a registered conversation", () => {
+  const registered = async (client: LettaAgentClient) => {
+    FakeSocket.capabilities = { runtime_tool_policy: true };
+    const registration = await client.registerTools({
+      conversations: ["conv-a"],
+      tools: [textTool("submit", () => "registered submit")],
+      allowedTools: ["Read", "submit"],
+      toolset: { base: "none", include: ["Read"] },
+    });
+    // Commands sent by sessions, not by the registration's own connection.
+    const registry = FakeSocket.instances[0]!;
+    const sessionSent = (type: string) =>
+      FakeSocket.instances.filter((socket) => socket !== registry)
+        .flatMap((socket) => socket.sent).filter((command) => command.type === type);
+    return { registration, sessionSent };
+  };
+
+  test("resumeSession inherits the registration's tools and policy", async () => {
+    const client = remote();
+    const { sessionSent } = await registered(client);
+    const session = client.resumeSession("conv-a");
+    const other = client.resumeSession("conv-b");
+    try {
+      await asAdvanced(session).initialize();
+      await asAdvanced(other).initialize();
+      const [start, otherStart] = sessionSent("runtime_start");
+      expect(start!.tool_policy).toEqual({
+        toolset: { base: "none", include: ["Read"] },
+        allowlist: ["Read", "submit"],
+        exclude_interactive: true,
+      });
+      expect(start!.external_tools).toEqual([{ tools: [expect.objectContaining({ name: "submit" })] }]);
+      expect(otherStart!.tool_policy).toEqual({ exclude_interactive: true });
+      expect(otherStart!.external_tools).toBeUndefined();
+
+      // A call on the session's own connection runs the registered tool.
+      const socket = FakeSocket.instances.find((candidate) => candidate.sent.includes(start!))!;
+      socket.reply({
+        type: "external_tool_call_request", request_id: "r1",
+        runtime: { agent_id: "agent-1", conversation_id: "conv-a" },
+        tool_call_id: "call-1", tool_name: "submit", input: {},
+      });
+      await tick();
+      expect(socket.sent.find((command) => command.request_id === "r1")).toMatchObject({
+        result: { content: [{ type: "text", text: "registered submit" }] },
+      });
+    } finally {
+      session.close();
+      other.close();
+      await client.close();
+    }
+  });
+
+  test("session allowedTools narrow the registration's and session tools are added", async () => {
+    const client = remote();
+    const { sessionSent } = await registered(client);
+    expect(() => client.resumeSession("conv-a", { tools: [textTool("submit", () => "x")] }))
+      .toThrow("already registered for conv-a");
+    expect(() => client.resumeSession("conv-a", { toolset: { base: "default" } }))
+      .toThrow("narrow it with the session's allowedTools");
+
+    const session = client.resumeSession("conv-a", {
+      allowedTools: ["submit", "Bash", "notes"],
+      tools: [textTool("notes", () => "n")],
+    });
+    try {
+      await asAdvanced(session).initialize();
+      const [start] = sessionSent("runtime_start");
+      expect(start!.tool_policy).toEqual({
+        toolset: { base: "none", include: ["Read"] },
+        allowlist: ["submit", "notes"],
+        exclude_interactive: true,
+      });
+      expect((start!.external_tools as Array<{ tools: Command[] }>)[0]!.tools.map((tool) => tool.name))
+        .toEqual(["submit", "notes"]);
+    } finally {
+      session.close();
+      await client.close();
+    }
+  });
+
+  test("open sessions follow registration updates and fall back when it closes", async () => {
+    const client = remote();
+    const { registration, sessionSent } = await registered(client);
+    const session = client.resumeSession("conv-a");
+    try {
+      await asAdvanced(session).initialize();
+      await registration.update({ allowedTools: ["submit"] });
+      await tick();
+      await registration.close();
+      await tick();
+      const runtimes = [{ agent_id: "agent-1", conversation_id: "conv-a" }];
+      expect(sessionSent("runtime_external_tools_update").map((command) => command.updates)).toEqual([
+        [{
+          runtimes,
+          external_tools: [{ tools: [expect.objectContaining({ name: "submit" })] }],
+          tool_policy: {
+            toolset: { base: "none", include: ["Read"] }, allowlist: ["submit"], exclude_interactive: true,
+          },
+        }],
+        [{ runtimes, external_tools: [], tool_policy: { exclude_interactive: true } }],
+      ]);
+    } finally {
+      session.close();
+      await client.close();
+    }
+  });
+});

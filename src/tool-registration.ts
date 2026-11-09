@@ -4,15 +4,13 @@ import {
   type AppServerSocketConstructor,
 } from "@letta-ai/letta-code/app-server-client";
 import type { ConversationRetrieveResponseMessage } from "@letta-ai/letta-code/app-server-protocol";
-import {
-  createExternalToolCallHandler,
-  externalToolGroups,
-  type AppServerSessionOptions,
-} from "./app-server-session.js";
+import type { AppServerSessionOptions } from "./app-server-session.js";
+import { createExternalToolCallHandler, externalToolGroups } from "./external-tools.js";
 import { applyUniqueRequestIds } from "./request-ids.js";
 import {
   runtimeToolPolicy,
   supportsRuntimeToolPolicy,
+  type InheritedToolSource,
 } from "./runtime-tool-policy.js";
 import type { RuntimeScope } from "./remote-session-protocol.js";
 import type { AnyAgentTool, ClientToolsetConfig } from "./types.js";
@@ -65,6 +63,7 @@ const runtimeKey = (runtime: { agent_id: string | null; conversation_id: string 
 export class ToolRegistry {
   private connection: Promise<Connection> | null = null;
   private readonly entries = new Set<Entry>();
+  private readonly listeners = new Set<() => void>();
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
@@ -93,6 +92,49 @@ export class ToolRegistry {
     this.closed = true;
     this.entries.clear();
     this.disconnect();
+    this.notify();
+  }
+
+  /**
+   * The registration source for a session on `id`, or null when no
+   * registration covers it. Throws when the session's options conflict with
+   * the registration instead of narrowing it.
+   */
+  inheritFor(id: string, own: { tools?: AnyAgentTool[]; toolset?: ClientToolsetConfig }): InheritedToolSource | null {
+    const covering = this.covering(id);
+    if (!covering) return null;
+    const registered = new Set(covering.options.tools.map((tool) => tool.name));
+    const clash = own.tools?.find((tool) => registered.has(tool.name));
+    if (clash) {
+      throw new Error(`Tool ${clash.name} is already registered for ${id} with registerTools(); don't pass it to the session again.`);
+    }
+    if (
+      own.toolset !== undefined && covering.options.toolset !== undefined &&
+      JSON.stringify(own.toolset) !== JSON.stringify(covering.options.toolset)
+    ) {
+      throw new Error(`${id} already has a toolset from registerTools(); narrow it with the session's allowedTools instead.`);
+    }
+    return {
+      current: () => this.covering(id)?.options ?? null,
+      onChange: (listener) => {
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+      },
+    };
+  }
+
+  private covering(id: string): Entry | undefined {
+    return [...this.entries].find((entry) =>
+      entry.options.conversations.includes(id) ||
+      entry.runtimes.some((runtime) =>
+        runtime.conversation_id === id ||
+        (runtime.conversation_id === "default" && runtime.agent_id === id)
+      )
+    );
+  }
+
+  private notify(): void {
+    for (const listener of [...this.listeners]) listener();
   }
 
   private async apply(entry: Entry, options: RegisterToolsOptions): Promise<void> {
@@ -136,10 +178,12 @@ export class ToolRegistry {
       if (isNew) this.entries.delete(entry);
       throw error;
     }
+    this.notify();
   }
 
   private async remove(entry: Entry): Promise<void> {
     if (!this.entries.delete(entry)) return;
+    this.notify();
     if (this.entries.size === 0) {
       // Closing the connection removes everything it registered.
       this.disconnect();

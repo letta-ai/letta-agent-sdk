@@ -71,6 +71,8 @@ await using session = client.resumeSession(agentId, {
 runs the tools registered for the conversation that made it, and
 registrations are restored after a reconnect. The tools also stay available to
 turns the agent starts on its own, such as background task notifications.
+Sessions opened with `resumeSession()` on a registered conversation inherit its
+tools and `allowedTools`, so you don't repeat them.
 
 ```typescript
 await using registration = await client.registerTools({
@@ -78,6 +80,7 @@ await using registration = await client.registerTools({
   tools: [tallyTool("north")],
   allowedTools: ["add_to_tally"],
 });
+await using north = client.resumeSession(northConversationId);
 ```
 
 ```bash

@@ -14,10 +14,9 @@ import {
 import {
   AppServerRuntimeController,
   agentToolNames,
-  createExternalToolCallHandler,
-  externalToolGroups,
   registerAppServerControlRequestHandler,
 } from "./app-server-session.js";
+import { createExternalToolCallHandler, externalToolGroups } from "./external-tools.js";
 import { createCloudStatusTransportConstructor } from "./cloud-status-transport.js";
 import {
   connectMcpServers,

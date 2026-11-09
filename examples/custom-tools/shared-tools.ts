@@ -4,8 +4,10 @@
  * Registers client tools for several conversations over one connection with
  * client.registerTools(). Each conversation gets its own tool instance, so a
  * call from one conversation never touches another conversation's state.
- * The same tools stay available to turns the agent starts on its own, such as
- * background task notifications, which stream() yields with an `origin`.
+ * Sessions on those conversations inherit the registered tools and
+ * allowedTools. The same tools stay available to turns the agent starts on
+ * its own, such as background task notifications, which stream() yields with
+ * an `origin`.
  *
  * Runs on the local backend and creates one local agent.
  *
@@ -42,10 +44,8 @@ const agentId = await client.createAgent({
   memfs: false,
 });
 
-await using north = client.createSession(agentId, { allowedTools });
-await using south = client.createSession(agentId, { allowedTools });
-const northId = (await north.ready()).conversationId;
-const southId = (await south.ready()).conversationId;
+const northId = (await client.conversations.create({ agentId })).id;
+const southId = (await client.conversations.create({ agentId })).id;
 
 // One registration per tool set; both share the client's connection.
 await using northTools = await client.registerTools({
@@ -58,6 +58,10 @@ await using southTools = await client.registerTools({
   tools: [tallyTool("south")],
   allowedTools,
 });
+
+// Sessions inherit each registration's tools and allowedTools.
+await using north = client.resumeSession(northId);
+await using south = client.resumeSession(southId);
 
 for (const [name, session, amount] of [["north", north, 3], ["south", south, 5]] as const) {
   await session.send(`Add ${amount} to the tally, then tell me the total.`);

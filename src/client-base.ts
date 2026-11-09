@@ -357,6 +357,11 @@ export class LettaAgentClientBase implements AsyncDisposable {
    *
    * `options.environment` overrides the client's default execution target for
    * Letta Cloud sessions. Remote app-server URLs already select the runtime.
+   *
+   * If `client.registerTools()` covers this conversation, the session uses the
+   * registration's tools, `allowedTools` and `toolset` and follows its
+   * updates. Session `tools` are added on top, and session `allowedTools` can
+   * only narrow the registration's.
    */
   resumeSession(
     id: string,
@@ -366,21 +371,25 @@ export class LettaAgentClientBase implements AsyncDisposable {
     const sessionOptions = stripCloudExecutionOptions(options);
     validateCreateSessionOptions(sessionOptions);
     this.assertSessionBackend("resumeSession", options);
+    const inherited = this.backend === "cloud"
+      ? null
+      : this.toolRegistry?.inheritFor(id, sessionOptions) ?? null;
 
     if (this.backend === "remote") {
-      if (looksLikeConversationId(id)) {
-        return new AppServerSession(this.appServerSessionOptions(), {
-          kind: "session",
-          conversationId: id,
-          options,
-        });
-      }
-      return new AppServerSession(this.appServerSessionOptions(), {
-        kind: "session",
-        agentId: id,
-        defaultConversation: true,
-        options,
-      });
+      const session = looksLikeConversationId(id)
+        ? new AppServerSession(this.appServerSessionOptions(), {
+            kind: "session",
+            conversationId: id,
+            options,
+          })
+        : new AppServerSession(this.appServerSessionOptions(), {
+            kind: "session",
+            agentId: id,
+            defaultConversation: true,
+            options,
+          });
+      if (inherited) session.inheritTools(inherited);
+      return session;
     }
     if (this.backend === "cloud") {
       if (looksLikeConversationId(id)) {
@@ -405,7 +414,9 @@ export class LettaAgentClientBase implements AsyncDisposable {
         this.getCloudClient(),
       );
     }
-    return this.resumeLocalSession(id, options);
+    const session = this.resumeLocalSession(id, options);
+    if (inherited && session instanceof AppServerSession) session.inheritTools(inherited);
+    return session;
   }
 
   /**

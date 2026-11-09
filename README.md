@@ -123,15 +123,25 @@ await using registration = await client.registerTools({
   allowedTools: ["lookup_customer", "Read", "Grep"],
 });
 
-await registration.update({ conversations: [plannerConversationId] });
+// Sessions on a registered conversation inherit its tools and allowedTools.
+await using session = client.resumeSession(plannerConversationId);
 ```
 
 Call `registerTools()` once per tool set; each call can bind its own tool
 implementations to its own conversations. It requires the `local` or `remote`
 backend, and `allowedTools` or `toolset` require a Letta Code release that
-advertises runtime tool policies. If you also open a session on one of these
-conversations, give it the same `allowedTools`: turns the runtime starts use
-the selection of the client that sent the latest message.
+advertises runtime tool policies.
+
+A session opened with `resumeSession()` on a registered conversation uses the
+registration's `tools`, `allowedTools` and `toolset`, and picks up
+`registration.update()` while it is open, so you set them in one place. Options
+you pass to the session can add and narrow but not widen:
+
+- `tools` are added on top of the registered tools; reusing a registered name
+  is an error.
+- `allowedTools` narrows the registered allowlist. Names outside it are
+  dropped unless they are the session's own tools.
+- `toolset` is only accepted when the registration has none or the same one.
 
 Set `LETTA_API_KEY` for the cloud backend. See the [quickstart](https://docs.letta.com/agent-sdk/quickstart) for the local and self-hosted paths.
 
