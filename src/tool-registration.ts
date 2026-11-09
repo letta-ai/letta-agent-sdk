@@ -80,7 +80,10 @@ export class ToolRegistry {
       get conversations() {
         return [...entry.options.conversations];
       },
-      update: (next) => registry.apply(entry, { ...entry.options, ...next }),
+      update: async (next) => {
+        if (!registry.entries.has(entry)) throw new Error("This tool registration is closed.");
+        await registry.apply(entry, { ...entry.options, ...next });
+      },
       close: () => registry.remove(entry),
       [Symbol.asyncDispose]: () => registry.remove(entry),
     };
@@ -115,14 +118,24 @@ export class ToolRegistry {
 
     const keys = new Set(runtimes.map(runtimeKey));
     const dropped = entry.runtimes.filter((runtime) => !keys.has(runtimeKey(runtime)));
-    await publish(connection.client, [
-      group(runtimes, options),
-      ...(dropped.length > 0 ? [{ runtimes: dropped, external_tools: [] }] : []),
-    ]);
+    // Claim the conversations before publishing so concurrent calls cannot
+    // register the same conversation twice; restore the old state on failure.
+    const previous = { ...entry };
+    const isNew = !this.entries.has(entry);
     entry.options = options;
     entry.runtimes = runtimes;
     entry.call = createExternalToolCallHandler(new Map(options.tools.map((tool) => [tool.name, tool])));
     this.entries.add(entry);
+    try {
+      await publish(connection.client, [
+        group(runtimes, options, connection.toolPolicy),
+        ...(dropped.length > 0 ? [{ runtimes: dropped, external_tools: [] }] : []),
+      ]);
+    } catch (error) {
+      Object.assign(entry, previous);
+      if (isNew) this.entries.delete(entry);
+      throw error;
+    }
   }
 
   private async remove(entry: Entry): Promise<void> {
@@ -158,7 +171,7 @@ export class ToolRegistry {
         ? { requestTimeoutMs: this.options.requestTimeoutMs }
         : {}),
     }));
-    client.onExternalToolCall((request) => {
+    client.onExternalToolCall(async (request) => {
       const runtime = request.runtime;
       const entry = runtime &&
         [...this.entries].find((candidate) => candidate.runtimes.some((r) => runtimeKey(r) === runtimeKey(runtime)));
@@ -209,16 +222,20 @@ export class ToolRegistry {
 
   private async republish(): Promise<void> {
     const connection = await this.connect();
-    await publish(connection.client, [...this.entries].map((entry) => group(entry.runtimes, entry.options)));
+    await publish(
+      connection.client,
+      [...this.entries].map((entry) => group(entry.runtimes, entry.options, connection.toolPolicy)),
+    );
     this.reconnectAttempt = 0;
   }
 }
 
-function group(runtimes: RuntimeScope[], options: RegisterToolsOptions) {
+/** Older listeners may reject unknown group keys, so tool_policy is gated. */
+function group(runtimes: RuntimeScope[], options: RegisterToolsOptions, toolPolicy: boolean) {
   return {
     runtimes,
     external_tools: externalToolGroups(options.tools) ?? [],
-    tool_policy: runtimeToolPolicy(options.allowedTools, options.toolset),
+    ...(toolPolicy ? { tool_policy: runtimeToolPolicy(options.allowedTools, options.toolset) } : {}),
   };
 }
 

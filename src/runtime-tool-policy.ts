@@ -15,6 +15,8 @@ export type RuntimeToolPolicy = {
 
 /** `app_server_info` capability advertising `tool_policy` support. */
 const RUNTIME_TOOL_POLICY_CAPABILITY = "runtime_tool_policy";
+/** Bounded so a listener that cannot answer never delays session startup long. */
+const CAPABILITY_PROBE_TIMEOUT_MS = 5_000;
 
 export function clientToolsetPayload(
   toolset: ClientToolsetConfig,
@@ -51,7 +53,7 @@ export async function supportsRuntimeToolPolicy(
   client: Pick<AppServerClient, "info">,
 ): Promise<boolean> {
   try {
-    const info = await client.info();
+    const info = await client.info({ timeoutMs: CAPABILITY_PROBE_TIMEOUT_MS });
     const capabilities = info.capabilities as Record<string, unknown> | undefined;
     return capabilities?.[RUNTIME_TOOL_POLICY_CAPABILITY] === true;
   } catch {

@@ -88,6 +88,51 @@ stored configuration.
 Cloud queries require an explicit connected computer. Local and remote clients
 run the conversation through their App Server.
 
+### Turns the agent starts on its own
+
+A conversation can also run turns that no `send()` started: a background task
+finishing, a cron prompt, or another client's message. `stream()` yields those
+turns as they run, and their `result` carries an `origin` such as
+`"task_notification"` or `"cron"`. Only the result of your own turn ends the
+`stream()` pass, so existing `send()` and `stream()` loops keep working.
+
+```typescript
+for await (const message of session.stream()) {
+  if (message.type === "result" && message.origin) {
+    console.log(`${message.origin} turn finished: ${message.result}`);
+  }
+}
+```
+
+A session's `allowedTools` and `toolset` apply to those turns too, for as long
+as the session is open.
+
+### Tools for many conversations
+
+To serve client tools to many conversations at once, register them on the
+client instead of opening a session per conversation. One connection carries
+every registration, calls are routed to the tools registered for the calling
+conversation, and registrations are restored after a reconnect:
+
+```typescript
+const client = new LettaAgentClient({ backend: "local" });
+
+await using registration = await client.registerTools({
+  conversations: [plannerConversationId, reviewerConversationId],
+  tools: [lookupCustomer],
+  allowedTools: ["lookup_customer", "Read", "Grep"],
+});
+
+await registration.update({ conversations: [plannerConversationId] });
+```
+
+Call `registerTools()` once per tool set; each call can bind its own tool
+implementations to its own conversations. It requires the `local` or `remote`
+backend, and `allowedTools` or `toolset` require a Letta Code release that
+advertises runtime tool policies. If you also open a session on one of these
+conversations, give it the same `allowedTools`: turns the runtime starts use
+the selection of the client that sent the latest message.
+
 Set `LETTA_API_KEY` for the cloud backend. See the [quickstart](https://docs.letta.com/agent-sdk/quickstart) for the local and self-hosted paths.
 
 ## Where your agents run

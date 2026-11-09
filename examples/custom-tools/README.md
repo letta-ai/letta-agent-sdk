@@ -63,3 +63,25 @@ await using session = client.resumeSession(agentId, {
 - The `execute` function receives `(toolCallId, args, signal?, onUpdate?)`. The `args` are the parsed JSON arguments from the agent's tool call.
 - Return `AgentToolResult` with a `content` array of `{ type: "text" | "image", text?, data?, mimeType? }` parts.
 - Tools are registered per-session via the `tools` option. They are not persisted on the agent.
+
+## Tools for many conversations
+
+`shared-tools.ts` registers tools on the client instead of on a session, with
+`client.registerTools()`. One connection serves every registration, each call
+runs the tools registered for the conversation that made it, and
+registrations are restored after a reconnect. The tools also stay available to
+turns the agent starts on its own, such as background task notifications.
+
+```typescript
+await using registration = await client.registerTools({
+  conversations: [northConversationId],
+  tools: [tallyTool("north")],
+  allowedTools: ["add_to_tally"],
+});
+```
+
+```bash
+bun run examples/custom-tools/shared-tools.ts
+```
+
+It uses the local backend; `registerTools()` supports `local` and `remote`.
