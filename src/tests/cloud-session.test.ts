@@ -2858,6 +2858,66 @@ describe("CloudEnvironmentSession", () => {
     }
   });
 
+  test("runs a Cloud external tool request relayed on both sockets once", async () => {
+    resetFakeCloud();
+    const requests: RecordedRequest[] = [];
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock(requests),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+      environment: { connectionId: "conn-explicit" },
+    });
+    let executions = 0;
+    const session = client.resumeSession("agent-1", {
+      stateless: true,
+      tools: [
+        {
+          name: "submit",
+          label: "Submit",
+          description: "Has a side effect",
+          parameters: { type: "object", properties: {} },
+          execute: async () => {
+            executions++;
+            return { content: [{ type: "text", text: "submitted" }] };
+          },
+        },
+      ],
+    });
+
+    try {
+      await asAdvanced(session).initialize();
+      const controlSocket = FakeCloudSocket.socket("control")!;
+      const streamSocket = FakeCloudSocket.socket("stream")!;
+      const request = {
+        type: "external_tool_call_request",
+        request_id: "external-tool-both",
+        runtime: { agent_id: "agent-1", conversation_id: "default" },
+        tool_call_id: "tool-call-both",
+        tool_name: "submit",
+        input: {},
+      };
+      // The relay mirrors listener frames onto both sockets.
+      controlSocket.serverMessage(request);
+      streamSocket.serverMessage(request);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(executions).toBe(1);
+      const responses = FakeCloudSocket.allSent().filter(
+        (command) => command.type === "external_tool_call_response",
+      );
+      expect(responses).toHaveLength(1);
+      expect(responses[0]).toMatchObject({
+        request_id: "external-tool-both",
+        result: { content: [{ type: "text", text: "submitted" }] },
+      });
+    } finally {
+      session.close();
+    }
+  });
+
   test("validates managed Cloud sandbox options and environment exclusivity", () => {
     expect(() => new LettaAgentClient({
       backend: "cloud",

@@ -189,6 +189,10 @@ export class CloudStatusTransport implements AppServerSocketLike {
     if (channel === "control" && message.type === "stream_delta") {
       return false;
     }
+    // Tool requests are answered on control; the stream copy is a duplicate.
+    if (channel === "stream" && message.type === "external_tool_call_request") {
+      return false;
+    }
     if (this.isDuplicate(message)) return false;
     this.trackEventSequence(message);
     return true;
