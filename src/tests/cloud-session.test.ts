@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import type { Message } from "@letta-ai/letta-client/resources/agents/messages";
+import { buildCreateAgentRequest } from "@letta-ai/letta-code/agent-presets";
 import {
   CloudManagedSandboxExpiredError,
   LettaAgentClient,
@@ -2634,7 +2635,11 @@ describe("CloudEnvironmentSession", () => {
     });
 
     await expect(client.createAgent()).resolves.toBe("agent-created");
-    expect(requests[0]?.body).toMatchObject({ model: "letta/auto" });
+    // The SDK forwards Letta Code's default rather than choosing its own, so
+    // compare against what Letta Code builds with no model selected.
+    const { model: lettaCodeDefaultModel } = await buildCreateAgentRequest({});
+    expect(lettaCodeDefaultModel).toEqual(expect.any(String));
+    expect(requests[0]?.body).toMatchObject({ model: lettaCodeDefaultModel });
 
     await expect(client.createAgent({
       model: "   ",

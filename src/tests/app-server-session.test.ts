@@ -11,6 +11,11 @@ import type { AnyAgentTool } from "../types.js";
 describe("createAgentBody", () => {
   test("builds a generic harness agent when personality is omitted", async () => {
     const body = await createAgentBody({ model: "openai/gpt-5.2" });
+    // Letta Code owns the compaction default (letta/auto before 0.34.45, the
+    // agent's own model since), so assert the SDK passes it through.
+    const { compaction_settings } = await buildCreateAgentRequest({
+      model: "openai/gpt-5.2",
+    });
 
     expect(body).toMatchObject({
       agent_type: LETTA_CODE_AGENT_TYPE,
@@ -18,7 +23,7 @@ describe("createAgentBody", () => {
       tags: ["origin:letta-code", "git-memory-enabled"],
       initial_message_sequence: [],
       parallel_tool_calls: true,
-      compaction_settings: { model: "letta/auto" },
+      compaction_settings,
       tools: ["web_search", "fetch_webpage"],
       include_base_tools: false,
       include_base_tool_rules: false,
