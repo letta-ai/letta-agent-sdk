@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ProtocolMessage, RuntimeScope } from "../remote-session-protocol.js";
 import { RemoteTurnCoordinator } from "../remote-turn-coordinator.js";
+import type { SDKMessage } from "../types.js";
 
 describe("cooked stream message identity", () => {
   test("preserves distinct OTIDs and replay cursors on remote text slices sharing an id", async () => {
@@ -511,6 +512,44 @@ describe("remote turn terminal receipts", () => {
       success: true,
       result: "finished",
     });
+    coordinator.close();
+  });
+
+  test("keeps an active turn alive past the request timeout while it streams", async () => {
+    const coordinator = new RemoteTurnCoordinator({
+      label: "test",
+      requestTimeoutMs: 40,
+      onDeviceStatus: () => {},
+    });
+    coordinator.trackSentTurn(runtime);
+    // Tool activity every 20 ms for ~5x the timeout, then the terminal.
+    for (let i = 0; i < 10; i++) {
+      coordinator.handleProtocolMessage(
+        streamDelta(runtime, {
+          message_type: "tool_return_message",
+          run_id: "run-long",
+          tool_call_id: `tool-${i}`,
+          tool_return: "ok",
+          status: "success",
+        }),
+        runtime,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    coordinator.handleProtocolMessage(
+      { type: "turn_finished", runtime, turn_id: "turn-long", run_id: "run-long", stop_reason: "end_turn" },
+      runtime,
+    );
+
+    const messages: SDKMessage[] = [];
+    for (;;) {
+      const message = await coordinator.nextMessage();
+      if (!message) break;
+      messages.push(message);
+      if (message.type === "result") break;
+    }
+    expect(messages.some((message) => message.type === "error")).toBe(false);
+    expect(messages.at(-1)).toMatchObject({ type: "result", success: true });
     coordinator.close();
   });
 

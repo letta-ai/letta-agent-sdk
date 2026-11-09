@@ -373,7 +373,7 @@ export interface LettaCodeLocalAppServerOptions {
   harnessBackend?: "api" | "local";
   /** Optional WebSocket constructor for tests/non-standard runtimes. */
   WebSocket?: LettaCodeSocketConstructor;
-  /** Timeout for websocket protocol request/turn correlation. */
+  /** Timeout for websocket protocol requests; for a turn, how long it may go without stream activity. */
   requestTimeoutMs?: number;
   /** Whether agents created through this app-server are added to Letta Code's global pinned-agent list. */
   pinGlobalAgent?: boolean;
@@ -397,7 +397,7 @@ export interface LettaCodeRemoteClientOptions {
   authToken?: string;
   /** Optional WebSocket constructor for non-browser runtimes and tests. */
   WebSocket?: LettaCodeSocketConstructor;
-  /** Timeout for websocket protocol request/turn correlation. */
+  /** Timeout for websocket protocol requests; for a turn, how long it may go without stream activity. */
   requestTimeoutMs?: number;
   /** Whether agents created through this app-server are added to Letta Code's global pinned-agent list. */
   pinGlobalAgent?: boolean;
@@ -415,7 +415,7 @@ export interface LettaCodeCloudClientOptions {
   fetch?: typeof fetch;
   /** Optional WebSocket constructor for non-browser runtimes and tests. */
   WebSocket?: LettaCodeSocketConstructor;
-  /** Timeout for websocket protocol request/turn correlation. */
+  /** Timeout for websocket protocol requests; for a turn, how long it may go without stream activity. */
   requestTimeoutMs?: number;
   /**
    * WebSocket authentication style. Defaults to Authorization headers; set to

@@ -304,6 +304,9 @@ export class RemoteTurnCoordinator {
     if (active && isTurnEvidence) {
       active.observedTurnEvidence = true;
       if (runId) active.runIds.add(runId);
+      // The turn timeout measures silence, not total duration: a turn that is
+      // still streaming or running tools must not be failed mid-flight.
+      this.armTurnTimeout(active);
     }
 
     const sdkMessage = this.transformStreamDelta(delta);
@@ -375,12 +378,17 @@ export class RemoteTurnCoordinator {
     this.activeTurn = turn;
     turn.startedAt = Date.now();
     this._activeTurnStartedAt = turn.startedAt;
-    if (this.requestTimeoutMs !== undefined) {
-      turn.timeout = setTimeout(() => {
-        this.failTurn(turn, `Timed out waiting for ${this.label} turn`);
-      }, this.requestTimeoutMs);
-      (turn.timeout as { unref?: () => void }).unref?.();
-    }
+    this.armTurnTimeout(turn);
+  }
+
+  /** (Re)start the turn's inactivity timer, if the session has one. */
+  private armTurnTimeout(turn: TurnTracker): void {
+    if (this.requestTimeoutMs === undefined) return;
+    if (turn.timeout) clearTimeout(turn.timeout);
+    turn.timeout = setTimeout(() => {
+      this.failTurn(turn, `Timed out waiting for ${this.label} turn`);
+    }, this.requestTimeoutMs);
+    (turn.timeout as { unref?: () => void }).unref?.();
   }
 
   private activateNextTurnFromProtocol(): TurnTracker | null {
