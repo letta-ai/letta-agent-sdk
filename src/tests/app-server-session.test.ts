@@ -5,6 +5,8 @@ import {
   LETTA_CODE_AGENT_TYPE,
 } from "@letta-ai/letta-code/agent-presets";
 import { createAgentBody } from "../agent-creation.js";
+import { createExternalToolCallHandler } from "../external-tools.js";
+import type { AnyAgentTool } from "../types.js";
 
 describe("createAgentBody", () => {
   test("builds a generic harness agent when personality is omitted", async () => {
@@ -99,5 +101,50 @@ describe("createAgentBody", () => {
         systemPrompt: "You are a focused research assistant.",
       })).system,
     ).toBe("You are a focused research assistant.");
+  });
+});
+
+describe("createExternalToolCallHandler", () => {
+  test("executes a repeated request_id once and returns the same result", async () => {
+    let executions = 0;
+    const contexts: unknown[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tool = {
+      name: "submit",
+      label: "Submit",
+      description: "Has a side effect",
+      parameters: { type: "object", properties: {} },
+      execute: async (_id: string, _args: unknown, _signal: unknown, _onUpdate: unknown, context: unknown) => {
+        executions++;
+        contexts.push(context);
+        await gate;
+        return { content: [{ type: "text" as const, text: `run ${executions}` }] };
+      },
+    } as unknown as AnyAgentTool;
+    const handler = createExternalToolCallHandler(new Map([["submit", tool]]));
+    const request = {
+      type: "external_tool_call_request",
+      request_id: "external-tool-1",
+      runtime: { agent_id: "agent-1", conversation_id: "default" },
+      tool_call_id: "tool-call-1",
+      tool_name: "submit",
+      input: {},
+    } as Parameters<typeof handler>[0];
+
+    // Second delivery arrives while the first is still in flight.
+    const first = handler(request);
+    const second = handler({ ...request });
+    release();
+    const results = await Promise.all([first, second]);
+    // A late redelivery after completion reuses the finished result.
+    const third = await handler({ ...request });
+
+    expect(executions).toBe(1);
+    expect(contexts).toEqual([{ toolCallId: "tool-call-1", agentId: "agent-1", conversationId: "default" }]);
+    expect(results[1]).toEqual(results[0]);
+    expect(third).toEqual(results[0]);
   });
 });
