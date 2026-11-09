@@ -225,6 +225,18 @@ export class LettaAgentClientBase implements AsyncDisposable {
       ) {
         throw new Error("Invalid appServer.requestTimeoutMs. Expected a positive integer.");
       }
+      const computer = localOptions.appServer?.computer;
+      if (computer !== undefined) {
+        if (typeof computer?.name !== "string" || !computer.name.trim()) {
+          throw new Error("Invalid appServer.computer.name. Expected a non-empty string.");
+        }
+        if (localOptions.appServer?.harnessBackend !== "api") {
+          throw new Error('appServer.computer requires appServer.harnessBackend: "api".');
+        }
+        if (localOptions.appServer?.url !== undefined) {
+          throw new Error("appServer.computer only applies to an app-server the SDK spawns; omit appServer.url.");
+        }
+      }
       const startupTimeoutMs = localOptions.appServer?.startupTimeoutMs;
       if (
         startupTimeoutMs !== undefined &&

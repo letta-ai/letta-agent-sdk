@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildLocalAppServerArgs,
   buildLocalAppServerProcess,
+  startLocalAppServer,
 } from "../local-app-server.js";
 
 describe("buildLocalAppServerArgs", () => {
@@ -211,3 +214,41 @@ type MemoryConfinementInput = {
   launcher: string[];
   env: NodeJS.ProcessEnv;
 };
+
+describe("startLocalAppServer", () => {
+  test("registers the spawned app-server as the named computer", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sdk-computer-"));
+    const argvFile = join(dir, "argv.json");
+    const cliPath = join(dir, "fake-letta.js");
+    // Stands in for Letta Code: records its argv and reports the listen URL
+    // the way `letta server --listen` does once it is ready.
+    writeFileSync(
+      cliPath,
+      `require("node:fs").writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2)));
+console.log("Listening on ws://127.0.0.1:4567");
+setInterval(() => {}, 1000);
+`,
+    );
+
+    const server = await startLocalAppServer({
+      cliPath,
+      backend: "api",
+      computerName: "gpu-box",
+      env: { LETTA_WORKLOAD_SYSTEMD_SLICE: undefined },
+    });
+    try {
+      expect(server.url).toBe("ws://127.0.0.1:4567");
+      expect(JSON.parse(readFileSync(argvFile, "utf8"))).toEqual([
+        "--backend",
+        "api",
+        "server",
+        "--listen",
+        "ws://127.0.0.1:0",
+        "--computer-name",
+        "gpu-box",
+      ]);
+    } finally {
+      server.close();
+    }
+  });
+});

@@ -371,6 +371,13 @@ export interface LettaCodeLocalAppServerOptions {
    *   the harness to be authenticated (login or LETTA_API_KEY).
    */
   harnessBackend?: "api" | "local";
+  /**
+   * Also register the spawned app-server as a Letta Cloud computer with this
+   * name. Cloud-delivered turns (such as another agent's message) for
+   * conversations pinned to it then run here, with this client's registered
+   * tools. Requires `harnessBackend: "api"`; sessions with their own process
+   * (`env` overrides, memory confinement) do not register. */
+  computer?: { name: string };
   /** Optional WebSocket constructor for tests/non-standard runtimes. */
   WebSocket?: LettaCodeSocketConstructor;
   /** Timeout for websocket protocol requests; for a turn, how long it may go without stream activity. */
