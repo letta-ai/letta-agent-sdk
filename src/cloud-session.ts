@@ -588,7 +588,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     });
     if (this.externalTools.size > 0) {
       this.removeExternalToolHandler = client.onExternalToolCall(
-        createExternalToolCallHandler(this.externalTools),
+        createExternalToolCallHandler(this.externalTools, () => this.runtime),
       );
     }
   }

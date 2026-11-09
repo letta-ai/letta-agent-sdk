@@ -448,3 +448,63 @@ describe("sessions on a registered conversation", () => {
     }
   });
 });
+
+describe("tool call context", () => {
+  const contextTool = (seen: unknown[]): AnyAgentTool => ({
+    name: "whoami",
+    label: "whoami",
+    description: "Report the calling conversation",
+    parameters: { type: "object", properties: {} },
+    execute: async (_id, _input, _signal, _onUpdate, context) => {
+      seen.push(context);
+      return { content: [{ type: "text", text: context?.conversationId ?? "none" }] };
+    },
+  });
+  const callTool = async (socket: FakeSocket, requestId: string, runtime?: Command) => {
+    socket.reply({
+      type: "external_tool_call_request", request_id: requestId,
+      ...(runtime ? { runtime } : {}),
+      tool_call_id: `call-${requestId}`, tool_name: "whoami", input: {},
+    });
+    await tick();
+    return socket.sent.find((command) => command.request_id === requestId);
+  };
+
+  test("a session tool receives the calling agent and conversation", async () => {
+    const client = remote();
+    const seen: unknown[] = [];
+    const session = client.resumeSession("conv-a", { tools: [contextTool(seen)] });
+    await asAdvanced(session).initialize();
+    const socket = FakeSocket.instances.at(-1)!;
+
+    expect(await callTool(socket, "r1", { agent_id: "agent-1", conversation_id: "conv-a" })).toMatchObject({
+      result: { content: [{ type: "text", text: "conv-a" }] },
+    });
+    // Listeners that omit `runtime` fall back to the session's own runtime.
+    await callTool(socket, "r2");
+    expect(seen).toEqual([
+      { toolCallId: "call-r1", agentId: "agent-1", conversationId: "conv-a" },
+      { toolCallId: "call-r2", agentId: "agent-1", conversationId: "conv-a" },
+    ]);
+    session.close();
+    await client.close();
+  });
+
+  test("one registered tool instance learns which conversation called it", async () => {
+    FakeSocket.capabilities = { runtime_tool_policy: true };
+    const client = remote();
+    const seen: unknown[] = [];
+    await client.registerTools({ conversations: ["conv-a", "conv-b"], tools: [contextTool(seen)] });
+    const socket = FakeSocket.instances.find((candidate) => !candidate.url.includes("channel=stream"))!;
+
+    expect(await callTool(socket, "r1", { agent_id: "agent-1", conversation_id: "conv-b" })).toMatchObject({
+      result: { content: [{ type: "text", text: "conv-b" }] },
+    });
+    await callTool(socket, "r2", { agent_id: "agent-1", conversation_id: "conv-a" });
+    expect(seen).toEqual([
+      { toolCallId: "call-r1", agentId: "agent-1", conversationId: "conv-b" },
+      { toolCallId: "call-r2", agentId: "agent-1", conversationId: "conv-a" },
+    ]);
+    await client.close();
+  });
+});

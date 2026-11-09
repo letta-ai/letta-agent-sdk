@@ -148,6 +148,7 @@ export type {
   BootstrapStateResult,
   // Tool types
   AgentTool,
+  AgentToolCallContext,
   AgentToolResult,
   AgentToolResultContent,
   AgentToolUpdateCallback,

@@ -679,7 +679,7 @@ export class AppServerSession extends RemoteClientSessionCore {
 
     if (this.externalTools.size > 0 || this.inheritedTools) {
       this.removeExternalToolHandler = client.onExternalToolCall(
-        createExternalToolCallHandler(this.externalTools),
+        createExternalToolCallHandler(this.externalTools, () => this.runtime),
       );
     }
 

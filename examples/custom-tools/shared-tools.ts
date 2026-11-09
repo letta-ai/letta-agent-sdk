@@ -1,9 +1,10 @@
 /**
  * Shared Tools Example
  *
- * Registers client tools for several conversations over one connection with
- * client.registerTools(). Each conversation gets its own tool instance, so a
- * call from one conversation never touches another conversation's state.
+ * Registers one set of client tools for several conversations over one
+ * connection with client.registerTools(). A single tool instance serves every
+ * conversation: execute() receives a context naming the calling conversation,
+ * so the tool keeps each conversation's state apart by `conversationId`.
  * Sessions on those conversations inherit the registered tools and
  * allowedTools. The same tools stay available to turns the agent starts on
  * its own, such as background task notifications, which stream() yields with
@@ -17,24 +18,25 @@
 
 import { LettaAgentClient, type AnyAgentTool } from "../../src/index.js";
 
-/** A tally counter whose state belongs to one conversation. */
-function tallyTool(label: string): AnyAgentTool {
-  let total = 0;
-  return {
-    name: "add_to_tally",
-    label: "Add to tally",
-    description: "Add a number to this conversation's running tally and return the new total.",
-    parameters: {
-      type: "object",
-      properties: { amount: { type: "number", description: "Number to add" } },
-      required: ["amount"],
-    },
-    execute: async (_toolCallId, args) => {
-      total += (args as { amount: number }).amount;
-      return { content: [{ type: "text", text: `${label} tally: ${total}` }] };
-    },
-  };
-}
+/** One tally per conversation, kept apart by the calling conversation's id. */
+const totals = new Map<string, number>();
+
+const addToTally: AnyAgentTool = {
+  name: "add_to_tally",
+  label: "Add to tally",
+  description: "Add a number to this conversation's running tally and return the new total.",
+  parameters: {
+    type: "object",
+    properties: { amount: { type: "number", description: "Number to add" } },
+    required: ["amount"],
+  },
+  execute: async (_toolCallId, args, _signal, _onUpdate, context) => {
+    if (!context) throw new Error("add_to_tally needs the calling conversation");
+    const total = (totals.get(context.conversationId) ?? 0) + (args as { amount: number }).amount;
+    totals.set(context.conversationId, total);
+    return { content: [{ type: "text", text: `tally: ${total}` }] };
+  },
+};
 
 const allowedTools = ["add_to_tally"];
 
@@ -47,19 +49,14 @@ const agentId = await client.createAgent({
 const northId = (await client.conversations.create({ agentId })).id;
 const southId = (await client.conversations.create({ agentId })).id;
 
-// One registration per tool set; both share the client's connection.
-await using northTools = await client.registerTools({
-  conversations: [northId],
-  tools: [tallyTool("north")],
-  allowedTools,
-});
-await using southTools = await client.registerTools({
-  conversations: [southId],
-  tools: [tallyTool("south")],
+// One registration covers both conversations on the client's connection.
+await using tools = await client.registerTools({
+  conversations: [northId, southId],
+  tools: [addToTally],
   allowedTools,
 });
 
-// Sessions inherit each registration's tools and allowedTools.
+// Sessions inherit the registration's tools and allowedTools.
 await using north = client.resumeSession(northId);
 await using south = client.resumeSession(southId);
 

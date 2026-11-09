@@ -127,6 +127,20 @@ await using registration = await client.registerTools({
 await using session = client.resumeSession(plannerConversationId);
 ```
 
+A tool's `execute` receives a context as its last argument, `{ toolCallId,
+agentId, conversationId }`, so one tool instance can serve every conversation
+and keep per-conversation state keyed on `conversationId`:
+
+```typescript
+const lookupCustomer: AnyAgentTool = {
+  // name, label, description, parameters ...
+  execute: async (toolCallId, args, signal, onUpdate, context) => {
+    const notes = notesFor(context?.conversationId);
+    // ...
+  },
+};
+```
+
 Call `registerTools()` once per tool set; each call can bind its own tool
 implementations to its own conversations. It requires the `local` or `remote`
 backend, and `allowedTools` or `toolset` require a Letta Code release that
