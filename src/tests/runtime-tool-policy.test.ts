@@ -220,6 +220,33 @@ describe("runtime-started turns", () => {
       session.close();
     }
   });
+
+  test("an item added and dequeued in one update takes its origin from the removal", async () => {
+    const session = remote().resumeSession("agent-1");
+    const runtime = { agent_id: "agent-1", conversation_id: "default" };
+    try {
+      await asAdvanced(session).initialize();
+      const seen: SDKMessage[] = [];
+      const consumed = (async () => {
+        for await (const message of session.stream()) seen.push(message);
+      })();
+
+      FakeSocket.push({
+        type: "update_queue", runtime, queue: [],
+        removed: [{ client_message_id: "cm-idle", disposition: "dequeued", source: "task_notification" }],
+      });
+      pushTurn(runtime, "run-idle", "background finished");
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      expect(seen.find((message) => message.type === "result")).toMatchObject({
+        type: "result", success: true, origin: "task_notification", runIds: ["run-idle"],
+      });
+      session.close();
+      await consumed;
+    } finally {
+      session.close();
+    }
+  });
 });
 
 describe("client.registerTools", () => {

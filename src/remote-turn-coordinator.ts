@@ -169,12 +169,17 @@ export class RemoteTurnCoordinator {
       }
     }
     for (const removed of Array.isArray(message.removed) ? message.removed : []) {
-      const { client_message_id: id, disposition } =
-        removed as { client_message_id?: unknown; disposition?: unknown };
+      const { client_message_id: id, disposition, source } =
+        removed as { client_message_id?: unknown; disposition?: unknown; source?: unknown };
       if (disposition !== "dequeued" || typeof id !== "string") continue;
       const own = [this.activeTurn, ...this.pendingTurns]
         .some((turn) => turn?.clientMessageId === id);
-      if (!own) this.nextServerOrigin = this.queueOrigins.get(id) ?? "unknown";
+      if (own) continue;
+      // Listeners that send `source` on removals cover items added and dequeued
+      // in the same update; older ones only expose it on the queued item.
+      this.nextServerOrigin = typeof source === "string" && TURN_ORIGINS.has(source)
+        ? (source as SDKTurnOrigin)
+        : this.queueOrigins.get(id) ?? "unknown";
     }
   }
 
