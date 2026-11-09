@@ -377,7 +377,7 @@ export interface LettaCodeLocalAppServerOptions {
    * conversations pinned to it then run here, with this client's registered
    * tools. Requires `harnessBackend: "api"`; sessions with their own process
    * (`env` overrides, memory confinement) do not register. */
-  computer?: { name: string };
+  registerComputer?: { name: string };
   /** Optional WebSocket constructor for tests/non-standard runtimes. */
   WebSocket?: LettaCodeSocketConstructor;
   /** Timeout for websocket protocol requests; for a turn, how long it may go without stream activity. */

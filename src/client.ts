@@ -24,7 +24,7 @@ export class LettaAgentClient extends LettaAgentClientBase {
       listen: options?.listen,
       backend: options?.harnessBackend ?? "local",
       startupTimeoutMs: options?.startupTimeoutMs,
-      computerName: options?.computer?.name,
+      computerName: options?.registerComputer?.name,
     });
   }
 
