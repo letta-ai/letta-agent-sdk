@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { LettaAgentClient, type AnyAgentTool, type SDKMessage } from "../index.js";
 import { asAdvanced } from "./advanced-session.js";
 
@@ -329,6 +332,54 @@ describe("client.registerTools", () => {
       [{ agent_id: "agent-1", conversation_id: "conv-b" }],
     ]);
     await client.close();
+  });
+
+  test("backend cloud with registerComputer runs tools on a server that registers this machine", async () => {
+    FakeSocket.capabilities = { runtime_tool_policy: true };
+    const dir = mkdtempSync(join(tmpdir(), "sdk-register-computer-"));
+    const spawned = join(dir, "spawned.json");
+    const cli = join(dir, "fake-letta.js");
+    // Stands in for Letta Code: records how it was started, then reports the
+    // listen URL the way `letta server --listen` does once it is ready.
+    writeFileSync(cli, `require("node:fs").writeFileSync(${JSON.stringify(spawned)}, JSON.stringify({
+  argv: process.argv.slice(2), apiKey: process.env.LETTA_API_KEY,
+}));
+console.log("Listening on ws://127.0.0.1:4567");
+setInterval(() => {}, 1000);
+`);
+    const saved = { cli: process.env.LETTA_CLI_PATH, slice: process.env.LETTA_WORKLOAD_SYSTEMD_SLICE };
+    process.env.LETTA_CLI_PATH = cli;
+    delete process.env.LETTA_WORKLOAD_SYSTEMD_SLICE;
+    const cloud = (options: { computer?: string; registerComputer?: { name: string } }) =>
+      new LettaAgentClient({
+        backend: "cloud", apiKey: "sk-test", WebSocket: FakeSocket as unknown as typeof WebSocket,
+        ...options,
+      });
+
+    const client = cloud({ registerComputer: { name: "gpu-box" } });
+    try {
+      await client.registerTools({ conversations: ["conv-a"], tools: [textTool("submit", () => "ok")] });
+      expect(JSON.parse(readFileSync(spawned, "utf8"))).toEqual({
+        argv: ["--backend", "api", "server", "--listen", "ws://127.0.0.1:0", "--computer-name", "gpu-box"],
+        apiKey: "sk-test",
+      });
+      expect(FakeSocket.instances[0]!.url).toStartWith("ws://127.0.0.1:4567");
+      expect(sentOfType("runtime_external_tools_update")).toHaveLength(1);
+    } finally {
+      await client.close();
+      if (saved.cli === undefined) delete process.env.LETTA_CLI_PATH;
+      else process.env.LETTA_CLI_PATH = saved.cli;
+      if (saved.slice !== undefined) process.env.LETTA_WORKLOAD_SYSTEMD_SLICE = saved.slice;
+    }
+
+    for (const options of [{}, { computer: "other-box" }]) {
+      const other = cloud(options);
+      await expect(other.registerTools({ conversations: ["conv-a"], tools: [] }))
+        .rejects.toThrow('backend: "cloud" with registerComputer');
+      await other.close();
+    }
+    expect(() => cloud({ computer: "other-box", registerComputer: { name: "gpu-box" } }))
+      .toThrow("cannot specify both computer and registerComputer");
   });
 
   test("rejects allowedTools when the listener cannot apply a tool policy", async () => {

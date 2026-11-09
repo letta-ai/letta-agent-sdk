@@ -93,6 +93,23 @@ function stripCloudExecutionOptions(
   return sessionOptions;
 }
 
+const REGISTERED_COMPUTER_READY_TIMEOUT_MS = 30_000;
+const REGISTERED_COMPUTER_POLL_INTERVAL_MS = 500;
+
+type CloudSessionMode = ConstructorParameters<typeof CloudEnvironmentSession>[1];
+
+function registeredComputerName(
+  options: LettaCodeClientOptions,
+): string | undefined {
+  return options.backend === "cloud" ? options.registerComputer?.name : undefined;
+}
+
+function isRegisteredComputerPending(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.startsWith("Computer not found") ||
+    message.startsWith("Computer is offline");
+}
+
 function hasRepositoryResources(options: LettaCodeClientSessionOptions): boolean {
   return options.resources !== undefined && options.resources.length > 0;
 }
@@ -150,7 +167,8 @@ type OneShotSession = LettaCodeSession & {
  * protocol.
  * `remote` connects to a user-managed Letta Code app-server websocket endpoint.
  * `cloud` uses agents hosted on Letta Cloud, with an explicit remote
- * environment or SDK-managed sandbox.
+ * environment or SDK-managed sandbox. With `registerComputer`, the SDK also
+ * starts a local app-server that registers this machine as that computer.
  */
 export class LettaAgentClientBase implements AsyncDisposable {
   readonly backend: LettaCodeBackend;
@@ -179,7 +197,9 @@ export class LettaAgentClientBase implements AsyncDisposable {
     }
 
     this.backend = backend;
-    this.computer = getOptionsComputer(options);
+    const registeredName = registeredComputerName(options);
+    this.computer = getOptionsComputer(options) ??
+      (registeredName !== undefined ? { name: registeredName } : undefined);
     this.environment = this.computer;
     this.options = options;
     this.agents = createAgentsClient(
@@ -224,18 +244,6 @@ export class LettaAgentClientBase implements AsyncDisposable {
         (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs <= 0)
       ) {
         throw new Error("Invalid appServer.requestTimeoutMs. Expected a positive integer.");
-      }
-      const registerComputer = localOptions.appServer?.registerComputer;
-      if (registerComputer !== undefined) {
-        if (typeof registerComputer?.name !== "string" || !registerComputer.name.trim()) {
-          throw new Error("Invalid appServer.registerComputer.name. Expected a non-empty string.");
-        }
-        if (localOptions.appServer?.harnessBackend !== "api") {
-          throw new Error('appServer.registerComputer requires appServer.harnessBackend: "api".');
-        }
-        if (localOptions.appServer?.url !== undefined) {
-          throw new Error("appServer.registerComputer only applies to an app-server the SDK spawns; omit appServer.url.");
-        }
       }
       const startupTimeoutMs = localOptions.appServer?.startupTimeoutMs;
       if (
@@ -350,16 +358,12 @@ export class LettaAgentClientBase implements AsyncDisposable {
       });
     }
     if (this.backend === "cloud") {
-      return new CloudEnvironmentSession(
-        this.cloudOptions(),
-        {
-          kind: "session",
-          agentId,
-          newConversation: true,
-          options,
-        },
-        this.getCloudClient(),
-      );
+      return this.createCloudSession({
+        kind: "session",
+        agentId,
+        newConversation: true,
+        options,
+      });
     }
     return this.createLocalSession(agentId, options);
   }
@@ -404,26 +408,10 @@ export class LettaAgentClientBase implements AsyncDisposable {
       return session;
     }
     if (this.backend === "cloud") {
-      if (looksLikeConversationId(id)) {
-        return new CloudEnvironmentSession(
-          this.cloudOptions(),
-          {
-            kind: "session",
-            conversationId: id,
-            options,
-          },
-          this.getCloudClient(),
-        );
-      }
-      return new CloudEnvironmentSession(
-        this.cloudOptions(),
-        {
-          kind: "session",
-          agentId: id,
-          defaultConversation: true,
-          options,
-        },
-        this.getCloudClient(),
+      return this.createCloudSession(
+        looksLikeConversationId(id)
+          ? { kind: "session", conversationId: id, options }
+          : { kind: "session", agentId: id, defaultConversation: true, options },
       );
     }
     const session = this.resumeLocalSession(id, options);
@@ -540,15 +528,11 @@ export class LettaAgentClientBase implements AsyncDisposable {
           "Cloud query conversation response did not include a conversation id.",
         );
       }
-      return new CloudEnvironmentSession(
-        this.cloudOptions(),
-        {
-          kind: "conversation",
-          conversationId: (conversation as { id: string }).id,
-          options: sessionOptions,
-        },
-        this.getCloudClient(),
-      );
+      return this.createCloudSession({
+        kind: "conversation",
+        conversationId: (conversation as { id: string }).id,
+        options: sessionOptions,
+      });
     }
     return this.createLocalQuerySession(options, sessionOptions);
   }
@@ -644,6 +628,48 @@ export class LettaAgentClientBase implements AsyncDisposable {
     throw new Error(
       `LettaAgentClient backend '${this.backend}' is not implemented yet. ${action} currently supports backend 'local' only.`,
     );
+  }
+
+  /**
+   * Build a Cloud session. Sessions that run on the computer this client
+   * registers start the local app-server first and wait for it to come online.
+   */
+  private createCloudSession(mode: CloudSessionMode): CloudEnvironmentSession {
+    const name = registeredComputerName(this.options);
+    const sessionComputer = mode.options.computer ?? mode.options.environment;
+    return new CloudEnvironmentSession(
+      this.cloudOptions(),
+      mode,
+      this.getCloudClient(),
+      name !== undefined && sessionComputer === undefined
+        ? () => this.connectRegisteredComputer(name)
+        : undefined,
+    );
+  }
+
+  private async connectRegisteredComputer(
+    name: string,
+  ): Promise<{ connectionId: string }> {
+    await this.startRegisteredComputer();
+    const deadline = Date.now() + REGISTERED_COMPUTER_READY_TIMEOUT_MS;
+    while (true) {
+      try {
+        const resolved = await this.getComputersClient().resolve({ name });
+        return { connectionId: resolved.connectionId };
+      } catch (error) {
+        if (!isRegisteredComputerPending(error) || Date.now() >= deadline) {
+          throw error;
+        }
+        await new Promise((resolve) =>
+          setTimeout(resolve, REGISTERED_COMPUTER_POLL_INTERVAL_MS),
+        );
+      }
+    }
+  }
+
+  /** Start the app-server that registers this machine; overridden by the Node client. */
+  protected startRegisteredComputer(): Promise<void> {
+    return Promise.reject(this.localBackendUnavailableError());
   }
 
   protected createLocalAgent(_options: CreateAgentOptions): Promise<string> {
@@ -777,9 +803,9 @@ export class LettaAgentClientBase implements AsyncDisposable {
    */
   registerTools(options: RegisterToolsOptions): Promise<ToolRegistration> {
     this.assertOpen();
-    if (this.backend === "cloud") {
+    if (this.backend === "cloud" && registeredComputerName(this.options) === undefined) {
       return Promise.reject(new Error(
-        'registerTools() requires backend: "local" or "remote". Cloud sessions register tools through the tools session option.',
+        'registerTools() requires backend: "local" or "remote", or backend: "cloud" with registerComputer. Other Cloud sessions register tools through the tools session option.',
       ));
     }
     this.toolRegistry ??= new ToolRegistry(
@@ -788,7 +814,10 @@ export class LettaAgentClientBase implements AsyncDisposable {
     return this.toolRegistry.register(options);
   }
 
-  /** How the local backend reaches its App Server; overridden by the Node client. */
+  /**
+   * How the local backend, or a Cloud client's registered computer, reaches
+   * its App Server; overridden by the Node client.
+   */
   protected localAppServerConnection(): AppServerSessionOptions {
     throw this.localBackendUnavailableError();
   }
@@ -823,6 +852,10 @@ export class LettaAgentClientBase implements AsyncDisposable {
     if (this.backend !== "cloud") {
       throw new Error('Letta Cloud options requested for non-"cloud" backend.');
     }
-    return this.options as LettaCodeCloudClientOptions;
+    const options = this.options as LettaCodeCloudClientOptions;
+    // Sessions run on the registered computer unless they select another one.
+    return options.registerComputer !== undefined
+      ? { ...options, computer: { name: options.registerComputer.name } }
+      : options;
   }
 }

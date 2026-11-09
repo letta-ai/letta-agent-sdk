@@ -1,5 +1,6 @@
 import { LettaAgentClientBase } from "./client-base.js";
 import { AppServerManagementTransport } from "./app-server-management.js";
+import { getCloudApiKey } from "./cloud-client.js";
 import type { ManagementTransport } from "./management.js";
 import { createLocalAppServerSession } from "./local-app-server-session.js";
 import { SharedLocalAppServer } from "./shared-local-app-server.js";
@@ -8,6 +9,7 @@ import type { SkillNodeSupport } from "./skill-loading.js";
 import { loadSkillDirectory, pushSkillSupportFiles } from "./skill-node.js";
 import type {
   CreateAgentOptions,
+  LettaCodeCloudClientOptions,
   LettaCodeClientSessionOptions,
   LettaCodeLocalClientOptions,
   LettaCodeSession,
@@ -19,12 +21,16 @@ export class LettaAgentClient extends LettaAgentClientBase {
 
   private sharedLocalServer(): SharedLocalAppServer {
     if (this.localClosePromise) throw new Error("LettaAgentClient is closed");
+    if (this.backend === "cloud") {
+      return this.localServer ??= registeredComputerServer(
+        this.options as LettaCodeCloudClientOptions,
+      );
+    }
     const options = (this.options as LettaCodeLocalClientOptions).appServer;
     return this.localServer ??= new SharedLocalAppServer({
       listen: options?.listen,
       backend: options?.harnessBackend ?? "local",
       startupTimeoutMs: options?.startupTimeoutMs,
-      computerName: options?.registerComputer?.name,
     });
   }
 
@@ -38,6 +44,10 @@ export class LettaAgentClient extends LettaAgentClientBase {
     return this.localClosePromise;
   }
 
+  protected override async startRegisteredComputer(): Promise<void> {
+    await this.sharedLocalServer().connect();
+  }
+
   protected override skillNodeSupport(): SkillNodeSupport {
     return { loadSkillDirectory, pushSkillSupportFiles };
   }
@@ -47,12 +57,17 @@ export class LettaAgentClient extends LettaAgentClientBase {
   }
 
   protected override localAppServerConnection() {
-    const localOptions = (
-      this.options as LettaCodeLocalClientOptions
-    ).appServer;
+    // A Cloud client's registered computer is always an SDK-spawned server.
+    const localOptions = this.backend === "cloud"
+      ? {
+          WebSocket: (this.options as LettaCodeCloudClientOptions).WebSocket,
+          requestTimeoutMs: (this.options as LettaCodeCloudClientOptions).requestTimeoutMs,
+        }
+      : (this.options as LettaCodeLocalClientOptions).appServer;
     const sharedServer = this.sharedLocalServer();
     return {
-      ...(localOptions?.url !== undefined
+      ...(localOptions !== undefined && "url" in localOptions &&
+        localOptions.url !== undefined
         ? { url: localOptions.url }
         : {
             connect: () => sharedServer.connect(),
@@ -168,6 +183,31 @@ export class LettaAgentClient extends LettaAgentClientBase {
       this.sharedLocalServer(),
     );
   }
+}
+
+/**
+ * The app-server behind `backend: "cloud", registerComputer`: it runs against
+ * Letta Cloud with this client's credentials and registers this machine under
+ * the given name.
+ */
+function registeredComputerServer(
+  options: LettaCodeCloudClientOptions,
+): SharedLocalAppServer {
+  const name = options.registerComputer?.name;
+  if (name === undefined) {
+    throw new Error("A local app-server is only available with backend: \"local\" or registerComputer.");
+  }
+  const apiKey = getCloudApiKey(options);
+  return new SharedLocalAppServer({
+    backend: "api",
+    computerName: name,
+    env: {
+      ...(apiKey !== undefined ? { LETTA_API_KEY: apiKey } : {}),
+      ...(options.apiBaseUrl !== undefined
+        ? { LETTA_BASE_URL: options.apiBaseUrl }
+        : {}),
+    },
+  });
 }
 
 function looksLikeConversationId(id: string): boolean {

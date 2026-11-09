@@ -371,13 +371,6 @@ export interface LettaCodeLocalAppServerOptions {
    *   the harness to be authenticated (login or LETTA_API_KEY).
    */
   harnessBackend?: "api" | "local";
-  /**
-   * Also register the spawned app-server as a Letta Cloud computer with this
-   * name. Cloud-delivered turns (such as another agent's message) for
-   * conversations pinned to it then run here, with this client's registered
-   * tools. Requires `harnessBackend: "api"`; sessions with their own process
-   * (`env` overrides, memory confinement) do not register. */
-  registerComputer?: { name: string };
   /** Optional WebSocket constructor for tests/non-standard runtimes. */
   WebSocket?: LettaCodeSocketConstructor;
   /** Timeout for websocket protocol requests; for a turn, how long it may go without stream activity. */
@@ -440,6 +433,13 @@ export interface LettaCodeCloudClientOptions {
   environment?: LettaCodeEnvironment;
   /** Options for SDK-managed sandboxes when no computer is selected. */
   sandbox?: LettaCodeCloudSandboxOptions;
+  /**
+   * Register this machine as a computer with this name and run the client's
+   * sessions on it. The SDK starts a Letta Code app-server here, so tools from
+   * `client.registerTools()` run in this process, including on turns Letta
+   * Cloud delivers to this computer. Node.js only; excludes `computer`/`sandbox`.
+   */
+  registerComputer?: { name: string };
 }
 
 export type LettaCodeClientOptions =
