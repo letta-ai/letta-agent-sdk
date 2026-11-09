@@ -64,7 +64,8 @@ export async function* streamStructuredTurns(config: {
       // External SDK tools have no terminal rule; stop after their successful return.
       void config.abort().catch(() => undefined);
     }
-    if (msg.type !== "result") {
+    // Results of turns the session did not send never settle its own turn.
+    if (msg.type !== "result" || msg.origin !== undefined) {
       yield msg;
       continue;
     }

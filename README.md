@@ -88,6 +88,75 @@ stored configuration.
 Cloud queries require an explicit connected computer. Local and remote clients
 run the conversation through their App Server.
 
+### Turns the agent starts on its own
+
+A conversation can also run turns that no `send()` started: a background task
+finishing, a cron prompt, or another client's message. `stream()` yields those
+turns as they run, and their `result` carries an `origin` such as
+`"task_notification"` or `"cron"`. Only the result of your own turn ends the
+`stream()` pass, so existing `send()` and `stream()` loops keep working.
+
+```typescript
+for await (const message of session.stream()) {
+  if (message.type === "result" && message.origin) {
+    console.log(`${message.origin} turn finished: ${message.result}`);
+  }
+}
+```
+
+A session's `allowedTools` and `toolset` apply to those turns too, for as long
+as the session is open.
+
+### Tools for many conversations
+
+To serve client tools to many conversations at once, register them on the
+client instead of opening a session per conversation. One connection carries
+every registration, calls are routed to the tools registered for the calling
+conversation, and registrations are restored after a reconnect:
+
+```typescript
+const client = new LettaAgentClient({ backend: "local" });
+
+await using registration = await client.registerTools({
+  conversations: [plannerConversationId, reviewerConversationId],
+  tools: [lookupCustomer],
+  allowedTools: ["lookup_customer", "Read", "Grep"],
+});
+
+// Sessions on a registered conversation inherit its tools and allowedTools.
+await using session = client.resumeSession(plannerConversationId);
+```
+
+A tool's `execute` receives a context as its last argument, `{ toolCallId,
+agentId, conversationId }`, so one tool instance can serve every conversation
+and keep per-conversation state keyed on `conversationId`:
+
+```typescript
+const lookupCustomer: AnyAgentTool = {
+  // name, label, description, parameters ...
+  execute: async (toolCallId, args, signal, onUpdate, context) => {
+    const notes = notesFor(context?.conversationId);
+    // ...
+  },
+};
+```
+
+Call `registerTools()` once per tool set; each call can bind its own tool
+implementations to its own conversations. It requires the `local` or `remote`
+backend, and `allowedTools` or `toolset` require a Letta Code release that
+advertises runtime tool policies.
+
+A session opened with `resumeSession()` on a registered conversation uses the
+registration's `tools`, `allowedTools` and `toolset`, and picks up
+`registration.update()` while it is open, so you set them in one place. Options
+you pass to the session can add and narrow but not widen:
+
+- `tools` are added on top of the registered tools; reusing a registered name
+  is an error.
+- `allowedTools` narrows the registered allowlist. Names outside it are
+  dropped unless they are the session's own tools.
+- `toolset` is only accepted when the registration has none or the same one.
+
 Set `LETTA_API_KEY` for the cloud backend. See the [quickstart](https://docs.letta.com/agent-sdk/quickstart) for the local and self-hosted paths.
 
 ## Where your agents run

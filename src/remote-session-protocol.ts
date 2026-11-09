@@ -10,6 +10,7 @@ import type {
   RecoverPendingApprovalsResult,
   ReasoningEffort,
   SDKErrorCode,
+  SDKTurnOrigin,
   OutputFormat,
   SDKQueueItem,
   SendMessage,
@@ -151,6 +152,8 @@ export type TurnTracker = {
   /** Caller-supplied OTID for this turn's user message, when one was provided. */
   otid?: string;
   outputFormat?: OutputFormat;
+  /** Set when the runtime started this turn rather than the session. */
+  origin?: SDKTurnOrigin;
   queuedAt: number;
   startedAt: number;
   assistantText: string;

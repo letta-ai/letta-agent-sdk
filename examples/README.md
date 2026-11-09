@@ -11,6 +11,7 @@ Run `bun install` from the repository root before you start. The examples import
 | [`stateless-conversations/`](./stateless-conversations) | Streaming, structured results, and independent one-turn questions without an agent | Local App Server + API backend | Creates ordinary conversations; does not create agents |
 | [`sdk-tour.ts`](./sdk-tour.ts) | Agent creation, streaming, conversations, tools, permissions, and MemFS | Local | Creates local agents and can run tools |
 | [`custom-tools/`](./custom-tools) | Tools that execute in your SDK process for a Cloud agent | Cloud | Creates a Cloud agent and runs local functions |
+| [`custom-tools/shared-tools.ts`](./custom-tools/shared-tools.ts) | One set of client tools for many conversations over one connection with `registerTools()` | Local | Creates a local agent and two conversations |
 | [`dungeon-master/`](./dungeon-master) | One persistent agent with visible files and resumable state | Local | Writes a rulebook, campaign files, and `state.json` |
 | [`web-chat/`](./web-chat) | Server-Sent Events, browser streaming, and repository-backed memory | Local or Cloud | Starts an HTTP server and writes `state.json` |
 | [`focus-group/`](./focus-group) | Several persistent agents coordinated by TypeScript | Local | Creates agents and writes `state.json` |

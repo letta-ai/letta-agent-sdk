@@ -3,9 +3,11 @@ import type {
   SDKLoopStatusMessage,
   SDKMessage,
   OutputFormat,
+  SDKQueueItem,
   SDKQueueUpdateMessage,
   SDKResultMessage,
   SDKStreamEventPayload,
+  SDKTurnOrigin,
   SessionDeviceStatus,
 } from "./types.js";
 import {
@@ -46,6 +48,9 @@ type RemoteTurnCoordinatorConfig = {
 
 const MAX_RECENTLY_SETTLED_RUN_IDS = 256;
 const TRAILING_USAGE_GRACE_MS = 100;
+const TURN_ORIGINS = new Set<string>([
+  "task_notification", "cron", "subagent", "system", "channel", "user",
+]);
 
 /**
  * Owns the portable session's turn correlation and stream queue.
@@ -64,6 +69,9 @@ export class RemoteTurnCoordinator {
   private activeTurn: TurnTracker | null = null;
   private pendingTurns: TurnTracker[] = [];
   private settledRunIds = new Set<string>();
+  /** Queue sources by client message id, to tag turns the session did not send. */
+  private queueOrigins = new Map<string, SDKTurnOrigin>();
+  private nextServerOrigin: SDKTurnOrigin = "unknown";
   private nextTurnId = 0;
   private messageCounter = 0;
   private clientMessageCounter = 0;
@@ -81,8 +89,10 @@ export class RemoteTurnCoordinator {
     return this._activeTurnStartedAt;
   }
 
+  /** Whether a turn this session sent is active or queued. */
   hasInFlightTurn(): boolean {
-    return this.activeTurn !== null || this.pendingTurns.length > 0;
+    return (this.activeTurn !== null && this.activeTurn.origin === undefined) ||
+      this.pendingTurns.length > 0;
   }
 
   /**
@@ -96,13 +106,29 @@ export class RemoteTurnCoordinator {
     outputFormat?: OutputFormat,
   ): TurnTracker {
     const otid = normalizeCallerOtid(callerOtid);
-    const turn: TurnTracker = {
-      id: ++this.nextTurnId,
-      runtime,
+    const turn = this.newTracker(runtime, {
       ...(otid !== undefined ? { otid } : {}),
       ...(outputFormat !== undefined ? { outputFormat } : {}),
       clientMessageId:
         otid ?? `sdk-message-${Date.now()}-${++this.clientMessageCounter}`,
+    });
+
+    if (this.activeTurn) {
+      this.pendingTurns.push(turn);
+    } else {
+      this.activateTurn(turn);
+    }
+    return turn;
+  }
+
+  private newTracker(
+    runtime: RuntimeScope,
+    identity: Pick<TurnTracker, "clientMessageId" | "otid" | "outputFormat" | "origin">,
+  ): TurnTracker {
+    return {
+      id: ++this.nextTurnId,
+      runtime,
+      ...identity,
       queuedAt: Date.now(),
       startedAt: 0,
       assistantText: "",
@@ -119,13 +145,42 @@ export class RemoteTurnCoordinator {
       abortRequested: false,
       timeout: null,
     };
+  }
 
-    if (this.activeTurn) {
-      this.pendingTurns.push(turn);
-    } else {
-      this.activateTurn(turn);
-    }
+  /**
+   * A run started while the session had no turn of its own in flight, such as
+   * a task notification or cron prompt. Track it like a sent turn so stream()
+   * yields its events and a result tagged with its origin.
+   */
+  private startServerTurn(runtime: RuntimeScope): TurnTracker {
+    const turn = this.newTracker(runtime, { clientMessageId: "", origin: this.nextServerOrigin });
+    this.nextServerOrigin = "unknown";
+    this.activateTurn(turn);
     return turn;
+  }
+
+  private observeQueueOrigins(message: ProtocolMessage, queue: SDKQueueItem[]): void {
+    for (const item of queue) {
+      if (!item.clientMessageId) continue;
+      this.queueOrigins.set(item.clientMessageId,
+        TURN_ORIGINS.has(item.source) ? (item.source as SDKTurnOrigin) : "unknown");
+      if (this.queueOrigins.size > MAX_RECENTLY_SETTLED_RUN_IDS) {
+        this.queueOrigins.delete(this.queueOrigins.keys().next().value!);
+      }
+    }
+    for (const removed of Array.isArray(message.removed) ? message.removed : []) {
+      const { client_message_id: id, disposition, source } =
+        removed as { client_message_id?: unknown; disposition?: unknown; source?: unknown };
+      if (disposition !== "dequeued" || typeof id !== "string") continue;
+      const own = [this.activeTurn, ...this.pendingTurns]
+        .some((turn) => turn?.clientMessageId === id);
+      if (own) continue;
+      // Listeners that send `source` on removals cover items added and dequeued
+      // in the same update; older ones only expose it on the queued item.
+      this.nextServerOrigin = typeof source === "string" && TURN_ORIGINS.has(source)
+        ? (source as SDKTurnOrigin)
+        : this.queueOrigins.get(id) ?? "unknown";
+    }
   }
 
   removeTrackedTurn(turn: TurnTracker): void {
@@ -137,6 +192,13 @@ export class RemoteTurnCoordinator {
     }
     const index = this.pendingTurns.indexOf(turn);
     if (index !== -1) this.pendingTurns.splice(index, 1);
+  }
+
+  /** A dropped transport cannot finish a turn the runtime started; end it here. */
+  failServerTurn(detail: string): void {
+    const active = this.activeTurn;
+    if (active?.origin === undefined) return;
+    this.failTurn(active, detail, { errorCode: "stream_closed", recoverable: true });
   }
 
   markAbortRequested(): void {
@@ -158,6 +220,7 @@ export class RemoteTurnCoordinator {
         type: "queue_update",
         queue: queueItems(message),
       };
+      this.observeQueueOrigins(message, sdkMessage.queue);
       this.enqueue(sdkMessage);
       return;
     }
@@ -219,12 +282,6 @@ export class RemoteTurnCoordinator {
     const delta = streamDeltaRecord(message);
     if (!delta) return;
     const messageType = streamDeltaMessageType(delta);
-    // Terminal metadata can trail the result it belongs to. It must never
-    // activate a queued turn or become evidence for that next turn.
-    const active =
-      messageType === "usage_statistics" || messageType === "stop_reason"
-        ? this.activeTurn
-        : this.activateNextTurnFromProtocol();
     const runId = streamDeltaRunId(delta);
     const isTurnEvidence =
       messageType === "assistant_message" ||
@@ -235,6 +292,13 @@ export class RemoteTurnCoordinator {
       messageType === "error_message" ||
       messageType === "loop_error" ||
       (runId !== undefined && (messageType === "usage_statistics" || messageType === "stop_reason"));
+    // Terminal metadata can trail the result it belongs to. It must never
+    // activate a queued turn or become evidence for that next turn.
+    const active =
+      messageType === "usage_statistics" || messageType === "stop_reason"
+        ? this.activeTurn
+        : (this.activateNextTurnFromProtocol() ??
+          (isTurnEvidence && runId !== undefined ? this.startServerTurn(runtime) : null));
     // Persisted user-message echoes and lifecycle status are not evidence that
     // the new model run started. In particular they may arrive after an abort.
     if (active && isTurnEvidence) {
@@ -806,6 +870,7 @@ export class RemoteTurnCoordinator {
         Date.now() - (tracker?.startedAt || this._activeTurnStartedAt),
       conversationId: turn.runtime.conversation_id,
       runIds: turn.runIds.length > 0 ? turn.runIds : undefined,
+      ...(tracker?.origin !== undefined ? { origin: tracker.origin } : {}),
     };
   }
 

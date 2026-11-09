@@ -60,6 +60,33 @@ await using session = client.resumeSession(agentId, {
 ## Key points
 
 - Tools execute in the SDK process, not in the agent's sandbox. This means they have access to your local filesystem, environment, and network.
-- The `execute` function receives `(toolCallId, args, signal?, onUpdate?)`. The `args` are the parsed JSON arguments from the agent's tool call.
+- The `execute` function receives `(toolCallId, args, signal?, onUpdate?, context?)`. The `args` are the parsed JSON arguments from the agent's tool call. `context` is `{ toolCallId, agentId, conversationId }` for the call, so one tool can tell which conversation called it.
 - Return `AgentToolResult` with a `content` array of `{ type: "text" | "image", text?, data?, mimeType? }` parts.
 - Tools are registered per-session via the `tools` option. They are not persisted on the agent.
+
+## Tools for many conversations
+
+`shared-tools.ts` registers tools on the client instead of on a session, with
+`client.registerTools()`. One connection serves every registration, each call
+runs the tools registered for the conversation that made it, and
+registrations are restored after a reconnect. A single `add_to_tally` instance
+serves both conversations and keeps a separate tally for each by reading
+`context.conversationId`. The tools also stay available to
+turns the agent starts on its own, such as background task notifications.
+Sessions opened with `resumeSession()` on a registered conversation inherit its
+tools and `allowedTools`, so you don't repeat them.
+
+```typescript
+await using registration = await client.registerTools({
+  conversations: [northConversationId, southConversationId],
+  tools: [addToTally],
+  allowedTools: ["add_to_tally"],
+});
+await using north = client.resumeSession(northConversationId);
+```
+
+```bash
+bun run examples/custom-tools/shared-tools.ts
+```
+
+It uses the local backend; `registerTools()` supports `local` and `remote`.

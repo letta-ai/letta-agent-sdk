@@ -258,6 +258,20 @@ export interface AgentToolResult<T> {
 export type AgentToolUpdateCallback<T> = (update: Partial<AgentToolResult<T>>) => void;
 
 /**
+ * Which call a tool is serving. Passed as the last argument to
+ * {@link AgentTool.execute}, so one tool instance can serve many
+ * conversations and keep per-conversation state keyed on `conversationId`.
+ */
+export interface AgentToolCallContext {
+  /** Same as the first `execute` argument. */
+  toolCallId: string;
+  /** Agent that made the call, or `null` when the runtime has no agent id. */
+  agentId: string | null;
+  /** Conversation that made the call. */
+  conversationId: string;
+}
+
+/**
  * Agent tool definition (matches pi-agent-core)
  */
 export interface AgentTool<TParams, TResult> {
@@ -273,12 +287,16 @@ export interface AgentTool<TParams, TResult> {
   /** JSON Schema for parameters (TypeBox or plain object) */
   parameters: TParams;
 
-  /** Execution function */
+  /**
+   * Execution function. `context` says which agent and conversation made the
+   * call; tools that don't need it can ignore it.
+   */
   execute: (
     toolCallId: string,
     args: unknown,
     signal?: AbortSignal,
     onUpdate?: AgentToolUpdateCallback<TResult>,
+    context?: AgentToolCallContext,
   ) => Promise<AgentToolResult<TResult>>;
 }
 
@@ -1087,7 +1105,27 @@ export interface SDKResultMessage {
   conversationId: string | null;
   /** Run IDs associated with this turn (if provided by the CLI). */
   runIds?: string[];
+  /**
+   * Set only on a turn this session did not send, such as a background task
+   * notification or a cron prompt. `stream()` yields these turns as they run
+   * and keeps going until the result of the session's own turn.
+   */
+  origin?: SDKTurnOrigin;
 }
+
+/**
+ * Who started a turn the session did not send: a queue source reported by
+ * the runtime, `"user"` for another client's message, or `"unknown"` when the
+ * runtime started the turn without reporting a source.
+ */
+export type SDKTurnOrigin =
+  | "task_notification"
+  | "cron"
+  | "subagent"
+  | "system"
+  | "channel"
+  | "user"
+  | "unknown";
 
 export interface SDKStreamEventDeltaPayload {
   type: string;

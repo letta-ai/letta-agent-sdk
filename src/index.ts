@@ -68,6 +68,7 @@ export type {
   SDKToolResultMessage,
   SDKReasoningMessage,
   SDKResultMessage,
+  SDKTurnOrigin,
   SDKErrorCode,
   SDKStreamEventMessage,
   SDKStreamEventPayload,
@@ -147,6 +148,7 @@ export type {
   BootstrapStateResult,
   // Tool types
   AgentTool,
+  AgentToolCallContext,
   AgentToolResult,
   AgentToolResultContent,
   AgentToolUpdateCallback,
@@ -190,6 +192,7 @@ export type {
 } from "./management-types.js";
 
 export { RepositoriesClient } from "./repositories.js";
+export type { RegisterToolsOptions, ToolRegistration } from "./tool-registration.js";
 export { ConversationForkHydrationError } from "./management-errors.js";
 export type {
   Computer,

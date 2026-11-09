@@ -42,11 +42,15 @@ export class LettaAgentClient extends LettaAgentClientBase {
   }
 
   protected override createLocalManagementTransport(): ManagementTransport {
+    return new AppServerManagementTransport(this.localAppServerConnection());
+  }
+
+  protected override localAppServerConnection() {
     const localOptions = (
       this.options as LettaCodeLocalClientOptions
     ).appServer;
     const sharedServer = this.sharedLocalServer();
-    return new AppServerManagementTransport({
+    return {
       ...(localOptions?.url !== undefined
         ? { url: localOptions.url }
         : {
@@ -58,7 +62,7 @@ export class LettaAgentClient extends LettaAgentClientBase {
       ...(localOptions?.requestTimeoutMs !== undefined
         ? { requestTimeoutMs: localOptions.requestTimeoutMs }
         : {}),
-    });
+    };
   }
 
   protected override async createLocalAgent(

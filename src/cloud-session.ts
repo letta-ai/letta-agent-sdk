@@ -14,16 +14,16 @@ import {
 import {
   AppServerRuntimeController,
   agentToolNames,
-  createExternalToolCallHandler,
-  externalToolGroups,
   registerAppServerControlRequestHandler,
 } from "./app-server-session.js";
+import { createExternalToolCallHandler, externalToolGroups } from "./external-tools.js";
 import { createCloudStatusTransportConstructor } from "./cloud-status-transport.js";
 import {
   connectMcpServers,
   expandMcpToolWildcards,
   type McpToolBridge,
 } from "./mcp-runtime.js";
+import { runtimeToolPolicy } from "./runtime-tool-policy.js";
 import { CloudManagementTransport } from "./cloud-management.js";
 import {
   createCloudClient,
@@ -588,7 +588,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     });
     if (this.externalTools.size > 0) {
       this.removeExternalToolHandler = client.onExternalToolCall(
-        createExternalToolCallHandler(this.externalTools),
+        createExternalToolCallHandler(this.externalTools, () => this.runtime),
       );
     }
   }
@@ -656,6 +656,15 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     }
     const groups = externalToolGroups([...this.externalTools.values()]);
     if (groups) command.external_tools = groups;
+    // Re-sent on idle-transport recovery so a new connection restores it.
+    // Per-message fields are still sent: Cloud does not confirm the capability.
+    command.tool_policy = runtimeToolPolicy(
+      expandMcpToolWildcards(
+        options.allowedTools,
+        this.mcpBridge?.tools.map((tool) => tool.name) ?? [],
+      ),
+      "toolset" in options ? options.toolset : undefined,
+    );
 
     return (await client.runtimeStart(
       command as Parameters<AppServerClient["runtimeStart"]>[0],

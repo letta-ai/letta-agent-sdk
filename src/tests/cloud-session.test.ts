@@ -1870,6 +1870,34 @@ describe("CloudEnvironmentSession", () => {
     }
   });
 
+  test("re-sends the session tool policy when an idle Cloud transport reconnects", async () => {
+    resetFakeCloud();
+    const client = new LettaAgentClient({
+      backend: "cloud",
+      apiBaseUrl: "https://api.test",
+      apiKey: "sk-test",
+      fetch: createCloudFetchMock([]),
+      WebSocket: FakeCloudSocket,
+      requestTimeoutMs: 1_000,
+    });
+
+    const session = client.resumeSession("agent-1", { allowedTools: ["Read", "Grep"] });
+    try {
+      await asAdvanced(session).initialize();
+      FakeCloudSocket.socket("stream")!.close();
+      await Promise.resolve();
+      await asAdvanced(session).sendAndWaitForResult("hello once");
+
+      const starts = FakeCloudSocket.allSent().filter((command) => command.type === "runtime_start");
+      expect(starts).toHaveLength(2);
+      for (const start of starts) {
+        expect(start.tool_policy).toEqual({ allowlist: ["Read", "Grep"], exclude_interactive: true });
+      }
+    } finally {
+      session.close();
+    }
+  });
+
   test("retries an initial Cloud transport failure before sending input", async () => {
     resetFakeCloud();
     FakeCloudSocket.openConnectionFailuresRemaining = 1;

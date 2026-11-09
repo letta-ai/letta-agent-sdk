@@ -1,7 +1,6 @@
 import {
   createAppServerClient,
   type AppServerClient,
-  type AppServerExternalToolCallHandler,
   type AppServerSocketConstructor,
 } from "@letta-ai/letta-code/app-server-client";
 import type {
@@ -25,6 +24,16 @@ import {
   type McpToolBridge,
 } from "./mcp-runtime.js";
 import { applyUniqueRequestIds } from "./request-ids.js";
+import { createExternalToolCallHandler, externalToolGroups } from "./external-tools.js";
+import {
+  clientToolsetPayload,
+  mergeInheritedTools,
+  runtimeToolPolicy,
+  supportsRuntimeToolPolicy,
+  type InheritedToolSource,
+  type RuntimeToolPolicy,
+  type SessionToolSelection,
+} from "./runtime-tool-policy.js";
 import {
   RemoteClientSessionCore,
   ensureSuccess,
@@ -103,41 +112,6 @@ export type AppServerSessionOptions = Partial<LettaCodeRemoteClientOptions> & {
 };
 
 export type AppServerSessionMode = RuntimeSessionMode;
-
-export function externalToolGroups(tools: AnyAgentTool[] | undefined): Array<Record<string, unknown>> | undefined {
-  if (!tools || tools.length === 0) return undefined;
-  return [
-    {
-      tools: tools.map((tool) => ({
-        name: tool.name,
-        label: tool.label,
-        description: tool.description,
-        parameters: tool.parameters as Record<string, unknown>,
-      })),
-    },
-  ];
-}
-
-export function createExternalToolCallHandler(
-  externalTools: Map<string, AnyAgentTool>,
-): AppServerExternalToolCallHandler {
-  return async (request) => {
-    const tool = externalTools.get(request.tool_name);
-    if (!tool) {
-      throw new Error(`Unknown external tool: ${request.tool_name}`);
-    }
-    const result = await tool.execute(request.tool_call_id, request.input);
-    return {
-      content: result.content.map((part) => ({
-        type: part.type,
-        ...(part.text !== undefined ? { text: part.text } : {}),
-        ...(part.data !== undefined ? { data: part.data } : {}),
-        ...(part.mimeType !== undefined ? { mimeType: part.mimeType } : {}),
-      })),
-      ...(result.isError === true ? { is_error: true } : {}),
-    };
-  };
-}
 
 type AppServerApprovalOptions = LettaCodeClientSessionOptions | CreateAgentOptions;
 
@@ -393,9 +367,31 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
   constructor(
     private readonly client: AppServerClient,
     private readonly options: AppServerSessionOptions,
-    private readonly clientToolAllowlist?: readonly string[],
-    private readonly clientToolset?: ClientToolsetConfig,
+    private clientToolAllowlist?: readonly string[],
+    private clientToolset?: ClientToolsetConfig,
+    /** The listener applies runtime_start's tool_policy to every turn. */
+    private readonly toolPolicyApplied = false,
   ) {}
+
+  /**
+   * Replace this connection's tools and policy for the runtime, as when a
+   * `registerTools()` registration the session inherits changes. Older
+   * listeners get the tools here and the selection with each message.
+   */
+  async updateToolSelection(runtime: RuntimeScope, selection: SessionToolSelection): Promise<void> {
+    this.clientToolAllowlist = selection.allowedTools;
+    this.clientToolset = selection.toolset;
+    const response = await this.client.runtimeExternalToolsUpdate({
+      updates: [{
+        runtimes: [runtime],
+        external_tools: externalToolGroups(selection.tools) ?? [],
+        ...(this.toolPolicyApplied
+          ? { tool_policy: runtimeToolPolicy(selection.allowedTools, selection.toolset) }
+          : {}),
+      }],
+    } as unknown as Parameters<AppServerClient["runtimeExternalToolsUpdate"]>[0]);
+    if (!response.success) throw new Error(response.error ?? "Failed to update session tools");
+  }
 
   onMessage(handler: (message: ProtocolMessage, channel?: string) => void): () => void {
     return this.client.onMessage((message, channel) => {
@@ -425,18 +421,12 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
         },
       ],
     };
-    if (this.clientToolAllowlist !== undefined) {
+    // Older listeners only honour tool selection sent with each message.
+    if (!this.toolPolicyApplied && this.clientToolAllowlist !== undefined) {
       payload.client_tool_allowlist = [...new Set(this.clientToolAllowlist)];
     }
-    if (this.clientToolset !== undefined) {
-      payload.client_toolset = {
-        ...(this.clientToolset.base !== undefined
-          ? { base: this.clientToolset.base }
-          : {}),
-        ...(this.clientToolset.include !== undefined
-          ? { include: [...new Set(this.clientToolset.include)] }
-          : {}),
-      };
+    if (!this.toolPolicyApplied && this.clientToolset !== undefined) {
+      payload.client_toolset = clientToolsetPayload(this.clientToolset);
     }
     if (options.outputFormat !== undefined) {
       payload.response_format = {
@@ -451,7 +441,7 @@ export class AppServerRuntimeController implements RemoteClientRuntimeController
     // SDK sessions are headless: interactive user-input tools are always
     // excluded from the toolset (harnesses without support ignore the flag
     // and the SDK's runtime denial still applies).
-    payload.exclude_interactive_tools = true;
+    if (!this.toolPolicyApplied) payload.exclude_interactive_tools = true;
     this.client.input({
       runtime,
       payload,
@@ -590,6 +580,10 @@ export class AppServerSession extends RemoteClientSessionCore {
   private mcpCleanup: Promise<void> = Promise.resolve();
   private removeExternalToolHandler: (() => void) | null = null;
   private removeControlRequestHandler: (() => void) | null = null;
+  private inheritedTools: InheritedToolSource | null = null;
+  private removeInheritedListener: (() => void) | null = null;
+  /** This session's own selection, after MCP tools and wildcards resolve. */
+  private ownSelection: SessionToolSelection | null = null;
 
   constructor(
     private readonly remoteOptions: AppServerSessionOptions,
@@ -603,6 +597,34 @@ export class AppServerSession extends RemoteClientSessionCore {
     for (const tool of tools ?? []) {
       this.externalTools.set(tool.name, tool);
     }
+  }
+
+  /**
+   * Use the tools and policy of the `registerTools()` registration covering
+   * this conversation, and follow its updates while the session is open.
+   */
+  inheritTools(source: InheritedToolSource): void {
+    this.inheritedTools = source;
+    this.removeInheritedListener = source.onChange(() => {
+      void this.refreshInheritedTools().catch(() => undefined);
+    });
+  }
+
+  /** Rebuild the effective tool map in place; call handlers hold the map. */
+  private applyToolSelection(): SessionToolSelection {
+    const selection = mergeInheritedTools(
+      this.inheritedTools?.current() ?? null,
+      this.ownSelection ?? { tools: [] },
+    );
+    this.externalTools.clear();
+    for (const tool of selection.tools) this.externalTools.set(tool.name, tool);
+    return selection;
+  }
+
+  private async refreshInheritedTools(): Promise<void> {
+    if (!this.ownSelection || !this.runtime || !(this.controller instanceof AppServerRuntimeController)) return;
+    const selection = this.applyToolSelection();
+    await this.controller.updateToolSelection(this.runtime, selection);
   }
 
   protected override shouldEnableMemfs(options: LettaCodeClientSessionOptions | CreateAgentOptions): boolean {
@@ -627,6 +649,8 @@ export class AppServerSession extends RemoteClientSessionCore {
     }));
 
     const options = this.currentOptions();
+    this.externalTools.clear();
+    for (const tool of this.mode.options.tools ?? []) this.externalTools.set(tool.name, tool);
     this.mcpBridge = await connectMcpServers(
       "mcpServers" in options ? options.mcpServers : undefined,
       {
@@ -637,6 +661,15 @@ export class AppServerSession extends RemoteClientSessionCore {
     for (const tool of this.mcpBridge.tools) {
       this.externalTools.set(tool.name, tool);
     }
+    const mcpToolNames = this.mcpBridge.tools.map((tool) => tool.name);
+    const ownToolset = "toolset" in options ? options.toolset : undefined;
+    const ownAllowedTools = expandMcpToolWildcards(options.allowedTools, mcpToolNames);
+    this.ownSelection = {
+      tools: [...this.externalTools.values()],
+      ...(ownAllowedTools !== undefined ? { allowedTools: ownAllowedTools } : {}),
+      ...(ownToolset !== undefined ? { toolset: ownToolset } : {}),
+    };
+    const { allowedTools, toolset: clientToolset } = this.applyToolSelection();
 
     this.removeControlRequestHandler = registerAppServerControlRequestHandler({
       client,
@@ -644,9 +677,9 @@ export class AppServerSession extends RemoteClientSessionCore {
       getOptions: () => this.currentOptions(),
     });
 
-    if (this.externalTools.size > 0) {
+    if (this.externalTools.size > 0 || this.inheritedTools) {
       this.removeExternalToolHandler = client.onExternalToolCall(
-        createExternalToolCallHandler(this.externalTools),
+        createExternalToolCallHandler(this.externalTools, () => this.runtime),
       );
     }
 
@@ -667,21 +700,19 @@ export class AppServerSession extends RemoteClientSessionCore {
           );
         }
       }
-      const response = await this.startRuntime(client);
+      const response = await this.startRuntime(
+        client,
+        runtimeToolPolicy(allowedTools, clientToolset),
+      );
       if (!response.success || !response.runtime) {
         throw new Error(response.error ?? "Failed to start app-server runtime");
       }
 
       this.watchTransportDisconnect(client);
+      const toolPolicyApplied = await supportsRuntimeToolPolicy(client);
 
       const tools = agentToolNames(response.agent);
       const skillSources = options.skillSources;
-      const clientToolset = "toolset" in options ? options.toolset : undefined;
-      const mcpToolNames = this.mcpBridge?.tools.map((tool) => tool.name) ?? [];
-      const allowedTools = expandMcpToolWildcards(
-        options.allowedTools,
-        mcpToolNames,
-      );
       const availableTools =
         tools === undefined && mcpToolNames.length === 0
           ? undefined
@@ -692,6 +723,7 @@ export class AppServerSession extends RemoteClientSessionCore {
           this.remoteOptions,
           allowedTools,
           clientToolset,
+          toolPolicyApplied,
         ),
         runtime: response.runtime,
         model:
@@ -719,6 +751,10 @@ export class AppServerSession extends RemoteClientSessionCore {
   }
 
   protected override onCoreClose(): void {
+    if (this.closed) {
+      this.removeInheritedListener?.();
+      this.removeInheritedListener = null;
+    }
     this.removeExternalToolHandler?.();
     this.removeExternalToolHandler = null;
     this.removeControlRequestHandler?.();
@@ -756,12 +792,16 @@ export class AppServerSession extends RemoteClientSessionCore {
 
   private async startRuntime(
     client: AppServerClient,
+    toolPolicy: RuntimeToolPolicy,
   ): Promise<RuntimeStartResponseMessage> {
-    const command = await this.buildRuntimeStartCommand(client);
+    const command = await this.buildRuntimeStartCommand(client, toolPolicy);
     return client.runtimeStart(command);
   }
 
-  private async buildRuntimeStartCommand(client: AppServerClient): Promise<RuntimeStartCommand> {
+  private async buildRuntimeStartCommand(
+    client: AppServerClient,
+    toolPolicy: RuntimeToolPolicy,
+  ): Promise<RuntimeStartCommand> {
     const options = this.mode.options;
     const command: Record<string, unknown> = {
       client_info: {
@@ -799,6 +839,10 @@ export class AppServerSession extends RemoteClientSessionCore {
     }
     const groups = externalToolGroups([...this.externalTools.values()]);
     if (groups) command.external_tools = groups;
+    // Sent on create, resume and every reconnect: the listener keeps it only
+    // while this connection is open, and applies it to every turn, including
+    // task notifications and cron prompts the runtime starts itself.
+    command.tool_policy = toolPolicy;
 
     if (this.mode.kind === "create-agent") {
       command.create_agent = {
