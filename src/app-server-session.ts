@@ -24,7 +24,7 @@ import {
   type McpToolBridge,
 } from "./mcp-runtime.js";
 import { applyUniqueRequestIds } from "./request-ids.js";
-import { createExternalToolCallHandler, externalToolGroups } from "./external-tools.js";
+import { createExternalToolCallHandler, externalToolGroups, registerExternalToolCallHandler } from "./external-tools.js";
 import {
   clientToolsetPayload,
   mergeInheritedTools,
@@ -678,7 +678,7 @@ export class AppServerSession extends RemoteClientSessionCore {
     });
 
     if (this.externalTools.size > 0 || this.inheritedTools) {
-      this.removeExternalToolHandler = client.onExternalToolCall(
+      this.removeExternalToolHandler = registerExternalToolCallHandler(client,
         createExternalToolCallHandler(this.externalTools, () => this.runtime),
       );
     }

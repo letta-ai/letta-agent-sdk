@@ -5,7 +5,7 @@ import {
 } from "@letta-ai/letta-code/app-server-client";
 import type { ConversationRetrieveResponseMessage } from "@letta-ai/letta-code/app-server-protocol";
 import type { AppServerSessionOptions } from "./app-server-session.js";
-import { createExternalToolCallHandler, externalToolGroups } from "./external-tools.js";
+import { createExternalToolCallHandler, externalToolGroups, registerExternalToolCallHandler } from "./external-tools.js";
 import { applyUniqueRequestIds } from "./request-ids.js";
 import {
   runtimeToolPolicy,
@@ -215,12 +215,12 @@ export class ToolRegistry {
         ? { requestTimeoutMs: this.options.requestTimeoutMs }
         : {}),
     }));
-    client.onExternalToolCall(async (request) => {
+    registerExternalToolCallHandler(client, async (request, signal) => {
       const runtime = request.runtime;
       const entry = runtime &&
         [...this.entries].find((candidate) => candidate.runtimes.some((r) => runtimeKey(r) === runtimeKey(runtime)));
       if (!entry) throw new Error(`No tools registered for conversation ${runtime?.conversation_id}`);
-      return entry.call(request);
+      return entry.call(request, signal);
     });
     try {
       await client.connect();
