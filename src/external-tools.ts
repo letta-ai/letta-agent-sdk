@@ -69,7 +69,6 @@ export function createExternalToolCallHandler(
   };
 }
 
-
 type CancellableToolCallHandler = (
   request: Parameters<AppServerExternalToolCallHandler>[0],
   signal?: AbortSignal,

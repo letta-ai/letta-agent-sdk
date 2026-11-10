@@ -606,7 +606,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       getOptions: () => this.currentOptions(),
     });
     if (this.externalTools.size > 0) {
-      this.removeExternalToolHandler = registerExternalToolCallHandler(client, 
+      this.removeExternalToolHandler = registerExternalToolCallHandler(client,
         createExternalToolCallHandler(this.externalTools, () => this.runtime),
       );
     }
