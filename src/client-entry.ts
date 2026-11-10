@@ -20,6 +20,11 @@ export class LettaAgentClient extends LettaAgentClientBase {
     if (this.backend === "local") {
       throw this.localBackendUnavailableError();
     }
+    if (options.backend === "cloud" && options.registerComputer !== undefined) {
+      throw new Error(
+        'registerComputer starts a local Letta Code app-server. Import from "@letta-ai/letta-agent-sdk" in Node.js to use it.',
+      );
+    }
   }
 }
 

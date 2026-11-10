@@ -206,6 +206,23 @@ export function validateCloudClientOptions(options: LettaCodeCloudClientOptions)
       `Letta Cloud sessions cannot specify both ${field} and sandbox options.`,
     );
   }
+  if (options.registerComputer !== undefined) {
+    const name = (options.registerComputer as { name?: unknown } | null)?.name;
+    if (typeof name !== "string" || !name.trim()) {
+      throw new Error("Invalid registerComputer.name. Expected a non-empty string.");
+    }
+    if (options.computer !== undefined || options.environment !== undefined) {
+      const field = options.computer !== undefined ? "computer" : "environment";
+      throw new Error(
+        `Letta Cloud clients cannot specify both ${field} and registerComputer. Use computer for a machine that is already connected, or registerComputer to connect this one.`,
+      );
+    }
+    if (options.sandbox !== undefined) {
+      throw new Error(
+        "Letta Cloud clients cannot specify both registerComputer and sandbox options.",
+      );
+    }
+  }
   if (
     options.webSocketAuth !== undefined &&
     options.webSocketAuth !== "header" &&
@@ -380,6 +397,8 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     private readonly cloudOptions: LettaCodeCloudClientOptions,
     mode: CloudSessionMode,
     private readonly apiClient: Letta = createCloudClient(cloudOptions),
+    /** Starts and resolves the computer this client registers, when the session runs there. */
+    private readonly connectRegisteredComputer?: () => Promise<ResolvedCloudConnection>,
   ) {
     super(mode, {
       label: "cloud",
@@ -954,6 +973,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   private async resolveExplicitConnection(
     environment: LettaCodeEnvironment,
   ): Promise<{ connectionId: string }> {
+    if (this.connectRegisteredComputer) return this.connectRegisteredComputer();
     const target = environmentToRemoteTarget(environment);
     const resolved = await this.remoteEnvironmentClient().resolveEnvironment(target);
     return { connectionId: resolved.connectionId };

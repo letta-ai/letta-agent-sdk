@@ -22,6 +22,8 @@ export interface StartLocalAppServerOptions {
   env?: Record<string, string | undefined>;
   filesystemConfinement?: "memory";
   agentId?: string;
+  /** Register the app-server as a Letta Cloud computer with this name. */
+  computerName?: string;
 }
 
 interface LocalAppServerProcess {
@@ -95,7 +97,10 @@ function tryExtractListeningUrl(output: string): string | null {
 
 export function buildLocalAppServerArgs(
   cliPath: string,
-  options: Pick<StartLocalAppServerOptions, "backend" | "listen"> = {},
+  options: Pick<
+    StartLocalAppServerOptions,
+    "backend" | "listen" | "computerName"
+  > = {},
 ): string[] {
   return [
     cliPath,
@@ -103,6 +108,9 @@ export function buildLocalAppServerArgs(
     "server",
     "--listen",
     options.listen ?? DEFAULT_LISTEN_URL,
+    ...(options.computerName !== undefined
+      ? ["--computer-name", options.computerName]
+      : []),
   ];
 }
 
