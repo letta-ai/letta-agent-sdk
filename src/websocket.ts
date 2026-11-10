@@ -8,7 +8,7 @@ import type {
  * Adapt React Native's three-argument WebSocket constructor to the SDK's
  * Node-compatible constructor shape. This is only needed when a remote
  * app-server authenticates its websocket upgrade with headers. Cloud clients
- * should prefer `webSocketAuth: "query"`.
+ * should prefer `webSocketAuth: "ticket"`.
  */
 export function createReactNativeWebSocketConstructor(
   WebSocket: LettaCodeReactNativeSocketConstructor,

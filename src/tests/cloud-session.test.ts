@@ -63,6 +63,8 @@ type CloudFetchMockOptions = {
   ) => Response | Promise<Response> | undefined;
   /** Override agent-level recompile responses for failure-path tests. */
   agentRecompileResponse?: (attempt: number) => Response | undefined;
+  /** Simulate a server that predates status WebSocket upgrade tickets. */
+  legacyTicketServer?: boolean;
 };
 
 function createCloudFetchMock(
@@ -73,6 +75,7 @@ function createCloudFetchMock(
   let sandboxCreates = 0;
   let sandboxRefreshes = 0;
   let agentRecompiles = 0;
+  let ticketsIssued = 0;
   return ((input: FetchInput | URL, init?: RequestInit) => {
     const url = urlOf(input);
     const parsed = new URL(url);
@@ -86,6 +89,17 @@ function createCloudFetchMock(
 
     if (parsed.pathname === "/v1/agents/" && method === "POST") {
       return Promise.resolve(jsonResponse({ id: "agent-created" }));
+    }
+
+    if (/^\/v1\/environments\/[^/]+\/status\/ws-ticket$/.test(parsed.pathname) && method === "POST") {
+      if (options.legacyTicketServer) {
+        return Promise.resolve(jsonResponse({ message: "Not Found" }, { status: 404 }));
+      }
+      ticketsIssued += 1;
+      return Promise.resolve(jsonResponse({
+        ticket: `ticket-${ticketsIssued}`,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }));
     }
 
     if (parsed.pathname === "/v1/conversations/" && method === "POST") {
@@ -2057,14 +2071,55 @@ describe("CloudEnvironmentSession", () => {
     }
   });
 
-  test("attaches to an explicit environment without creating a sandbox", async () => {
+  test.each(["ticket", "query"] as const)(
+    "%s auth sends single-use upgrade tickets instead of the API key",
+    async (webSocketAuth) => {
+      resetFakeCloud();
+      const requests: RecordedRequest[] = [];
+      const client = new LettaAgentClient({
+        backend: "cloud",
+        apiBaseUrl: "https://api.test",
+        apiKey: "sk-test",
+        fetch: createCloudFetchMock(requests),
+        WebSocket: FakeCloudSocket,
+        webSocketAuth,
+        requestTimeoutMs: 1_000,
+        environment: { connectionId: "conn-explicit" },
+      });
+
+      const session = client.resumeSession("agent-1");
+      await asAdvanced(session).initialize();
+
+      expect(requests.some((request) => new URL(request.url).pathname.includes("/sandboxes"))).toBe(false);
+      const ticketRequests = requests.filter(
+        (request) => new URL(request.url).pathname === "/v1/environments/conn-explicit/status/ws-ticket",
+      );
+      expect(ticketRequests).toHaveLength(2);
+      expect(ticketRequests[0]!.headers.authorization ?? ticketRequests[0]!.headers.Authorization).toBe("Bearer sk-test");
+      const controlUrl = new URL(FakeCloudSocket.socket("control")!.url);
+      const streamUrl = new URL(FakeCloudSocket.socket("stream")!.url);
+      expect(controlUrl.pathname).toBe("/v1/environments/conn-explicit/status/ws");
+      for (const socketUrl of [controlUrl, streamUrl]) {
+        expect(socketUrl.searchParams.has("token")).toBe(false);
+        expect(socketUrl.toString()).not.toContain("sk-test");
+      }
+      expect(new Set([controlUrl.searchParams.get("ticket"), streamUrl.searchParams.get("ticket")])).toEqual(
+        new Set(["ticket-1", "ticket-2"]),
+      );
+      expect(FakeCloudSocket.socket("control")!.options).toBeUndefined();
+      expect(FakeCloudSocket.socket("stream")!.options).toBeUndefined();
+      session.close();
+    },
+  );
+
+  test("deprecated query auth falls back to ?token only when the server cannot issue tickets", async () => {
     resetFakeCloud();
     const requests: RecordedRequest[] = [];
     const client = new LettaAgentClient({
       backend: "cloud",
       apiBaseUrl: "https://api.test",
       apiKey: "sk-test",
-      fetch: createCloudFetchMock(requests),
+      fetch: createCloudFetchMock(requests, undefined, { legacyTicketServer: true }),
       WebSocket: FakeCloudSocket,
       webSocketAuth: "query",
       requestTimeoutMs: 1_000,
@@ -2074,15 +2129,8 @@ describe("CloudEnvironmentSession", () => {
     const session = client.resumeSession("agent-1");
     await asAdvanced(session).initialize();
 
-    expect(requests.some((request) => new URL(request.url).pathname.includes("/sandboxes"))).toBe(false);
-    const socketUrl = new URL(FakeCloudSocket.instances[0]!.url);
-    expect(socketUrl.pathname).toBe("/v1/environments/conn-explicit/status/ws");
-    expect(socketUrl.searchParams.get("token")).toBe("sk-test");
-    expect(FakeCloudSocket.instances[0]!.options).toBeUndefined();
     expect(new URL(FakeCloudSocket.socket("control")!.url).searchParams.get("token")).toBe("sk-test");
     expect(new URL(FakeCloudSocket.socket("stream")!.url).searchParams.get("token")).toBe("sk-test");
-    expect(FakeCloudSocket.socket("control")!.options).toBeUndefined();
-    expect(FakeCloudSocket.socket("stream")!.options).toBeUndefined();
     session.close();
   });
 
