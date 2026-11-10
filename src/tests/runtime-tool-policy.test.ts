@@ -275,12 +275,12 @@ describe("client.registerTools", () => {
     expect(sentOfType("runtime_external_tools_update").map((command) => command.updates)).toEqual([
       [{
         runtimes: [{ agent_id: "agent-1", conversation_id: "conv-a" }],
-        external_tools: [{ tools: [expect.objectContaining({ name: "submit" })] }],
+        external_tools: [{ capabilities: { external_tool_call_cancel: true }, tools: [expect.objectContaining({ name: "submit" })] }],
         tool_policy: { allowlist: ["Read", "submit"], exclude_interactive: true },
       }],
       [{
         runtimes: [{ agent_id: "agent-2", conversation_id: "default" }],
-        external_tools: [{ tools: [expect.objectContaining({ name: "submit" })] }],
+        external_tools: [{ capabilities: { external_tool_call_cancel: true }, tools: [expect.objectContaining({ name: "submit" })] }],
         tool_policy: { exclude_interactive: true },
       }],
     ]);
@@ -422,7 +422,7 @@ describe("sessions on a registered conversation", () => {
         allowlist: ["Read", "submit"],
         exclude_interactive: true,
       });
-      expect(start!.external_tools).toEqual([{ tools: [expect.objectContaining({ name: "submit" })] }]);
+      expect(start!.external_tools).toEqual([{ capabilities: { external_tool_call_cancel: true }, tools: [expect.objectContaining({ name: "submit" })] }]);
       expect(otherStart!.tool_policy).toEqual({ exclude_interactive: true });
       expect(otherStart!.external_tools).toBeUndefined();
 
@@ -486,7 +486,7 @@ describe("sessions on a registered conversation", () => {
       expect(sessionSent("runtime_external_tools_update").map((command) => command.updates)).toEqual([
         [{
           runtimes,
-          external_tools: [{ tools: [expect.objectContaining({ name: "submit" })] }],
+          external_tools: [{ capabilities: { external_tool_call_cancel: true }, tools: [expect.objectContaining({ name: "submit" })] }],
           tool_policy: {
             toolset: { base: "none", include: ["Read"] }, allowlist: ["submit"], exclude_interactive: true,
           },
@@ -558,4 +558,67 @@ describe("tool call context", () => {
     ]);
     await client.close();
   });
+});
+
+
+describe("external tool cancellation", () => {
+  for (const registered of [true, false]) {
+    test(`${registered ? "registered" : "session"} tools cancel once and ignore late or unknown cancellation`, async () => {
+      const client = remote();
+      let signal: AbortSignal | undefined;
+      let resolve!: (value: { content: [{ type: "text"; text: string }] }) => void;
+      let calls = 0;
+      const tool: AnyAgentTool = {
+        name: "wait", label: "wait", description: "Wait", parameters: {},
+        execute: async (_id, _args, nextSignal) => {
+          calls++;
+          signal = nextSignal;
+          return new Promise((done) => { resolve = done; });
+        },
+      };
+      const session = registered ? undefined : client.resumeSession("conv-a", { tools: [tool] });
+      try {
+        if (registered) await client.registerTools({ conversations: ["conv-a"], tools: [tool] });
+        else await asAdvanced(session!).initialize();
+        const socket = FakeSocket.instances.at(-1)!;
+        const request = (requestId: string) => socket.reply({
+          type: "external_tool_call_request", request_id: requestId,
+          runtime: { agent_id: "agent-1", conversation_id: "conv-a" },
+          tool_call_id: requestId, tool_name: "wait", input: {},
+        });
+        const cancel = (requestId: string) => socket.reply({
+          type: "external_tool_call_cancel", request_id: requestId, reason: "aborted",
+        });
+        const responses = () => socket.sent.filter((message) => message.type === "external_tool_call_response");
+        cancel("unknown");
+        request("cancel-me");
+        expect(signal?.aborted).toBe(false);
+        cancel("cancel-me");
+        expect(signal?.aborted).toBe(true);
+        expect(responses()).toEqual([{ type: "external_tool_call_response", request_id: "cancel-me", error: "cancelled" }]);
+        resolve({ content: [{ type: "text", text: "late result" }] });
+        await tick();
+        cancel("cancel-me");
+        request("cancel-me");
+        expect(calls).toBe(1);
+        expect(responses()).toHaveLength(1);
+
+        request("finished");
+        resolve({ content: [{ type: "text", text: "done" }] });
+        await tick();
+        cancel("finished");
+        cancel("unknown");
+        await tick();
+        expect(responses()).toHaveLength(2);
+        expect(responses()[1]).toEqual({
+          type: "external_tool_call_response", request_id: "finished",
+          result: { content: [{ type: "text", text: "done" }] },
+        });
+        expect(signal?.aborted).toBe(false);
+      } finally {
+        session?.close();
+        await client.close();
+      }
+    });
+  }
 });

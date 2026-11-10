@@ -16,7 +16,7 @@ import {
   agentToolNames,
   registerAppServerControlRequestHandler,
 } from "./app-server-session.js";
-import { createExternalToolCallHandler, externalToolGroups } from "./external-tools.js";
+import { createExternalToolCallHandler, externalToolGroups, registerExternalToolCallHandler } from "./external-tools.js";
 import { createCloudStatusTransportConstructor } from "./cloud-status-transport.js";
 import {
   connectMcpServers,
@@ -606,7 +606,7 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       getOptions: () => this.currentOptions(),
     });
     if (this.externalTools.size > 0) {
-      this.removeExternalToolHandler = client.onExternalToolCall(
+      this.removeExternalToolHandler = registerExternalToolCallHandler(client, 
         createExternalToolCallHandler(this.externalTools, () => this.runtime),
       );
     }
