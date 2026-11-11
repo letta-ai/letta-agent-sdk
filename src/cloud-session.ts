@@ -382,6 +382,7 @@ export function assertCloudSessionOptionsSupported(
 export class CloudEnvironmentSession extends RemoteClientSessionCore {
   readonly sandbox: SandboxFilesClient | undefined;
   private connectionId: string | null = null;
+  private readonly pinnedConversations = new Set<string>();
   private removeExternalToolHandler: (() => void) | null = null;
   private removeControlRequestHandler: (() => void) | null = null;
   private externalTools = new Map<string, AnyAgentTool>();
@@ -1014,7 +1015,27 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       if (sandboxOptions !== undefined) {
         throw new Error("Letta Cloud sessions cannot specify both environment and sandbox options.");
       }
-      return this.resolveExplicitConnection(environment);
+      const connection = await this.resolveExplicitConnection(environment);
+      const computer = this.cloudOptions.registerComputer?.name;
+      if (this.connectRegisteredComputer && computer &&
+          !this.pinnedConversations.has(runtime.conversation_id)) {
+        try {
+          const body = await this.apiClient.put<unknown>(
+            `/v1/conversations/${encodeURIComponent(runtime.conversation_id)}/computer`,
+            { body: { computer } },
+          );
+          if (typeof body !== "object" || body === null ||
+              !("conversation_id" in body) || body.conversation_id !== runtime.conversation_id ||
+              !("target_device_id" in body) || !(body.target_device_id === null || typeof body.target_device_id === "string")) {
+            throw new Error("Cloud computer pin response did not include a valid conversation target.");
+          }
+        } catch (error) {
+          // Older Cloud deployments do not expose the pin endpoint yet.
+          if (!isNotFound(error)) throw error;
+        }
+        this.pinnedConversations.add(runtime.conversation_id);
+      }
+      return connection;
     }
     return this.createManagedSandboxConnection(runtime);
   }

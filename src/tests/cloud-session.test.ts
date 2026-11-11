@@ -1,3 +1,5 @@
+import { CloudEnvironmentSession } from "../cloud-session.js";
+import { createCloudClient } from "../cloud-client.js";
 import { describe, expect, spyOn, test } from "bun:test";
 import type { Message } from "@letta-ai/letta-client/resources/agents/messages";
 import { buildCreateAgentRequest } from "@letta-ai/letta-code/agent-presets";
@@ -3132,4 +3134,53 @@ describe("CloudEnvironmentSession", () => {
 
     session.close();
   });
+});
+
+
+test("registered computer sessions pin created and resumed conversations, tolerating older Cloud", async () => {
+  for (const status of [200, 404, 409]) {
+    for (const newConversation of [true, false]) {
+      resetFakeCloud();
+      const requests: RecordedRequest[] = [];
+      const baseFetch = createCloudFetchMock(requests);
+      const options = {
+        backend: "cloud" as const,
+        apiBaseUrl: "https://api.test",
+        apiKey: "sk-test",
+        computer: { name: "gpu-box" },
+        registerComputer: { name: "gpu-box" },
+        WebSocket: FakeCloudSocket,
+        requestTimeoutMs: 1_000,
+        fetch: ((input: FetchInput | URL, init?: RequestInit) => {
+          if (new URL(urlOf(input)).pathname.endsWith("/computer")) {
+            requests.push({ url: urlOf(input), method: init?.method ?? "GET",
+              headers: headersOf(init), body: bodyOf(init) });
+            return Promise.resolve(jsonResponse(status === 200 ? {
+              conversation_id: newConversation ? "conv-created" : "conv-1", target_device_id: "device-1",
+            } : { message: "Unavailable" }, { status }));
+          }
+          return baseFetch(input, init);
+        }) as typeof fetch,
+      };
+      const api = createCloudClient(options);
+      // Mock the API boundary while exercising session initialization and runtime startup.
+      const put = spyOn(api, "put");
+      const session = new CloudEnvironmentSession(options, {
+        kind: "session", agentId: "agent-1", newConversation,
+        ...(newConversation ? {} : { conversationId: "conv-1" }), options: {},
+      }, api, async () => ({ connectionId: "conn-1" }));
+      try {
+        if (status === 409) await expect(session.ready()).rejects.toThrow();
+        else await session.ready();
+        expect(put).toHaveBeenCalledTimes(1);
+        expect(put.mock.calls[0]).toEqual([
+          `/v1/conversations/${newConversation ? "conv-created" : "conv-1"}/computer`,
+          { body: { computer: "gpu-box" } },
+        ]);
+      } finally {
+        session.close();
+        put.mockRestore();
+      }
+    }
+  }
 });
