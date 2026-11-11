@@ -480,6 +480,8 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
         throw new Error(response.error ?? "Failed to start Cloud status runtime");
       }
 
+      await this.pinRegisteredComputer(response.runtime);
+
       this.watchTransportDisconnect(client, { recoverWhenIdle: true });
 
       const tools = agentToolNames(response.agent);
@@ -1015,29 +1017,31 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
       if (sandboxOptions !== undefined) {
         throw new Error("Letta Cloud sessions cannot specify both environment and sandbox options.");
       }
-      const connection = await this.resolveExplicitConnection(environment);
-      const computer = this.cloudOptions.registerComputer?.name;
-      if (this.connectRegisteredComputer && computer &&
-          !this.pinnedConversations.has(runtime.conversation_id)) {
-        try {
-          const body = await this.apiClient.put<unknown>(
-            `/v1/conversations/${encodeURIComponent(runtime.conversation_id)}/computer`,
-            { body: { computer } },
-          );
-          if (typeof body !== "object" || body === null ||
-              !("conversation_id" in body) || body.conversation_id !== runtime.conversation_id ||
-              !("target_device_id" in body) || !(body.target_device_id === null || typeof body.target_device_id === "string")) {
-            throw new Error("Cloud computer pin response did not include a valid conversation target.");
-          }
-        } catch (error) {
-          // Older Cloud deployments do not expose the pin endpoint yet.
-          if (!isNotFound(error)) throw error;
-        }
-        this.pinnedConversations.add(runtime.conversation_id);
-      }
-      return connection;
+      return this.resolveExplicitConnection(environment);
     }
     return this.createManagedSandboxConnection(runtime);
+  }
+
+  private async pinRegisteredComputer(runtime: RuntimeScope): Promise<void> {
+    const computer = this.cloudOptions.registerComputer?.name;
+    if (this.connectRegisteredComputer && computer &&
+        !this.pinnedConversations.has(runtime.conversation_id)) {
+      try {
+        const body = await this.apiClient.put<unknown>(
+          `/v1/conversations/${encodeURIComponent(runtime.conversation_id)}/computer`,
+          { body: { computer } },
+        );
+        if (typeof body !== "object" || body === null ||
+            !("conversation_id" in body) || body.conversation_id !== runtime.conversation_id ||
+            !("target_device_id" in body) || !(body.target_device_id === null || typeof body.target_device_id === "string")) {
+          throw new Error("Cloud computer pin response did not include a valid conversation target.");
+        }
+      } catch (error) {
+        // Older Cloud deployments do not expose the pin endpoint yet.
+        if (!isNotFound(error)) throw error;
+      }
+      this.pinnedConversations.add(runtime.conversation_id);
+    }
   }
 
   private async resolveExplicitConnection(
