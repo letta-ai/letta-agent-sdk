@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -120,6 +121,20 @@ export function buildLocalAppServerProcess(
   confineMemory: MemoryConfinementLauncher = createMemoryConfinementLauncher,
 ): LocalAppServerProcess {
   const env = { ...process.env, ...(options.env ?? {}) };
+  if (!options.env?.LETTA_CONFIG_DIR?.trim()) {
+    // Keep SDK settings and device identity stable without inheriting a
+    // standalone server's config. Hash names so they cannot escape this root.
+    const scope =
+      options.computerName === undefined
+        ? "local"
+        : join(
+            "computers",
+            createHash("sha256").update(options.computerName).digest("hex"),
+          );
+    env.LETTA_CONFIG_DIR = join(
+      targetHomeDirectory(env), ".letta", "agent-sdk", scope,
+    );
+  }
   const launcher = [
     process.execPath,
     ...buildLocalAppServerArgs(cliPath, options),
