@@ -418,10 +418,10 @@ export interface LettaCodeCloudClientOptions {
   /** Timeout for websocket protocol requests; for a turn, how long it may go without stream activity. */
   requestTimeoutMs?: number;
   /**
-   * WebSocket authentication style. Defaults to Authorization headers; set to
-   * query for browser-style clients that cannot send WebSocket headers.
+   * WebSocket auth. Defaults to headers; `ticket` trades the key for single-use upgrade
+   * tickets (no key in URLs). `query` is deprecated: tickets, or `?token=` on old servers.
    */
-  webSocketAuth?: "header" | "query";
+  webSocketAuth?: "header" | "ticket" | "query";
   /** Heartbeat interval for the Cloud status websocket. Defaults to 30s. */
   pingIntervalMs?: number;
   /**

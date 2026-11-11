@@ -226,9 +226,10 @@ export function validateCloudClientOptions(options: LettaCodeCloudClientOptions)
   if (
     options.webSocketAuth !== undefined &&
     options.webSocketAuth !== "header" &&
+    options.webSocketAuth !== "ticket" &&
     options.webSocketAuth !== "query"
   ) {
-    throw new Error("Invalid webSocketAuth. Valid values: header, query.");
+    throw new Error("Invalid webSocketAuth. Valid values: header, ticket, query.");
   }
 }
 
@@ -252,6 +253,8 @@ function environmentToRemoteTarget(
   }
   throw new Error("Unknown cloud environment selector.");
 }
+
+type CloudStatusChannelTickets = Record<"control" | "stream", Record<string, string>>;
 
 function buildCloudStatusWebSocketUrl(params: {
   apiBaseUrl?: string;
@@ -523,30 +526,71 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
   private createCloudTransportClient(
     runtime: RuntimeScope,
     connectionId: string,
+    channelTickets: CloudStatusChannelTickets | null,
   ): AppServerClient {
     const apiKey = getCloudApiKey(this.cloudOptions);
+    const authMode = this.cloudOptions.webSocketAuth ?? "header";
     const url = buildCloudStatusWebSocketUrl({
       apiBaseUrl: this.cloudOptions.apiBaseUrl,
       connectionId,
       agentId: runtime.agent_id,
       conversationId: runtime.conversation_id,
       apiKey,
-      authMode: this.cloudOptions.webSocketAuth ?? "header",
+      // Legacy query auth only remains for servers that cannot issue tickets.
+      authMode: authMode === "query" && !channelTickets ? "query" : "header",
     });
     return applyUniqueRequestIds(createAppServerClient({
       url,
       WebSocket: createCloudStatusTransportConstructor({
         url,
         WebSocket: getWebSocketConstructor(this.cloudOptions.WebSocket),
-        ...((this.cloudOptions.webSocketAuth ?? "header") === "header"
+        ...(authMode === "header"
           ? { headers: cloudWebSocketHeaders(this.cloudOptions) }
           : {}),
+        ...(channelTickets ? { channelQuery: channelTickets } : {}),
         pingIntervalMs:
           this.cloudOptions.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS,
         runtime,
       }),
       requestTimeoutMs: this.cloudOptions.requestTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
     }));
+  }
+
+  /**
+   * Mint one single-use upgrade ticket per status channel, so clients that
+   * cannot send WebSocket headers never put the API key in a URL.
+   * Returns null only for deprecated query auth against a server that predates
+   * ticket issuance, which then falls back to `?token=`.
+   */
+  private async issueStatusWebSocketTickets(
+    connectionId: string,
+  ): Promise<CloudStatusChannelTickets | null> {
+    const authMode = this.cloudOptions.webSocketAuth ?? "header";
+    if (authMode !== "ticket" && authMode !== "query") return null;
+    const path = `/v1/environments/${encodeURIComponent(connectionId)}/status/ws-ticket`;
+    const issue = async (): Promise<string> => {
+      const body = await this.apiClient.post<unknown>(path, { body: {} });
+      const ticket = (body as { ticket?: unknown } | null)?.ticket;
+      if (typeof ticket !== "string" || !ticket) {
+        throw new Error("Cloud status WebSocket ticket response did not include a ticket.");
+      }
+      return ticket;
+    };
+    try {
+      const [control, stream] = await Promise.all([issue(), issue()]);
+      return { control: { ticket: control }, stream: { ticket: stream } };
+    } catch (error) {
+      if (authMode === "query" && isNotFound(error)) {
+        console.warn(
+          JSON.stringify({
+            event: "cloud_status_websocket_query_auth_fallback",
+            connection_id: connectionId,
+          }),
+        );
+        return null;
+      }
+      throw error;
+    }
   }
 
   private async connectCloudTransport(
@@ -557,7 +601,12 @@ export class CloudEnvironmentSession extends RemoteClientSessionCore {
     let lastError: unknown;
 
     for (let attempt = 0; attempt < INITIAL_CLOUD_TRANSPORT_ATTEMPTS; attempt++) {
-      const client = this.createCloudTransportClient(runtime, connectionId);
+      const channelTickets = await this.issueStatusWebSocketTickets(connectionId);
+      const client = this.createCloudTransportClient(
+        runtime,
+        connectionId,
+        channelTickets,
+      );
       this.installTransportHandlers(client);
 
       try {

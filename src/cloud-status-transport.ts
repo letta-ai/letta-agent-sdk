@@ -20,6 +20,8 @@ type CloudStatusTransportOptions = {
   url: string;
   WebSocket: LettaCodeSocketConstructor;
   headers?: Record<string, string>;
+  /** Extra per-channel query params, such as single-use upgrade tickets. */
+  channelQuery?: Partial<Record<SocketChannel, Record<string, string>>>;
   pingIntervalMs: number;
   runtime: RuntimeScope;
 };
@@ -63,9 +65,16 @@ function messageEventData(event: unknown): string | null {
   return null;
 }
 
-function channelUrl(url: string, channel: SocketChannel): string {
+function channelUrl(
+  url: string,
+  channel: SocketChannel,
+  query: Record<string, string> = {},
+): string {
   const parsed = new URL(url);
   parsed.searchParams.set("channel", channel);
+  for (const [key, value] of Object.entries(query)) {
+    parsed.searchParams.set(key, value);
+  }
   return parsed.toString();
 }
 
@@ -96,11 +105,11 @@ export class CloudStatusTransport implements AppServerSocketLike {
       ? { headers: options.headers }
       : undefined;
     this.controlSocket = new options.WebSocket(
-      channelUrl(options.url, "control"),
+      channelUrl(options.url, "control", options.channelQuery?.control),
       socketOptions,
     );
     this.streamSocket = new options.WebSocket(
-      channelUrl(options.url, "stream"),
+      channelUrl(options.url, "stream", options.channelQuery?.stream),
       socketOptions,
     );
     this.bindSocket("control", this.controlSocket);
