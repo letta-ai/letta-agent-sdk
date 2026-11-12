@@ -31,6 +31,34 @@ describe("buildLocalAppServerArgs", () => {
 });
 
 describe("buildLocalAppServerProcess", () => {
+  test("isolates SDK config while preserving credentials and explicit overrides", () => {
+    const inherited = process.env.LETTA_CONFIG_DIR;
+    process.env.LETTA_CONFIG_DIR = "/standalone/config";
+    try {
+      const env = {
+        HOME: "/home/sdk", USERPROFILE: "/home/sdk",
+        LETTA_HOME: "/legacy/config",
+        LETTA_API_KEY: "test-key", LETTA_BASE_URL: "https://api.example.com",
+      };
+      const build = (computerName?: string, override?: string) =>
+        buildLocalAppServerProcess("/path/to/letta.js", {
+          computerName, env: { ...env, ...(override ? { LETTA_CONFIG_DIR: override } : {}) },
+        }).env;
+      const first = build("gpu/../node");
+      expect(first.LETTA_CONFIG_DIR).toStartWith(join("/home/sdk", ".letta", "agent-sdk", "computers") + "/");
+      expect(first.LETTA_CONFIG_DIR).toBe(build("gpu/../node").LETTA_CONFIG_DIR);
+      expect(first.LETTA_CONFIG_DIR).not.toBe(build("other-node").LETTA_CONFIG_DIR);
+      expect(build().LETTA_CONFIG_DIR).toBe(join("/home/sdk", ".letta", "agent-sdk", "local"));
+      expect(build("gpu/../node", "/explicit/config").LETTA_CONFIG_DIR).toBe("/explicit/config");
+      expect(first.LETTA_API_KEY).toBe(env.LETTA_API_KEY);
+      expect(first.LETTA_BASE_URL).toBe(env.LETTA_BASE_URL);
+      expect(process.env.LETTA_CONFIG_DIR).toBe("/standalone/config");
+    } finally {
+      if (inherited === undefined) delete process.env.LETTA_CONFIG_DIR;
+      else process.env.LETTA_CONFIG_DIR = inherited;
+    }
+  });
+
   test("keeps the normal app-server launcher unwrapped", () => {
     const processSpec = buildLocalAppServerProcess("/path/to/letta.js", {
       env: { SDK_TEST_VALUE: "present", LETTA_WORKLOAD_SYSTEMD_SLICE: undefined },
