@@ -601,10 +601,10 @@ export type ClientToolsetBase =
   | "codex"
   | "codex_snake"
   | "default"
+  | "letta"
   | "gemini"
   | "gemini_snake"
   | "none";
-
 export interface ClientToolsetConfig {
   /** Request-scoped base toolset. Omitted preserves the harness preference. */
   base?: ClientToolsetBase;
