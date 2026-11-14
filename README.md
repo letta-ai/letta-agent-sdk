@@ -107,6 +107,12 @@ for await (const message of session.stream()) {
 A session's `allowedTools` and `toolset` apply to those turns too, for as long
 as the session is open.
 
+Select the unified Letta toolset with `toolset: { base: "letta" }` when
+creating or resuming a session. It combines Codex-style shell tools with
+`Read`, `Edit`, and `Write`. Other accepted bases are `auto`, `codex`,
+`codex_snake`, `default`, `gemini`, `gemini_snake`, and `none`; the listener
+version determines which presets are available.
+
 ### Tools for many conversations
 
 To serve client tools to many conversations at once, register them on the

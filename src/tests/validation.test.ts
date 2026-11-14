@@ -19,6 +19,12 @@ describe("validation", () => {
     ).not.toThrow();
   });
 
+  test("accepts the unified letta toolset", () => {
+    expect(() =>
+      validateCreateSessionOptions({ toolset: { base: "letta" } }),
+    ).not.toThrow();
+  });
+
   test("validates structured output options", () => {
     expect(() =>
       validateCreateSessionOptions({

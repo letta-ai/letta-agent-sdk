@@ -27,6 +27,7 @@ const VALID_TOOLSET_BASES = [
   "codex",
   "codex_snake",
   "default",
+  "letta",
   "gemini",
   "gemini_snake",
   "none",

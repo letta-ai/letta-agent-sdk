@@ -157,6 +157,33 @@ describe("session tool policy", () => {
     }
   });
 
+  test("runtime_start passes the letta preset through on create and resume", async () => {
+    const client = remote();
+    const options = {
+      allowedTools: ["Read", "lookup", "Read"],
+      toolset: { base: "letta" as const, include: ["Read"] },
+      tools: [textTool("lookup", () => "ok")],
+    };
+    const created = client.createSession("agent-1", options);
+    const resumed = client.resumeSession("agent-1", options);
+    try {
+      await asAdvanced(created).initialize();
+      await asAdvanced(resumed).initialize();
+      const starts = sentOfType("runtime_start");
+      expect(starts).toHaveLength(2);
+      for (const start of starts) {
+        expect(start.tool_policy).toEqual({
+          toolset: { base: "letta", include: ["Read"] },
+          allowlist: ["Read", "lookup"],
+          exclude_interactive: true,
+        });
+      }
+    } finally {
+      created.close();
+      resumed.close();
+    }
+  });
+
   test("per-message tool fields are dropped only when the listener applies the policy", async () => {
     const inputPayload = async (capable: boolean) => {
       FakeSocket.instances = [];
